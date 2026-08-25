@@ -1,0 +1,67 @@
+name: "バグ報告（Bug）"
+description: "既存機能が仕様・要件どおりに動かない場合の報告"
+title: "[area] "
+labels:
+  - "bug"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        起票後、サイドバーから以下のラベルを手動で付与してください（このフォームは自動では付けません）。
+        - 優先度: `P0`（8/28 発表までに必須） / `P1`（差別化・加点対象） / `P2`（余力があれば）
+        - 領域: `area:web` / `area:api` / `area:shared` / `area:db` / `area:registry` / `area:infra` / `area:docs`
+        - 種別: `bug`（デフォルト付与済み）
+  - type: input
+    id: requirement
+    attributes:
+      label: 対象要件
+      description: "関連する docs/requirements.md の要件 ID があれば"
+      placeholder: "例: FR-12 / AC-12-5"
+    validations:
+      required: false
+  - type: textarea
+    id: current-state
+    attributes:
+      label: "現状（根拠ファイル・再現手順）"
+      description: "何が起きているか、再現手順、関連する既存コードをファイルパス付きで書く"
+      placeholder: |
+        1. /domains/[name] を開く
+        2. 移管承認ボタンを押す
+        3. 期待: pendingTransfer が解除される / 実際: 500 が返る（apps/api/src/routes/transfers.ts:120 付近）
+    validations:
+      required: true
+  - type: textarea
+    id: todo
+    attributes:
+      label: やること
+      description: "原因調査・修正方針をチェックリストで"
+      value: |
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: 受け入れ条件
+      description: "修正完了と判定する基準をチェックリストで（AC-xx があれば ID を付ける）"
+      value: |
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: target-files
+    attributes:
+      label: 対象ファイル
+      description: "修正が見込まれるファイル / ディレクトリ"
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: 依存
+      description: "先行 / 後続の issue があれば番号を書く"
+      placeholder: |
+        先行: #56
+        後続: なし
+    validations:
+      required: false

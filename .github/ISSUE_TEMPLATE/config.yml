@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 要件定義書（docs/requirements.md）
+    url: https://github.com/GMO-26-teamb/dopamin-com/blob/main/docs/requirements.md
+    about: 要件の SSOT。実装前に該当する FR / NFR・【要確認】の有無を確認してください。
+  - name: トラッキング用 epic（進捗・分担）
+    url: https://github.com/GMO-26-teamb/dopamin-com/issues/97
+    about: 残タスクの一覧・担当目安・クリティカルパスはこちらを参照してください。

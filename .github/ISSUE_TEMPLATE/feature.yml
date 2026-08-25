@@ -1,0 +1,80 @@
+name: "機能タスク（Feature / Task）"
+description: "新機能・実装タスクの起票。1 issue = 1 spec = 1 PR の粒度で書く"
+title: "[area] "
+labels:
+  - "type:feat"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        起票後、サイドバーから以下のラベルを手動で付与してください（このフォームは自動では付けません）。
+        - 優先度: `P0`（8/28 発表までに必須） / `P1`（差別化・加点対象） / `P2`（余力があれば）
+        - 領域: `area:web` / `area:api` / `area:shared` / `area:db` / `area:registry` / `area:infra` / `area:docs`
+        - 種別: `type:feat`（デフォルト付与済み）。設定・雑務なら `type:chore`、テスト追加なら `type:test` に付け替える
+
+        実装作業を始める前に `docs/specs/_template.md` をコピーして `docs/specs/<feature>.md` を作成することを検討してください（対象 FR が既存 spec に含まれる場合は不要）。
+  - type: input
+    id: requirement
+    attributes:
+      label: 対象要件
+      description: "docs/requirements.md の要件 ID（複数可）"
+      placeholder: "例: FR-06 / NFR-04"
+    validations:
+      required: false
+  - type: input
+    id: estimate
+    attributes:
+      label: 見積
+      placeholder: "例: ~2h"
+    validations:
+      required: false
+  - type: textarea
+    id: current-state
+    attributes:
+      label: "現状（根拠ファイル）"
+      description: "関連する既存コード・既存挙動をファイルパス付きで書く。新規なら「なし」と明記する"
+      placeholder: |
+        packages/registry/src/adapter.ts:18-43 に registrarId が無く、kitaq.ts / mock.ts にも 0 件。
+    validations:
+      required: true
+  - type: textarea
+    id: todo
+    attributes:
+      label: やること
+      description: "実装ステップをチェックリストで"
+      placeholder: |
+        - [ ] adapter.ts に ... を追加
+        - [ ] kitaq.ts に ... を実装
+        - [ ] テストを追加
+      value: |
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: 受け入れ条件
+      description: "完了判定の基準をチェックリストで（AC-xx があれば ID を付ける）"
+      value: |
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: target-files
+    attributes:
+      label: 対象ファイル
+      description: "変更・追加が見込まれるファイル / ディレクトリ"
+      placeholder: |
+        packages/registry/src/adapter.ts, packages/registry/src/kitaq.ts, packages/registry/src/mock.ts
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: 依存
+      description: "先行 / 後続の issue があれば番号を書く"
+      placeholder: |
+        先行: #26
+        後続: #45 #57
+    validations:
+      required: false
