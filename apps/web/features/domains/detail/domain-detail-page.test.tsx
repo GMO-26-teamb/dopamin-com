@@ -1,10 +1,13 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiClientError } from "@/lib/api/errors";
+import { MOCK_NOW } from "@/lib/api/mock/fixtures";
 import { createMockServices } from "@/lib/api/mock/mock-services";
 import type { MockScenario } from "@/lib/api/mock/scenario";
 import { resetMockStore } from "@/lib/api/mock/store";
 import { AppProviders } from "@/lib/api/query-client";
+import type { DomainService, Services } from "@/lib/api/services";
 import { ThemeProvider } from "@/lib/theme/theme-provider";
 import { DomainDetailPage } from "./domain-detail-page";
 
@@ -15,9 +18,17 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/domains/takutaku.com",
 }));
 
-function renderPage(name: string, scenario: MockScenario = "default") {
+function renderPage(
+  name: string,
+  scenario: MockScenario = "default",
+  domainOverrides: Partial<DomainService> = {},
+) {
   // 遅延 0ms で全状態を待たずに検証する（scenario ごとの挙動は mock-services が持つ）
-  const services = createMockServices(scenario, { delayMs: 0 });
+  const base = createMockServices(scenario, { delayMs: 0 });
+  const services: Services = {
+    ...base,
+    domains: { ...base.domains, ...domainOverrides },
+  };
   return render(
     <ThemeProvider>
       <AppProviders services={services}>
@@ -39,12 +50,20 @@ function actionsPanel(): HTMLElement {
 
 describe("DomainDetailPage", () => {
   beforeEach(() => {
+    // fixtures は固定基準 MOCK_NOW からの相対で作られる（`tkt-lab.net` の
+    // `actByAt` は MOCK_NOW + 15 分）。実時刻のままだと 10:15 JST を過ぎた瞬間に
+    // 承認 / 拒否が Disabled になり落ちるので、Date だけ MOCK_NOW に固定する。
+    // タイマー本体は実物のまま（`useCountdown` の setInterval と Testing Library の
+    // waitFor をそのまま動かすため）。
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(MOCK_NOW));
     resetMockStore();
     push.mockReset();
   });
 
   afterEach(() => {
     resetMockStore();
+    vi.useRealTimers();
   });
 
   it("S-35: 取得中は Skeleton を出す", () => {
@@ -279,6 +298,79 @@ describe("DomainDetailPage", () => {
     ).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByText("移管済み")).toBeInTheDocument();
+    });
+  });
+
+  it("D-07: 更新の失敗は Error Card を出し、「再試行」で D-01 を開き直す", async () => {
+    const user = userEvent.setup();
+    const renew = vi.fn(() =>
+      Promise.reject(
+        new ApiClientError({
+          code: "REGISTRY_TIMEOUT",
+          message: "レジストリが応答しませんでした。",
+          registry: "kitaqsign",
+        }),
+      ),
+    );
+    renderPage("takutaku.com", "default", { renew });
+
+    await user.click(
+      await screen.findByRole("button", { name: /更新（期限延長）/ }),
+    );
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: "延長する",
+      }),
+    );
+
+    // ダイアログは閉じ、メイン先頭に Error Card（FR-18 の 1 文つき）
+    expect(
+      await screen.findByText("Kitaqsign が応答しませんでした"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/ローカルの情報は変更されていません/),
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    // 「再試行」はエラーを消すだけでなく D-01 を開き直す
+    await user.click(screen.getByRole("button", { name: "再試行" }));
+    const reopened = await screen.findByRole("dialog");
+    expect(within(reopened).getByText("有効期限を延長")).toBeInTheDocument();
+    expect(renew).toHaveBeenCalledTimes(1);
+  });
+
+  it("D-07: 再試行できないコードは「閉じる」で Error Card を畳む", async () => {
+    const user = userEvent.setup();
+    const renew = vi.fn(() =>
+      Promise.reject(
+        new ApiClientError({
+          code: "OPERATION_NOT_ALLOWED",
+          message: "",
+          details: { statuses: ["serverUpdateProhibited"] },
+        }),
+      ),
+    );
+    renderPage("takutaku.com", "default", { renew });
+
+    await user.click(
+      await screen.findByRole("button", { name: /更新（期限延長）/ }),
+    );
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: "延長する",
+      }),
+    );
+
+    expect(
+      await screen.findByText("ロック中のため実行できません"),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "再試行" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "閉じる" }));
+    await waitFor(() => {
+      expect(screen.queryByText("ロック中のため実行できません")).toBeNull();
     });
   });
 

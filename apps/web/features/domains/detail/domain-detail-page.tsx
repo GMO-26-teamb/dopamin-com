@@ -52,6 +52,12 @@ type DialogKind =
   | "transfer-approve"
   | "transfer-reject";
 
+/**
+ * 更新系の操作を起こしたダイアログ（D-07 の Error Card から「再試行」で開き直す先）。
+ * AuthCode（D-05）はダイアログ内で完結するのでここには含めない。
+ */
+type OperationDialogKind = Exclude<DialogKind, "none" | "auth-code">;
+
 export interface DomainDetailPageProps {
   name: string;
 }
@@ -67,6 +73,9 @@ export function DomainDetailPage({ name }: DomainDetailPageProps) {
     null,
   );
   const [authCode, setAuthCode] = useState<string | null>(null);
+  // D-07: 直前に失敗した操作。「再試行」で同じダイアログを開き直す
+  const [lastOperation, setLastOperation] =
+    useState<OperationDialogKind | null>(null);
 
   const renew = useRenewDomain(name);
   const update = useUpdateDomain(name);
@@ -114,16 +123,21 @@ export function DomainDetailPage({ name }: DomainDetailPageProps) {
     setDialog(kind);
   }, []);
 
-  /** 更新系の共通後処理。成功なら Banner Ok、失敗なら Error Card（D-07）。 */
+  /**
+   * 更新系の共通後処理。成功なら Banner Ok、失敗なら Error Card（D-07）。
+   * 失敗した操作を覚えておき、「再試行」で同じダイアログを開き直せるようにする。
+   */
   const settle = useCallback(
-    (message: string) => ({
+    (kind: OperationDialogKind, message: string) => ({
       onSuccess: () => {
         setSuccess(message);
         setOperationError(null);
+        setLastOperation(null);
         setDialog("none");
       },
       onError: (error: ApiClientError) => {
         setOperationError(error);
+        setLastOperation(kind);
         setSuccess(null);
         setDialog("none");
       },
@@ -187,15 +201,32 @@ export function DomainDetailPage({ name }: DomainDetailPageProps) {
     remove.isPending ||
     restore.isPending ||
     transferAction.isPending;
+  // 再試行できないコード（OPERATION_NOT_ALLOWED / REGISTRY_REJECTED など）は「閉じる」だけ出す
+  const retryOperation =
+    lastOperation === null || operationError?.retryable !== true
+      ? null
+      : () => openDialog(lastOperation);
 
   return (
     <>
       {operationError === null ? null : (
-        <ErrorCard
-          error={operationError}
-          onRetry={() => setOperationError(null)}
-          showLogsLink
-        />
+        <div className="flex w-full flex-col items-start gap-2">
+          {/* D-07: 更新系の失敗。retryable なら同じダイアログを開き直す */}
+          <ErrorCard
+            error={operationError}
+            showLogsLink
+            {...(retryOperation === null ? {} : { onRetry: retryOperation })}
+          />
+          {retryOperation === null ? (
+            <Button
+              onClick={() => setOperationError(null)}
+              size="sm"
+              variant="subtle"
+            >
+              閉じる
+            </Button>
+          ) : null}
+        </div>
       )}
       <StateBanner
         countdownLabel={countdown.label}
@@ -261,7 +292,7 @@ export function DomainDetailPage({ name }: DomainDetailPageProps) {
         onSubmit={(period) =>
           renew.mutate(
             { period },
-            settle(`${domain.name} の有効期限を延長しました`),
+            settle("renew", `${domain.name} の有効期限を延長しました`),
           )
         }
         open={dialog === "renew"}
@@ -280,7 +311,10 @@ export function DomainDetailPage({ name }: DomainDetailPageProps) {
           nameservers: string[];
           contacts?: DomainContactsInput;
         }) =>
-          update.mutate(input, settle(`${domain.name} の情報を更新しました`))
+          update.mutate(
+            input,
+            settle("ns-edit", `${domain.name} の情報を更新しました`),
+          )
         }
         open={dialog === "ns-edit"}
       />
@@ -300,6 +334,7 @@ export function DomainDetailPage({ name }: DomainDetailPageProps) {
             onSuccess: (result) => {
               setDialog("none");
               setOperationError(null);
+              setLastOperation(null);
               if (result.outcome === "deleted") {
                 // AGP 即時削除は詳細 URL が消えるのでダッシュボードへ戻す（FR-10 / 要確認 #5）
                 router.push(
@@ -313,6 +348,7 @@ export function DomainDetailPage({ name }: DomainDetailPageProps) {
             },
             onError: (error) => {
               setOperationError(error);
+              setLastOperation("delete");
               setDialog("none");
             },
           })
@@ -333,7 +369,10 @@ export function DomainDetailPage({ name }: DomainDetailPageProps) {
         onSubmit={() =>
           restore.mutate(
             undefined,
-            settle(`${domain.name} を復旧しました。Active に戻りました`),
+            settle(
+              "restore",
+              `${domain.name} を復旧しました。Active に戻りました`,
+            ),
           )
         }
         open={dialog === "restore"}
@@ -373,6 +412,7 @@ export function DomainDetailPage({ name }: DomainDetailPageProps) {
           transferAction.mutate(
             { id: pendingTransfer.id, action },
             settle(
+              action === "approve" ? "transfer-approve" : "transfer-reject",
               action === "approve"
                 ? `${domain.name} の移管を承認しました`
                 : `${domain.name} の移管を拒否しました`,

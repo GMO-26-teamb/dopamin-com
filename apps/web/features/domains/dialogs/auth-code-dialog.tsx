@@ -65,8 +65,7 @@ export function AuthCodeDialog({
         <DialogHeader>
           <DialogTitle>AuthCode を発行</DialogTitle>
           <DialogDescription variant="subtitle">
-            {domainName}・移管 OUT
-            用。発行のたびに前の値は無効になります（rotate-auth-info）
+            {domainName}・移管 OUT 用（rotate-auth-info）
           </DialogDescription>
         </DialogHeader>
 
@@ -79,7 +78,7 @@ export function AuthCodeDialog({
         )}
 
         <p className="w-full text-caption text-muted">
-          AuthCode
+          発行すると以前のコードは使えなくなります。AuthCode
           はアプリに保存されません。表示は操作ログにマスク（***）して記録されます。相手レジストラの移管申請に貼り付けてください。
         </p>
 

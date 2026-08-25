@@ -2,7 +2,7 @@
 
 import { hostNameSchema } from "@dopamin/shared";
 import { Plus, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Divider } from "@/components/ui/card";
@@ -106,20 +106,24 @@ export function NsEditDialog({
   const [registrantEmail, setRegistrantEmail] = useState("");
   const [submitted, setSubmitted] = useState(false);
 
-  // 開くたびに現在値へ戻す
+  // 開いた瞬間だけ現在値へ戻す。`domain` は再取得のたびに参照が変わるので
+  // 依存に入れず ref 経由で読む（入力中に値が巻き戻らないように）
+  const domainRef = useRef(domain);
+  domainRef.current = domain;
   useEffect(() => {
     if (!open) {
       return;
     }
+    const current = domainRef.current;
     setRows(
-      (domain.nameservers.length === 0 ? ["", ""] : domain.nameservers).map(
+      (current.nameservers.length === 0 ? ["", ""] : current.nameservers).map(
         newRow,
       ),
     );
-    setRegistrantName(domain.registrant.name);
-    setRegistrantEmail(domain.registrant.email);
+    setRegistrantName(current.registrant.name);
+    setRegistrantEmail(current.registrant.email);
     setSubmitted(false);
-  }, [open, domain]);
+  }, [open]);
 
   const values = rows.map((row) => row.value);
   const nsError = validateNameservers(values);
