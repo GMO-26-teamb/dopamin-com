@@ -197,7 +197,7 @@ TanStack Query。queryKey は `["domains"]`, `["domain", name]`, `["candidates",
 | S-11 / S-12 / S-13 | `/dashboard?mock=empty` / `?mock=loading` / `?mock=stale` |
 | S-21 / S-23 / S-24 Error | `/domains/new?mock=loading`（生成中 10 秒）/ `?mock=ai-timeout` / `?mock=partial-failure` |
 | S-27 / S-28 | 登録ダイアログで `?mock=conflict` / `?mock=error` |
-| S-31〜S-39 | `/domains/<name>`：fixtures の名前で状態を決める（`harupika.xyz`=移管受信、`demo-app.online`=RGP、`old-blog.xyz`=移管済み、`hold.example`=停止中、`inactive.example`=NS 未設定、`tkt-lab.net`=コンタクト未移行）。`?mock=stale` で S-31、`?mock=loading` で S-35 |
+| S-31〜S-39 | `/domains/<name>`：fixtures の名前で状態を決める（`tkt-lab.net`=移管受信（S-32）、`demo-app.online`=RGP、`old-blog.xyz`=移管済み、`hold.example`=停止中、`inactive.example`=NS 未設定、`harupika.xyz`=コンタクト未移行（S-39）。§4.4 の fixtures と一致させる）。`?mock=stale` で S-31、`?mock=loading` で S-35 |
 | S-40〜S-46 | `/domains/takutaku.com/subdomains`（設計あり = S-43）、`/domains/harupika.xyz/subdomains`（設計なし = S-40）、`?mock=error`（S-42）、`?mock=ns-fail`（S-46） |
 | S-51〜S-53 | `/transfers?mock=empty` / 申請フォームに誤った AuthCode（`bad`）で S-52 / `?mock=error` で S-53 |
 | S-62 | `/logs?mock=empty` |

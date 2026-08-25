@@ -4,16 +4,13 @@ import { Check, ChevronDown } from "lucide-react";
 import { Select as SelectPrimitive } from "radix-ui";
 import { useId } from "react";
 import { cn } from "@/lib/utils";
+import { FIELD_SURFACE, type FieldSurface } from "./field-surface";
 
 /**
  * Figma: Input `46:110`（Type = Select）
  * トリガーはテキスト入力と同じ枠・高さ。開いている間はブランドグラデーションの枠にする。
+ * 面の塗り分けは `field-surface.ts` を Input と共有する。
  */
-const SURFACE = {
-  bg: "bg-panel",
-  panel: "bg-bg",
-} as const;
-
 export interface SelectOption {
   value: string;
   label: string;
@@ -24,7 +21,7 @@ export interface SelectProps {
   value: string;
   onValueChange: (value: string) => void;
   options: readonly SelectOption[];
-  surface?: "bg" | "panel";
+  surface?: FieldSurface;
   helper?: string;
   disabled?: boolean;
   className?: string;
@@ -58,8 +55,8 @@ export function Select({
         <SelectPrimitive.Trigger
           aria-describedby={helper ? helperId : undefined}
           className={cn(
-            "flex h-control-md w-full items-center justify-between gap-2 border-2 border-line px-3 text-body text-ink transition-colors focus:border-transparent focus:outline-none focus:[border-image:var(--gradient-brand)_1] data-[placeholder]:text-muted data-[state=open]:border-transparent data-[state=open]:[border-image:var(--gradient-brand)_1] disabled:border-soft disabled:text-muted disabled:opacity-[var(--opacity-disabled)]",
-            SURFACE[surface],
+            "flex h-control-md w-full items-center justify-between gap-2 border-2 border-line px-3 text-body text-ink transition-colors focus:border-transparent focus:outline-none focus:[border-image:var(--gradient-brand)_1] data-[state=open]:border-transparent data-[state=open]:[border-image:var(--gradient-brand)_1] disabled:border-soft disabled:text-muted disabled:opacity-[var(--opacity-disabled)]",
+            FIELD_SURFACE[surface],
             className,
           )}
           id={triggerId}

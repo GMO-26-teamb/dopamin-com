@@ -84,4 +84,42 @@ describe("SegmentedControl", () => {
     expect(onChange).toHaveBeenCalledWith("standard");
     expect(screen.getByRole("button", { name: "スタンダード" })).toHaveFocus();
   });
+
+  it("左端で ArrowLeft を押すと右端に巻き戻る", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <SegmentedControl
+        aria-label="テーマ"
+        onChange={onChange}
+        options={OPTIONS}
+        value="standard"
+      />,
+    );
+
+    screen.getByRole("button", { name: "スタンダード" }).focus();
+    await user.keyboard("{ArrowLeft}");
+
+    expect(onChange).toHaveBeenCalledWith("goku");
+    expect(screen.getByRole("button", { name: "ドパモード" })).toHaveFocus();
+  });
+
+  it("右端で ArrowRight を押すと左端に巻き戻る", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <SegmentedControl
+        aria-label="テーマ"
+        onChange={onChange}
+        options={OPTIONS}
+        value="goku"
+      />,
+    );
+
+    screen.getByRole("button", { name: "ドパモード" }).focus();
+    await user.keyboard("{ArrowRight}");
+
+    expect(onChange).toHaveBeenCalledWith("standard");
+    expect(screen.getByRole("button", { name: "スタンダード" })).toHaveFocus();
+  });
 });

@@ -2,23 +2,19 @@
 
 import { type ComponentProps, useId } from "react";
 import { cn } from "@/lib/utils";
+import { FIELD_SURFACE, type FieldSurface } from "./field-surface";
 
 /**
  * Figma: Input `46:110`
  * 高さ 36（--size-control-md）、枠 2px。フォーカスでブランドグラデーションの枠になる。
- * `surface` は「入力欄が置かれている面」。bg の上なら panel 色、panel の上なら bg 色で塗る。
+ * `surface` は「入力欄が置かれている面」（塗り分けは `field-surface.ts`）。
  */
-const SURFACE = {
-  bg: "bg-panel",
-  panel: "bg-bg",
-} as const;
-
 export interface InputProps extends Omit<ComponentProps<"input">, "size"> {
   label?: string;
   helper?: string;
   /** 設定すると helper の位置にこの文言を warn 色で出し、aria-invalid を立てる */
   error?: string;
-  surface?: "bg" | "panel";
+  surface?: FieldSurface;
   monospace?: boolean;
 }
 
@@ -49,7 +45,7 @@ export function Input({
         aria-invalid={error ? true : undefined}
         className={cn(
           "h-control-md w-full border-2 px-3 py-0.5 text-ink placeholder:text-muted focus:outline-none disabled:border-soft disabled:text-muted disabled:opacity-[var(--opacity-disabled)]",
-          SURFACE[surface],
+          FIELD_SURFACE[surface],
           monospace ? "text-code-input" : "text-body",
           error
             ? "border-warn"

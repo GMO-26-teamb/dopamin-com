@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
  * ラベルは左寄せ。Primary は 1 画面 1 つ。
  */
 export const buttonVariants = cva(
-  "inline-flex shrink-0 items-center justify-start py-0.5 transition-colors disabled:pointer-events-none disabled:opacity-[var(--opacity-disabled)]",
+  "inline-flex shrink-0 items-center justify-start py-0.5 transition-[color,background-color,opacity] disabled:pointer-events-none disabled:opacity-[var(--opacity-disabled)]",
   {
     variants: {
       variant: {
@@ -77,25 +77,22 @@ export function Button({
     leadingIcon
   );
 
-  const inner = (
-    <>
-      {leading ? (
-        <span aria-hidden="true" className={iconClass}>
-          {leading}
-        </span>
-      ) : null}
-      {asChild ? <Slot.Slottable>{children}</Slot.Slottable> : children}
-      {trailingIcon ? (
-        <span aria-hidden="true" className={iconClass}>
-          {trailingIcon}
-        </span>
-      ) : null}
-    </>
-  );
+  const leadingNode = leading ? (
+    <span aria-hidden="true" className={iconClass}>
+      {leading}
+    </span>
+  ) : null;
+  const trailingNode = trailingIcon ? (
+    <span aria-hidden="true" className={iconClass}>
+      {trailingIcon}
+    </span>
+  ) : null;
 
   const classes = cn(buttonVariants({ variant, size }), className);
 
-  // asChild では type / disabled を子要素（a など）に流さない
+  // asChild では type / disabled を子要素（a など）に流さない。
+  // Slot は React.Children.forEach で直下の子しか見ないので、Fragment で包むと
+  // Slottable が見つからず props が捨てられる。必ず直下に並べること。
   if (asChild) {
     return (
       <Slot.Root
@@ -103,7 +100,9 @@ export function Button({
         className={classes}
         {...props}
       >
-        {inner}
+        {leadingNode}
+        <Slot.Slottable>{children}</Slot.Slottable>
+        {trailingNode}
       </Slot.Root>
     );
   }
@@ -116,7 +115,9 @@ export function Button({
       type={type}
       {...props}
     >
-      {inner}
+      {leadingNode}
+      {children}
+      {trailingNode}
     </button>
   );
 }
