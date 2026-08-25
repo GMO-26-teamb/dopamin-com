@@ -47,7 +47,7 @@
 | S-40b | サブドメイン設計 | `/domains/[name]/subdomains` | —（フレームなし。§4 の読み込み規則で表現） |
 | S-50〜S-53 | 移管 | `/transfers` | `85:5523` `85:5760` `85:5888` `93:7717` |
 | D-08 | 移管（dialog） | `/transfers` | `85:6029` |
-| S-60 / S-61 / S-62 | ログ | `/logs` | `85:6086` / `85:6309` / `85:6474` |
+| S-60 / S-61 / S-62 | ログ | `/logs`（S-61 = `/logs?tab=ai`） | `85:6086` / `85:6309` / `85:6474` |
 | S-63 | ログ | `/logs` | —（フレームなし。§4 の読み込み規則で表現） |
 | P-01 | ログ（AI ログパネル） | 共通（右ドロワー） | `85:6576` |
 | S-70 | 設定 | `/settings` | `85:6709` |
@@ -110,8 +110,8 @@ Figma の code syntax（`var(--color-bg)` 等）は Dev Mode で確認できる�
 | `color/brand/start` | `--color-brand-1` | `bg-brand-1` / `text-brand-1` / `border-brand-1` | `#7c3aed` | `#ff2fb3` |
 | `color/brand/mid` | `--color-brand-mid` | `bg-brand-mid`（グラデーション中間色） | `#a83bb4` | `#8b5cf6` |
 | `color/brand/end` | `--color-brand-2` | `bg-brand-2` / `text-brand-2` | `#db2777` | `#22d3ee` |
-| `color/effect/glow-1` | `--glow-1` | 未登録（`--glow-brand` 経由のみ） | `transparent` | `#ff2fb359` |
-| `color/effect/glow-2` | `--glow-2` | 未登録（`--glow-brand` 経由のみ） | `transparent` | `#22d3ee40` |
+| `color/effect/glow-1` | `--glow-1` | 未登録（`--glow-brand` 経由のみ） | `#00000000` | `#ff2fb359` |
+| `color/effect/glow-2` | `--glow-2` | 未登録（`--glow-brand` 経由のみ） | `#00000000` | `#22d3ee40` |
 
 `--gradient-brand`（`linear-gradient(90deg, --color-brand-1, --color-brand-mid, --color-brand-2)`）と `--glow-brand`（`--glow-1` / `--glow-2` の box-shadow 合成）は `tokens.css` で組み立てる複合変数で `@theme` には登録しない。Button primary は `bg-[image:var(--gradient-brand)] shadow-[var(--glow-brand)]`、Goku ロゴのアニメーションは `.gradient-animated` クラスで使う（§4）。
 
@@ -133,7 +133,7 @@ Figma の code syntax（`var(--color-bg)` 等）は Dev Mode で確認できる�
 
 - `--space-2`〜`--space-48` は Tailwind 既定の 4px グリッド（`p-0.5`〜`p-12` 等）と同じ値になるため、既定のスペーシングユーティリティ（`gap-3` `px-4` `py-2` 等）をそのまま使う。
 - `--size-icon-sm/md/lg`（14/16/20px）も Tailwind 既定スケール（`size-3.5` / `size-4` / `size-5`）と一致するため同様。
-- `--size-bar-thin` / `--size-bar`、`--stroke-thin/medium/strong/accent` は該当する既定クラスが無い値のみ Tailwind の任意値で CSS 変数を直接参照する（例 `border-[length:var(--stroke-medium)]`、`border-l-[length:var(--stroke-accent)]`）。`--stroke-strong`（2px）は Tailwind 既定の `border-2` と一致するため素の `border-2` を使う。
+- 既定クラスと一致しないのは `--stroke-medium`（1.5px）と `--stroke-accent`（3px）だけで、この 2 つは Tailwind の任意値で CSS 変数を直接参照する（例 `border-[length:var(--stroke-medium)]`、`border-l-[length:var(--stroke-accent)]`）。`--stroke-thin`（1px）は素の `border`、`--stroke-strong`（2px）は `border-2`、`--size-bar-thin`（4px）/ `--size-bar`（6px）は `h-1` / `h-1.5` を使う。
 - `--radius-none`（`0px`）は角丸を使わない、という宣言のためのトークンで、実装では `rounded-*` を一切付けない（`globals.css` のコメント参照）。
 - `--opacity-disabled` / `--opacity-muted` は `opacity-[var(--opacity-disabled)]` のように任意値で参照する。
 
