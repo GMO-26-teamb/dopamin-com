@@ -8,6 +8,7 @@ import {
 } from "@/lib/api/mock/mock-services";
 import type { MockScenario } from "@/lib/api/mock/scenario";
 import { AppProviders } from "@/lib/api/query-client";
+import { SUPPORTED_TLDS } from "./tlds";
 
 /**
  * `/domains/new`（S-20〜S-28）を `?mock=` の各シナリオで通す。
@@ -48,7 +49,20 @@ function renderPage(scenario: MockScenario) {
       <DomainsNewPage />
     </AppProviders>,
   );
+  return services;
 }
+
+/** 希望 TLD の chip はどちらのフォームにもあるので、form 単位で絞り込む。 */
+function formOf(label: string): HTMLElement {
+  const form = screen.getByLabelText(label).closest("form");
+  if (form === null) {
+    throw new Error(`${label} の form が見つかりません`);
+  }
+  return form;
+}
+
+const CANDIDATE_FORM = "ニックネームまたはアプリ名 *";
+const SEARCH_FORM = "ドメイン名（SLD）";
 
 async function generate(scenario: MockScenario) {
   renderPage(scenario);
@@ -91,10 +105,40 @@ describe("/domains/new", () => {
       screen.getByRole("heading", { name: "名前を考える" }),
     ).toBeInTheDocument();
     expect(screen.getByText("AI に候補を考えてもらう")).toBeInTheDocument();
-    expect(screen.getByLabelText("ドメイン名（SLD）")).toBeInTheDocument();
+    expect(screen.getByLabelText(SEARCH_FORM)).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "空きを確認" }),
     ).toBeInTheDocument();
+  });
+
+  it("S-20 / S-24: 希望 TLD は複数選択で、既定は全対応 TLD 22 種", () => {
+    renderPage("default");
+
+    for (const label of [CANDIDATE_FORM, SEARCH_FORM]) {
+      const chips = within(formOf(label)).getAllByRole("button", {
+        pressed: true,
+      });
+      expect(chips).toHaveLength(SUPPORTED_TLDS.length);
+      expect(chips).toHaveLength(22);
+      expect(chips.map((chip) => chip.textContent)).toContain(".com");
+    }
+  });
+
+  it("S-20: 希望 TLD を絞り込むと generate に tlds を渡す", async () => {
+    const services = renderPage("default");
+    const generateSpy = vi.spyOn(services.candidates, "generate");
+    const user = userEvent.setup();
+    const form = formOf(CANDIDATE_FORM);
+
+    await user.click(within(form).getByRole("button", { name: "解除" }));
+    await user.click(within(form).getByRole("button", { name: ".xyz" }));
+    await user.type(screen.getByLabelText(CANDIDATE_FORM), "たくたく");
+    await user.click(screen.getByRole("button", { name: "候補を考える" }));
+
+    expect(generateSpy).toHaveBeenCalledWith({
+      nickname: "たくたく",
+      tlds: ["xyz"],
+    });
   });
 
   it("S-20: ニックネーム未入力では送信せずバリデーションを出す", async () => {
@@ -193,17 +237,71 @@ describe("/domains/new", () => {
     expect(screen.queryByText(/の空き状況/)).not.toBeInTheDocument();
   });
 
+  it("S-24: TLD を絞り込むと選んだ TLD だけを check する", async () => {
+    const services = renderPage("default");
+    const check = vi.spyOn(services.domains, "check");
+    const user = userEvent.setup();
+    const form = formOf(SEARCH_FORM);
+
+    await user.click(within(form).getByRole("button", { name: "解除" }));
+    await user.click(within(form).getByRole("button", { name: ".com" }));
+    await user.click(within(form).getByRole("button", { name: ".art" }));
+    await user.type(screen.getByLabelText(SEARCH_FORM), "takutaku");
+    await user.click(screen.getByRole("button", { name: "空きを確認" }));
+
+    expect(check).toHaveBeenCalledWith({
+      sld: "takutaku",
+      tlds: ["com", "art"],
+    });
+    expect(await findDomainNode("takutaku.com")).toBeInTheDocument();
+    expect(screen.getByText(/2 TLD 中 2 件を表示/)).toBeInTheDocument();
+  });
+
+  it("S-24: TLD を 1 つも選ばないとレジストリに送らず警告を出す", async () => {
+    const services = renderPage("default");
+    const check = vi.spyOn(services.domains, "check");
+    const user = userEvent.setup();
+
+    await user.click(
+      within(formOf(SEARCH_FORM)).getByRole("button", { name: "解除" }),
+    );
+    await user.type(screen.getByLabelText(SEARCH_FORM), "takutaku");
+    await user.click(screen.getByRole("button", { name: "空きを確認" }));
+
+    expect(check).not.toHaveBeenCalled();
+    expect(
+      screen.getByText("TLD を 1 つ以上選んでください"),
+    ).toBeInTheDocument();
+  });
+
   it("S-24 エラー: check が落ちたら Error Card で再試行を促す", async () => {
     renderPage("error");
     const user = userEvent.setup();
 
-    await user.type(screen.getByLabelText("ドメイン名（SLD）"), "takutaku");
+    await user.type(screen.getByLabelText(SEARCH_FORM), "takutaku");
     await user.click(screen.getByRole("button", { name: "空きを確認" }));
 
     await waitFor(() => {
       expect(
         screen.getByText("Kitaqsign に接続できません"),
       ).toBeInTheDocument();
+    });
+  });
+
+  it("S-24 エラー: Error Card の再試行は直前と同じ条件を送り直す", async () => {
+    const services = renderPage("error");
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText(SEARCH_FORM), "takutaku");
+    await user.click(screen.getByRole("button", { name: "空きを確認" }));
+
+    const alert = await screen.findByRole("alert");
+    const check = vi.spyOn(services.domains, "check");
+    await user.click(within(alert).getByRole("button", { name: "再試行" }));
+
+    expect(check).toHaveBeenCalledWith({
+      sld: "takutaku",
+      tlds: [...SUPPORTED_TLDS],
     });
   });
 

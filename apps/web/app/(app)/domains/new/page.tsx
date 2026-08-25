@@ -5,6 +5,7 @@ import { RotateCcw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
 import { PageHeader } from "@/components/app/page-header";
+import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorCard } from "@/components/ui/error-card";
@@ -38,6 +39,7 @@ import type {
   SearchResult,
   UniquenessScore,
 } from "@/lib/api/types";
+import { toErrorCopy } from "@/lib/error-messages";
 
 /**
  * ui-screens S-20〜S-28（`/domains/new`、FR-03 / 04 / 05 / 06）。
@@ -60,6 +62,8 @@ export default function DomainsNewPage() {
   const [excluded, setExcluded] = useState<readonly string[]>([]);
   const [searchOpen, setSearchOpen] = useState(true);
   const [summary, setSummary] = useState<SearchSummary | null>(null);
+  // 直前に投げた check。Error Card の「再試行」で同じ条件をそのまま送り直す（S-24）
+  const [lastSearch, setLastSearch] = useState<DomainCheckRequest | null>(null);
   // 「再試行」で個別に取り直した結果。候補・検索結果に上書きで重ねる（AC-03-2 / AC-05-2）
   const [overrides, setOverrides] = useState<Record<string, SearchResult>>({});
   const [registeredNames, setRegisteredNames] = useState<ReadonlySet<string>>(
@@ -135,10 +139,18 @@ export default function DomainsNewPage() {
   const handleSearch = useCallback(
     (request: DomainCheckRequest, next: SearchSummary) => {
       setSummary(next);
+      setLastSearch(request);
       search.mutate(request, { onSuccess: () => setOverrides({}) });
     },
     [search],
   );
+
+  const handleRetrySearch = useCallback(() => {
+    if (lastSearch === null || summary === null) {
+      return;
+    }
+    handleSearch(lastSearch, summary);
+  }, [handleSearch, lastSearch, summary]);
 
   const handleShowAlternatives = useCallback(
     (names: string[]) => {
@@ -235,9 +247,22 @@ export default function DomainsNewPage() {
     [lastTarget, router],
   );
 
+  // 行ごとの「再試行」が落ちたときに黙って元の表示に戻らないよう、帯で知らせる（AC-03-2）
+  const recheckCopy =
+    recheck.error === null ? null : toErrorCopy(recheck.error);
+
   return (
     <>
       <PageHeader title="名前を考える" />
+
+      {recheckCopy === null ? null : (
+        <Banner
+          body={recheckCopy.body}
+          onClose={() => recheck.reset()}
+          title={`再確認できませんでした — ${recheckCopy.title}`}
+          tone="warn"
+        />
+      )}
 
       <CandidateForm
         busy={generate.isPending}
@@ -282,6 +307,7 @@ export default function DomainsNewPage() {
         onOpenChange={setSearchOpen}
         onRegister={handleRegisterResult}
         onRetry={handleRetry}
+        onRetrySearch={handleRetrySearch}
         onSearch={handleSearch}
         onShowAlternatives={handleShowAlternatives}
         open={searchOpen}

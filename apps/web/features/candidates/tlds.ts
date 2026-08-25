@@ -1,47 +1,49 @@
 import { domainNameSchema, sldSchema } from "@dopamin/shared";
-import type { SelectOption } from "@/components/ui/select";
 
 /**
- * 一括確認の対象 TLD（ui-screens S-20 / S-24「TLD 22 種を一括確認」）。
+ * 対応 TLD 22 種（kitaqsign 4 + kitaqnic 18）。
+ *
+ * 正は `packages/registry/src/routing.ts` の `REGISTRY_TLDS` / `SUPPORTED_TLDS`
+ * （`GET /sessions/hello` で確定済み。同ファイルのコメントどおり UI の選択肢もここから生成する）。
+ * ただし `@dopamin/registry` は `node:crypto` に依存していてブラウザには載せられないため、
+ * ここでは値をコピーしている。`@dopamin/shared` への移設（issue #32）が済んだら import に置き換える。
+ *
  * `POST /domains/check` の `tlds` は最大 22 件（`domainCheckRequestSchema`）なので、
- * ここが上限とちょうど一致する。
+ * 全選択がちょうど上限と一致する（ui-screens S-20 / S-24「TLD 22 種を一括確認」）。
  */
 export const SUPPORTED_TLDS = [
+  // kitaqsign
   "com",
   "net",
   "org",
   "info",
-  "biz",
-  "dev",
-  "app",
+  // kitaqnic
   "xyz",
   "online",
   "site",
   "tech",
   "space",
   "store",
+  "website",
+  "press",
+  "host",
   "fun",
-  "shop",
-  "blog",
-  "cloud",
-  "page",
-  "live",
-  "studio",
-  "works",
-  "world",
+  "icu",
+  "cyou",
+  "sbs",
+  "bond",
+  "cfd",
+  "art",
+  "build",
+  "ceo",
 ] as const;
 
-/** Select の「すべて」を表す番兵。TLD は英字のみなので実在の値とは衝突しない。 */
-export const ALL_TLDS = "*";
+/** 希望 TLD の既定値 = 全対応 TLD（ui-screens S-20 / S-24）。 */
+export const DEFAULT_TLDS: readonly string[] = SUPPORTED_TLDS;
 
-export const TLD_OPTIONS: readonly SelectOption[] = [
-  { value: ALL_TLDS, label: `すべて（${SUPPORTED_TLDS.length} 種）` },
-  ...SUPPORTED_TLDS.map((tld) => ({ value: tld, label: `.${tld}` })),
-];
-
-/** Select の値（`*` またはひとつの TLD）を check に渡す TLD 配列にする。 */
-export function resolveTlds(value: string): string[] {
-  return value === ALL_TLDS ? [...SUPPORTED_TLDS] : [value];
+/** 全対応 TLD が選ばれている（= 絞り込んでいない）か。 */
+export function isAllTlds(tlds: readonly string[]): boolean {
+  return tlds.length === SUPPORTED_TLDS.length;
 }
 
 /**
@@ -59,6 +61,9 @@ export type ParseResult =
 const SLD_ERROR =
   "英数字とハイフンのみ、1〜63 文字で入力してください（RFC 1035）";
 const FQDN_ERROR = "ドメイン名の形式が不正です（例: takutaku.com）";
+
+/** TLD を 1 つも選ばずに一括確認しようとしたとき（`tlds` は最小 1 件）。 */
+export const TLD_REQUIRED = "TLD を 1 つ以上選んでください";
 
 /**
  * 入力欄の文字列を検証して SLD / FQDN に振り分ける（AC-03-3）。

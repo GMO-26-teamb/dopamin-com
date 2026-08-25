@@ -7,12 +7,12 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ErrorCard } from "@/components/ui/error-card";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
 import type { ApiClientError } from "@/lib/api/errors";
 import type { SearchResult } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 import { SearchResultRow, SearchResultRowSkeleton } from "./search-result-row";
-import { ALL_TLDS, parseSearchQuery, resolveTlds, TLD_OPTIONS } from "./tlds";
+import { TldMultiSelect } from "./tld-select";
+import { DEFAULT_TLDS, parseSearchQuery, TLD_REQUIRED } from "./tlds";
 
 /**
  * Figma: S-20 `81:741`（初期）/ S-24 `81:1156`（結果）
@@ -49,6 +49,8 @@ export interface DirectSearchProps {
   onRegister: (result: SearchResult) => void;
   onShowAlternatives: (names: string[]) => void;
   onRetry: (name: string) => void;
+  /** Error Card の「再試行」。直前と同じ条件で check をやり直す */
+  onRetrySearch: () => void;
 }
 
 export function DirectSearch({
@@ -64,12 +66,20 @@ export function DirectSearch({
   onRegister,
   onShowAlternatives,
   onRetry,
+  onRetrySearch,
 }: DirectSearchProps) {
   const panelId = useId();
   const messageId = useId();
   const [query, setQuery] = useState("");
-  const [tld, setTld] = useState<string>(ALL_TLDS);
+  const [tlds, setTlds] = useState<readonly string[]>(DEFAULT_TLDS);
   const [invalid, setInvalid] = useState<string | undefined>(undefined);
+
+  const handleTldChange = (next: string[]) => {
+    setTlds(next);
+    if (next.length > 0 && invalid === TLD_REQUIRED) {
+      setInvalid(undefined);
+    }
+  };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -78,9 +88,9 @@ export function DirectSearch({
       setInvalid(parsed.message);
       return;
     }
-    setInvalid(undefined);
 
     if (parsed.query.kind === "fqdn") {
+      setInvalid(undefined);
       onSearch(
         { names: [parsed.query.name] },
         { label: parsed.query.name, tldCount: null, rowCount: 1 },
@@ -88,10 +98,20 @@ export function DirectSearch({
       return;
     }
 
-    const tlds = resolveTlds(tld);
+    // SLD だけの入力は選択した TLD と掛け合わせる。0 件では check に出せない
+    if (tlds.length === 0) {
+      setInvalid(TLD_REQUIRED);
+      return;
+    }
+    setInvalid(undefined);
+    const picked = [...tlds];
     onSearch(
-      { sld: parsed.query.sld, tlds },
-      { label: parsed.query.sld, tldCount: tlds.length, rowCount: tlds.length },
+      { sld: parsed.query.sld, tlds: picked },
+      {
+        label: parsed.query.sld,
+        tldCount: picked.length,
+        rowCount: picked.length,
+      },
     );
   };
 
@@ -128,15 +148,6 @@ export function DirectSearch({
                 {...(invalid === undefined ? {} : { "aria-invalid": true })}
               />
             </div>
-            <div className="w-44 shrink-0">
-              <Select
-                label="TLD"
-                onValueChange={setTld}
-                options={TLD_OPTIONS}
-                surface="panel"
-                value={tld}
-              />
-            </div>
             <Button
               leadingIcon={<Search />}
               loading={busy}
@@ -146,6 +157,7 @@ export function DirectSearch({
               空きを確認
             </Button>
           </div>
+          <TldMultiSelect label="TLD" onChange={handleTldChange} value={tlds} />
           <p
             className={cn(
               "w-full text-caption",
@@ -164,6 +176,7 @@ export function DirectSearch({
         error={error}
         onRegister={onRegister}
         onRetry={onRetry}
+        onRetrySearch={onRetrySearch}
         onShowAlternatives={onShowAlternatives}
         registeredNames={registeredNames}
         results={results}
@@ -184,6 +197,7 @@ interface SearchResultsProps {
   onRegister: (result: SearchResult) => void;
   onShowAlternatives: (names: string[]) => void;
   onRetry: (name: string) => void;
+  onRetrySearch: () => void;
 }
 
 /** 結果カード（読み込み / エラー / 結果あり）。まだ検索していないときは何も出さない。 */
@@ -197,6 +211,7 @@ function SearchResults({
   onRegister,
   onShowAlternatives,
   onRetry,
+  onRetrySearch,
 }: SearchResultsProps) {
   if (busy && summary !== null) {
     const rows = Array.from(
@@ -214,8 +229,9 @@ function SearchResults({
     );
   }
 
+  // 候補側の Error Card と同じく、同じ条件でそのまま送り直せるようにする（AC-03-2）
   if (error !== null) {
-    return <ErrorCard error={error} showLogsLink />;
+    return <ErrorCard error={error} onRetry={onRetrySearch} showLogsLink />;
   }
 
   if (results === undefined || summary === null) {

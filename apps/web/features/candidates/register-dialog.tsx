@@ -127,7 +127,7 @@ export function RegisterDialog({
       onPrimary={handleRegister}
       open={target !== null}
       primaryDisabled={!canRegister}
-      primaryLabel="登録する — 決めるのはこれだけ"
+      primaryLabel="登録する"
       title={`${name} を登録`}
     >
       {notice === null ? null : (
