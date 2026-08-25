@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
  * AI ログ 1 件（FR-14）。Result（Ok / Error）× Feature / Model / Input / Output / Meta。
  */
 
-const FEATURE_LABEL: Record<AiLog["feature"], string> = {
+export const FEATURE_LABEL: Record<AiLog["feature"], string> = {
   domain_candidates: "候補生成",
   uniqueness: "独自性スコア",
   subdomain_plan: "サブドメイン提案",
@@ -35,10 +35,19 @@ function formatMeta(log: AiLog): string {
 
 export interface AiLogEntryProps {
   log: AiLog;
+  /**
+   * 機能名 / モデル / 結果バッジの行を出すか。既定は true（P-01 のドロワー）。
+   * S-61 の展開行では同じ値が Log Row 側に出ているので false にする。
+   */
+  showHeader?: boolean;
   className?: string;
 }
 
-export function AiLogEntry({ log, className }: AiLogEntryProps) {
+export function AiLogEntry({
+  log,
+  showHeader = true,
+  className,
+}: AiLogEntryProps) {
   const failed = log.status === "error";
 
   return (
@@ -48,15 +57,17 @@ export function AiLogEntry({ log, className }: AiLogEntryProps) {
         className,
       )}
     >
-      <div className="flex w-full items-center gap-1.5">
-        <span className="shrink-0 text-ink text-label-sm">
-          {FEATURE_LABEL[log.feature]}
-        </span>
-        <span className="min-w-0 flex-1 truncate text-caption-sm text-muted">
-          {log.model}
-        </span>
-        <Badge tone={failed ? "warn" : "ok"}>{failed ? "ERROR" : "OK"}</Badge>
-      </div>
+      {showHeader ? (
+        <div className="flex w-full items-center gap-1.5">
+          <span className="shrink-0 text-ink text-label-sm">
+            {FEATURE_LABEL[log.feature]}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-caption-sm text-muted">
+            {log.model}
+          </span>
+          <Badge tone={failed ? "warn" : "ok"}>{failed ? "ERROR" : "OK"}</Badge>
+        </div>
+      ) : null}
       <p className="w-full text-caption text-muted">入力: {log.inputSummary}</p>
       <p
         className={cn("w-full text-body-sm", failed ? "text-warn" : "text-ink")}
