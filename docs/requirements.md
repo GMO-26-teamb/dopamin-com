@@ -481,18 +481,19 @@ dopamin/
 │  │  ├─ lib/webauthn.ts        # @simplewebauthn/browser ラッパー
 │  │  └─ next.config.ts         # rewrites: /api/* → API_ORIGIN
 │  └─ api/                      # Hono（Vercel Functions, Node.js）
-│     ├─ src/index.ts           # app 定義、AppType export
+│     ├─ src/index.ts           # app 定義、AppType export（Vercel はこの default export を使う）
+│     ├─ src/dev.ts             # ローカル開発用 Node サーバー（@hono/node-server, :8787）
 │     ├─ src/routes/            # auth / domains / ai / logs / demo / health
 │     ├─ src/services/          # ユースケース（domain.service.ts, ai.service.ts, ...）
 │     ├─ src/middleware/        # session, origin-check, request-id, error-handler
 │     ├─ src/lib/               # webauthn, ai-provider, github, logger
-│     └─ vercel.json
-├─ packages/
+│     ├─ tsup.config.ts         # デプロイ用に dist/index.js へバンドル（@dopamin/* を取り込む）
+│     └─ vercel.json            # outputDirectory: dist
+├─ packages/                    # 内部パッケージは TS ソースを直接 export（ビルド不要）
 │  ├─ shared/                   # zod スキーマ、型、定数（TLD, EPP status）、導出ロジック
 │  ├─ db/                       # Drizzle schema / migrations / client / seed
 │  ├─ registry/                 # RegistryAdapter IF、kitaqsign / kitaqnic / mock、routing
-│  ├─ tsconfig/                 # tsconfig.base.json
-│  └─ biome-config/             # 共有 Biome 設定（ルート biome.json から extends）
+│  └─ tsconfig/                 # base.json（各パッケージの tsconfig が extends）
 ├─ docs/
 │  ├─ requirements.md           # 本書
 │  ├─ specs/                    # 機能別仕様（FR-xx を参照）
@@ -1028,8 +1029,8 @@ export function resolveEmbeddingModel() { /* EMBEDDING_PROVIDER / EMBEDDING_MODE
 
 **`ci.yml`**（PR / push）
 1. `pnpm install --frozen-lockfile`
-2. `pnpm turbo run lint typecheck test --filter=...[origin/main]`（変更パッケージのみ）
-3. `pnpm turbo run build`（Next.js ビルドの型エラー検出）
+2. `pnpm lint`（ルートの Biome を全パッケージに一括適用）
+3. `pnpm turbo run typecheck test build`（Turborepo のキャッシュで未変更パッケージはスキップ）
 
 **`deploy-web.yml` / `deploy-api.yml`**（`main` push → 本番、PR → プレビュー）
 1. `pnpm install`
@@ -1244,3 +1245,4 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | 版 | 日付 | 内容 |
 |---|---|---|
 | v0.1 | 2026-08-25 | 初版。技術選定（Turborepo / Next.js + Hono 分離 / Drizzle / パスキー自前実装 / AI SDK / 埋め込みスコア）を反映 |
+| v0.1.1 | 2026-08-25 | モノレポ雛形の実装に合わせて §8（tsup / vercel.json、biome-config 廃止）と §16.2（CI 手順）を更新。判断は ADR-0001 |

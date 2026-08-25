@@ -1,0 +1,7 @@
+{
+  "extends": "@dopamin/tsconfig/base.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["src", "drizzle.config.ts"]
+}

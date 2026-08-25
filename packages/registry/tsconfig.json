@@ -1,0 +1,4 @@
+{
+  "extends": "@dopamin/tsconfig/base.json",
+  "include": ["src"]
+}

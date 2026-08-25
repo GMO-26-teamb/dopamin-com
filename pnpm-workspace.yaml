@@ -1,0 +1,13 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# pnpm 11: 依存の postinstall は明示許可制
+allowBuilds:
+  esbuild: true
+  sharp: false
+  unrs-resolver: false
+
+# pnpm 11 は公開 1 日未満のバージョンを解決しない（supply-chain 対策）。必要なら例外を追加する
+minimumReleaseAgeExclude:
+  - hono
