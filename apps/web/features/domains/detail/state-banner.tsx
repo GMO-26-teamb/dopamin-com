@@ -3,7 +3,8 @@
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import type { DomainDetail } from "@/lib/api/types";
-import { daysUntil, formatRelative, gracePeriodOf } from "./derive";
+import { formatRelativeTime, remainingDays } from "../format";
+import { gracePeriodOf } from "./derive";
 
 /**
  * 状態バナー（ui-screens S-31〜S-39）。メイン先頭に **1 つだけ** 出す（§1）。
@@ -39,7 +40,7 @@ export function StateBanner({
   if (domain.stale) {
     return (
       <Banner
-        body={`表示しているのは最終同期 ${formatRelative(domain.syncedAt, now)} のキャッシュです。「再同期」に成功するまで操作は実行できません。`}
+        body={`表示しているのは最終同期 ${formatRelativeTime(domain.syncedAt, now)} のキャッシュです。「再同期」に成功するまで操作は実行できません。`}
         title="最新の状態を取得できませんでした"
         tone="warn"
       />
@@ -60,7 +61,7 @@ export function StateBanner({
     case "rgp":
       return (
         <Banner
-          body={`残り ${daysUntil(domain.rgpUntil, now)} 日。期間内なら「復旧する」で Active に戻せます。過ぎると完全に削除されます。`}
+          body={`残り ${remainingDays(domain.rgpUntil, now)} 日。期間内なら「復旧する」で Active に戻せます。過ぎると完全に削除されます。`}
           title="復旧猶予（RGP）期間中です"
           tone="info"
         />
@@ -77,7 +78,7 @@ export function StateBanner({
     // S-36: 削除待ち（復旧ボタンは出さない・AC-11-2）
     case "pending_delete": {
       const until = gracePeriodOf(domain, "pendingDelete");
-      const days = until === null ? null : daysUntil(until.until, now);
+      const days = until === null ? null : remainingDays(until.until, now);
       return (
         <Banner
           body="レジストリが削除処理中です。復旧はできません。"

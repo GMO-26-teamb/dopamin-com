@@ -5,11 +5,11 @@ import { FormDialog } from "@/components/ui/dialog";
 import { Select } from "@/components/ui/select";
 import type { DomainDetail } from "@/lib/api/types";
 import {
-  formatDate,
   MAX_REGISTRATION_YEARS,
   maxRenewPeriod,
   renewedExpiry,
 } from "../detail/derive";
+import { formatDate } from "../format";
 
 /**
  * Figma: D-01 `83:3496`（Dialog / Form）
