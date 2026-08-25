@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.1.2（2026-08-25） |
+| 版 | v0.1.3（2026-08-25） |
 | プロダクト | ドパ民.com / dopamin.com — Z世代向けドメイン管理プラットフォーム（疑似レジストラ） |
 | チーム | チームドパ民（Team B）: 佐々木 琢登・星 はるか・上原 拓也 |
 | 位置づけ | GMO Internet Internship in kitaQ Webアプリケーションコース（2026/08/24–28）成果物 |
@@ -501,7 +501,7 @@ dopamin/
 │  └─ registry/                 # Swagger から抽出した仕様メモ・fixture（JSON）
 ├─ .github/workflows/
 │  ├─ ci.yml                    # lint / typecheck / test（PR・push）
-│  └─ deploy.yml                # main push → Vercel 本番 / PR → プレビュー（api → web の 2 ジョブ）
+│  └─ deploy.yml                # main push → Vercel 本番（api → web の 2 ジョブ）。PR プレビューなし
 ├─ CLAUDE.md                    # エージェント向け規約（§18.4）
 ├─ turbo.json
 ├─ biome.json
@@ -877,7 +877,7 @@ Server ステータスは Client ステータスより優先される。
 ### 12.1 方針
 
 - Supabase Auth は使わない。WebAuthn の Relying Party は `apps/api`（SimpleWebAuthn）。資格情報は `passkey_credentials`、セッションは `sessions` テーブルで管理する。
-- RP ID = Web の本番ドメイン（例: `dopamin.vercel.app` または独自ドメイン）。`WEBAUTHN_RP_ID` / `WEBAUTHN_ORIGIN` は環境変数。プレビュー環境では URL が毎回変わるため、パスキーはプレビューごとに登録し直す（許容）。
+- RP ID = Web の本番ドメイン（例: `dopamin.vercel.app` または独自ドメイン）。`WEBAUTHN_RP_ID` / `WEBAUTHN_ORIGIN` は環境変数。
 - `authenticatorSelection`: `residentKey: 'required'`, `userVerification: 'preferred'`。ログイン時は `allowCredentials` を空にして Discoverable Credential を使う。
 
 ### 12.2 登録シーケンス
@@ -1037,13 +1037,13 @@ export function resolveEmbeddingModel() { /* EMBEDDING_PROVIDER / EMBEDDING_MODE
 2. `pnpm lint`（ルートの Biome を全パッケージに一括適用）
 3. `pnpm turbo run typecheck test build`（Turborepo のキャッシュで未変更パッケージはスキップ）
 
-**`deploy.yml`**（`main` push → 本番、PR → プレビュー。`apps/**`・`packages/**`・lockfile 変更時のみ）
-- Web と API を 1 ワークフロー・2 ジョブで **api → web の順**にデプロイする。`apps/web/next.config.ts` の rewrites はビルド時に `API_ORIGIN` を読むため、プレビューでは直前にデプロイした API のプレビュー URL を Web のビルドに渡す必要がある（本番は Vercel プロジェクトに設定した固定の `API_ORIGIN` を使う）。
+**`deploy.yml`**（`main` push → 本番のみ。PR プレビューは行わない。`apps/**`・`packages/**`・lockfile 変更時のみ）
+- Web と API を 1 ワークフロー・2 ジョブで **api → web の順**にデプロイする。`apps/web/next.config.ts` の rewrites はビルド時に `API_ORIGIN` を読む（Vercel プロジェクトに設定した固定値）。PR の動作確認はローカル（`pnpm dev`）で行う。
 - 各ジョブの手順（リポジトリルートで実行。Root Directory は Vercel プロジェクト設定から `vercel pull` が取り込む）:
   1. `pnpm install --frozen-lockfile`
-  2. `vercel pull --yes --environment=<production|preview> --token=$VERCEL_TOKEN`（`VERCEL_ORG_ID` / `VERCEL_PROJECT_ID` を env に）
-  3. `vercel build [--prod]`
-  4. `vercel deploy --prebuilt [--prod]` → Web / API の URL を PR コメントに投稿（1 コメントを更新）
+  2. `vercel pull --yes --environment=production --token=$VERCEL_TOKEN`（`VERCEL_ORG_ID` / `VERCEL_PROJECT_ID` を env に）
+  3. `vercel build --prod`
+  4. `vercel deploy --prebuilt --prod`
 - GitHub Secrets: `VERCEL_TOKEN` / `VERCEL_ORG_ID` / `VERCEL_PROJECT_ID_WEB` / `VERCEL_PROJECT_ID_API`。アプリの環境変数（§17）は Vercel プロジェクト側で管理する。
 - マイグレーション: `api` ジョブの前段で `pnpm --filter @dopamin/db migrate`（`DIRECT_DATABASE_URL`）。失敗時はデプロイしない。【要確認】マイグレーションが作成された時点で追加する。
 
@@ -1058,7 +1058,6 @@ export function resolveEmbeddingModel() { /* EMBEDDING_PROVIDER / EMBEDDING_MODE
 | 環境 | Web | API | DB | レジストリ |
 |---|---|---|---|---|
 | local | `localhost:3000` | `localhost:8787` | Supabase（開発用スキーマ or ローカル Supabase） | `mock` または実レジストリ |
-| preview | PR ごとの URL | PR ごとの URL | 本番と同じ Supabase（`DEMO_RESET_ENABLED=false`） | 実レジストリ |
 | production | `dopamin.ut42tech.com` | `dopamin-api.ut42tech.com` | Supabase | 実レジストリ |
 
 ---
@@ -1209,7 +1208,7 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 |---|---|---|
 | Swagger と本書の想定が大きく異なる | 必須機能の遅延 | 8/25 午前に両 Swagger を精読し、Bridge 層の IF を先に固定。UI はモックで先行 |
 | 期間中の仕様変更通知 | アダプタ修正 | §11.5 の手順。契約テストで影響範囲を即時把握 |
-| パスキー自前実装のハマり（RP ID / origin 不一致、プレビュー URL） | ログイン不能 | 8/25 に本番 URL で通す。プレビューは登録し直し前提。`mock` 認証は作らない（本番と同じ経路で検証） |
+| パスキー自前実装のハマり（RP ID / origin 不一致） | ログイン不能 | 8/25 に本番 URL で通す。`mock` 認証は作らない（本番と同じ経路で検証） |
 | Vercel 2 プロジェクト間の Cookie / rewrites | 認証が通らない | rewrites を最初にデプロイして確認。ダメなら API を Next.js Route Handler にマウントする案へ切替（ADR 化） |
 | AI 無料枠のレート制限 | 候補生成失敗 | キャッシュ、フォールバックプロバイダ、失敗時は手入力導線 |
 | 埋め込みの弁別力不足 | スコアが説得力を欠く | 較正セットで早期検証、編集距離ガードを用意 |
@@ -1255,3 +1254,4 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | v0.1 | 2026-08-25 | 初版。技術選定（Turborepo / Next.js + Hono 分離 / Drizzle / パスキー自前実装 / AI SDK / 埋め込みスコア）を反映 |
 | v0.1.1 | 2026-08-25 | モノレポ雛形の実装に合わせて §8（tsup / vercel.json、biome-config 廃止）と §16.2（CI 手順）を更新。判断は ADR-0001 |
 | v0.1.2 | 2026-08-25 | §15 / §16.2: デプロイワークフローを `deploy-web.yml` / `deploy-api.yml` の 2 ファイルから `deploy.yml`（api → web の 2 ジョブ）に変更。プレビューで API の URL を Web ビルドに渡すため。§16.1 / §16.4 / §17: 本番ドメインを `dopamin.ut42tech.com` / `dopamin-api.ut42tech.com` に |
+| v0.1.3 | 2026-08-25 | §15 / §16.2 / §16.4: PR ごとの Vercel プレビューデプロイを廃止し、`deploy.yml` を `main` push → 本番のみに変更。preview 環境の行を削除 |

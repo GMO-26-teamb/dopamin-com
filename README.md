@@ -20,7 +20,7 @@ pnpm dev   # web: http://localhost:3000 / api: http://localhost:8787
 
 ## デプロイ（Vercel）
 
-`main` への push で本番、PR でプレビューを `.github/workflows/deploy.yml` からデプロイする（Git 連携は使わない。詳細は `docs/requirements.md` §16）。
+`main` への push で本番を `.github/workflows/deploy.yml` からデプロイする（PR プレビューはなし。Git 連携は使わない。詳細は `docs/requirements.md` §16）。
 
 初回セットアップ:
 
