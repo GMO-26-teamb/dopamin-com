@@ -2,7 +2,7 @@
 
 ## まず読む
 
-- `docs/requirements.md` が要件の SSOT。機能単位の詳細は `docs/specs/<feature>.md`（要件ID `FR-xx` / `NFR-xx` を参照）。
+- `docs/requirements.md` が要件の SSOT。機能単位の詳細は `docs/specs/<feature>.md`（要件ID `FR-xx` / `NFR-xx` を参照）。新規に書く場合は `docs/specs/_template.md` をコピーする。
 - 優先順位: 本書 < `docs/specs/*` < `docs/requirements.md` < レジストリの Swagger UI（API 仕様の正）。
 - `【要確認】` は未確定事項。推測で実装せず、確認して requirements.md を更新してから進める。
 - 1 タスク = 1 spec = 1 PR。`pnpm check` がグリーンでない変更は main に入れない。
@@ -43,6 +43,7 @@
 - レジストリ固有の処理は `packages/registry` の外に書かない。正規化型（`packages/shared`）を変える場合は ADR を書く。
 - ロジック変更にはテストを伴う。契約テストの fixture は `docs/registry/**`。
 - 大きな設計判断は `docs/adr/` に ADR を残す。
+- issue は `.github/ISSUE_TEMPLATE/`（feature / bug）、PR は `.github/PULL_REQUEST_TEMPLATE.md` の雛形に従う。
 
 ## 禁止
 
