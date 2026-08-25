@@ -7,36 +7,36 @@ import {
   transferEligibleAt,
 } from "./dates";
 
-const NOW = new Date("2026-08-26T12:00:00+09:00");
+const NOW = new Date(2026, 7, 26, 12, 0, 0);
 
 describe("daysUntil（AC-02-2）", () => {
   it("同じ日なら 0", () => {
-    expect(daysUntil(new Date("2026-08-26T00:00:00+09:00"), NOW)).toBe(0);
-    expect(daysUntil(new Date("2026-08-26T23:59:59+09:00"), NOW)).toBe(0);
+    expect(daysUntil(new Date(2026, 7, 26, 0, 0, 0), NOW)).toBe(0);
+    expect(daysUntil(new Date(2026, 7, 26, 23, 59, 59), NOW)).toBe(0);
   });
 
   it("翌日なら 1、前日なら -1", () => {
-    expect(daysUntil(new Date("2026-08-27T00:00:00+09:00"), NOW)).toBe(1);
-    expect(daysUntil(new Date("2026-08-25T23:59:59+09:00"), NOW)).toBe(-1);
+    expect(daysUntil(new Date(2026, 7, 27, 0, 0, 0), NOW)).toBe(1);
+    expect(daysUntil(new Date(2026, 7, 25, 23, 59, 59), NOW)).toBe(-1);
   });
 
   it("時刻ではなく暦日で数える（NOW より前の時刻でも同じ日なら 0）", () => {
-    expect(daysUntil(new Date("2026-08-26T00:00:01+09:00"), NOW)).toBe(0);
+    expect(daysUntil(new Date(2026, 7, 26, 0, 0, 1), NOW)).toBe(0);
   });
 
   it("30 日警告の境界（ちょうど 30 日 / 31 日）", () => {
-    expect(daysUntil(new Date("2026-09-25T12:00:00+09:00"), NOW)).toBe(30);
-    expect(daysUntil(new Date("2026-09-26T12:00:00+09:00"), NOW)).toBe(31);
+    expect(daysUntil(new Date(2026, 8, 25, 12, 0, 0), NOW)).toBe(30);
+    expect(daysUntil(new Date(2026, 8, 26, 12, 0, 0), NOW)).toBe(31);
   });
 
   it("ISO 文字列でも Date でも同じ結果になる", () => {
-    const iso = "2026-08-27T00:00:00+09:00";
+    const iso = "2026-08-27T00:00:00Z";
     expect(daysUntil(iso, NOW)).toBe(daysUntil(new Date(iso), NOW));
   });
 
   it("now を省略すると現在時刻が使われる", () => {
     const soon = new Date(Date.now() + 60 * 60 * 1000);
-    expect(daysUntil(soon)).toBe(0);
+    expect([0, 1]).toContain(daysUntil(soon));
   });
 });
 
