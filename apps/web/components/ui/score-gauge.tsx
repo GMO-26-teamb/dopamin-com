@@ -104,6 +104,7 @@ export function ScoreGauge({
           style.value,
         )}
       >
+        <span className="sr-only">独自性スコア </span>
         {Math.round(shown)}
       </span>
     </div>

@@ -23,23 +23,25 @@ export function CodeBlock({
   copyLabel = "コピー",
   className,
 }: CodeBlockProps) {
-  const [copied, setCopied] = useState(false);
+  // コピーした時刻（0 = 未コピー）。連続クリックでも毎回タイマーを張り直せるよう値を変える
+  const [copiedAt, setCopiedAt] = useState(0);
+  const copied = copiedAt > 0;
 
   useEffect(() => {
-    if (!copied) {
+    if (copiedAt === 0) {
       return;
     }
-    const timer = window.setTimeout(() => setCopied(false), COPIED_RESET_MS);
+    const timer = window.setTimeout(() => setCopiedAt(0), COPIED_RESET_MS);
     return () => window.clearTimeout(timer);
-  }, [copied]);
+  }, [copiedAt]);
 
   async function copy(): Promise<void> {
     try {
       await navigator.clipboard.writeText(code);
-      setCopied(true);
+      setCopiedAt(Date.now());
     } catch {
       // クリップボードが使えない環境（未許可・非セキュアコンテキスト）では黙って諦める
-      setCopied(false);
+      setCopiedAt(0);
     }
   }
 

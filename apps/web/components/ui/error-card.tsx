@@ -25,6 +25,8 @@ export interface ErrorCardProps {
   error: ApiClientError;
   onRetry?: () => void;
   showLogsLink?: boolean;
+  /** 操作ログへのリンク先（既定 /logs） */
+  logsHref?: string;
   className?: string;
 }
 
@@ -32,6 +34,7 @@ export function ErrorCard({
   error,
   onRetry,
   showLogsLink = false,
+  logsHref = LOGS_HREF,
   className,
 }: ErrorCardProps) {
   const copy = toErrorCopy(error);
@@ -80,7 +83,7 @@ export function ErrorCard({
               trailingIcon={<ArrowRight />}
               variant="subtle"
             >
-              <Link href={LOGS_HREF}>操作ログを見る</Link>
+              <Link href={logsHref}>操作ログを見る</Link>
             </Button>
           ) : null}
         </div>
