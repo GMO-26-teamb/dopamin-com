@@ -776,7 +776,7 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。すべてのテーブル
       "availability": "available",
       "uniqueness": { "score": 82, "label": "high", "topSimilar": [{ "name": "takaku", "similarity": 0.61 }] }
     },
-    { "name": "takutaku.jp", "registry": "kitaqnic", "availability": "unavailable", "uniqueness": null },
+    { "name": "takutaku.xyz", "registry": "kitaqnic", "availability": "unavailable", "uniqueness": null },
     { "name": "takutaku.net", "registry": "kitaqsign", "availability": "error", "error": { "code": "REGISTRY_TIMEOUT" } }
   ]
 }
@@ -813,13 +813,19 @@ export interface RegistryAdapter {
 - すべての呼び出しは `operation_logs` に記録する（呼び出し側の `RegistryClient` ラッパーが担当。アダプタはログを意識しない）。
 - `mock` アダプタ: インメモリ + DB（`domains.raw_info`）で状態遷移を再現。`MOCK_REGISTRY_FAIL_MODE=timeout|5xx|reject|spec_mismatch` でエラーシミュレーションができる。
 
-### 11.2 TLD ルーティング（初期値・【要確認】）
+### 11.2 TLD ルーティング
 
-| TLD | レジストリ | 根拠 |
-|---|---|---|
-| `.com` `.net` | kitaqsign | プロトタイプのデモデータ（onamae-sample.com / expired-demo.net が kitaqsign） |
-| `.jp` | kitaqnic | プロトタイプのデモデータ（gmo-hackathon.jp が kitaqnic） |
-| `.shop` 他 | 要確認 | 各 Swagger の対応 TLD を確認して `routing.ts` に反映 |
+両 Swagger の仕様メモは `docs/registry/spec-notes.md`。認証方式・エンベロープ・result code は両レジストリで同一。
+
+`GET /sessions/hello` で確定済み（2026-08-25 取得）。**両者に重複は無く、TLD からレジストリが一意に決まる。**
+
+| レジストリ | 対応 TLD（計 22） |
+|---|---|
+| kitaqsign | `.com` `.net` `.org` `.info`（4） |
+| kitaqnic | `.xyz` `.online` `.site` `.tech` `.space` `.store` `.website` `.press` `.host` `.fun` `.icu` `.cyou` `.sbs` `.bond` `.cfd` `.art` `.build` `.ceo`（18） |
+
+- **`.jp` は両レジストリとも非対応**（kitaqnic は gTLD のみ）。プロトタイプのデモデータ `gmo-hackathon.jp` / API 例の `takutaku.xyz` は使えないため、デモシナリオと UI の TLD 選択肢を上記 22 種から選び直す。
+- kitaqnic の登録期間は 1〜10 年、猶予期間 45 日、IDN 許可（`hello` の `info` より）。
 
 ルーティングは `packages/registry/src/routing.ts` の 1 箇所で管理し、UI の TLD 選択肢はここから生成する。
 
@@ -1073,8 +1079,9 @@ export function resolveEmbeddingModel() { /* EMBEDDING_PROVIDER / EMBEDDING_MODE
 | `DATABASE_URL` | Supavisor（6543）接続文字列 |
 | `DIRECT_DATABASE_URL` | マイグレーション用（5432） |
 | `WEBAUTHN_RP_ID` / `WEBAUTHN_RP_NAME` / `WEBAUTHN_ORIGIN` | WebAuthn RP 設定 |
-| `KITAQSIGN_BASE_URL` / `KITAQSIGN_API_KEY`（または認証情報）| 【要確認: Swagger の認証方式】 |
-| `KITAQNIC_BASE_URL` / `KITAQNIC_API_KEY`（同上）| 【要確認】 |
+| `KITAQSIGN_BASE_URL` / `KITAQNIC_BASE_URL` | EPP API のオリジン（`https://epp.kitaqsign.com` / `https://epp.kitaqnic.com`）。`docs.*` は Swagger UI の URL であって API のホストではない |
+| `KITAQSIGN_GATE_USER` / `KITAQSIGN_GATE_PASSWORD` | 共通 Basic ゲート（認証 1 段目）。kitaqnic も同名で `KITAQNIC_*` |
+| `KITAQSIGN_REGISTRAR_ID` / `KITAQSIGN_API_KEY` | `X-Registrar-Id` / `X-Api-Key` ヘッダ（認証 2 段目）。kitaqnic も同様 |
 | `REGISTRY_MODE` | `real` / `mock` |
 | `MOCK_REGISTRY_FAIL_MODE` | `none` / `timeout` / `5xx` / `reject` / `spec_mismatch` |
 | `AI_PROVIDER` / `AI_MODEL` | 既定の生成モデル |
