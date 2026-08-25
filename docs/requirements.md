@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.1（2026-08-25） |
+| 版 | v0.1.2（2026-08-25） |
 | プロダクト | ドパ民.com / dopamin.com — Z世代向けドメイン管理プラットフォーム（疑似レジストラ） |
 | チーム | チームドパ民（Team B）: 佐々木 琢登・星 はるか・上原 拓也 |
 | 位置づけ | GMO Internet Internship in kitaQ Webアプリケーションコース（2026/08/24–28）成果物 |
@@ -501,8 +501,7 @@ dopamin/
 │  └─ registry/                 # Swagger から抽出した仕様メモ・fixture（JSON）
 ├─ .github/workflows/
 │  ├─ ci.yml                    # lint / typecheck / test（PR・push）
-│  ├─ deploy-web.yml            # main push → Vercel 本番 / PR → プレビュー
-│  └─ deploy-api.yml
+│  └─ deploy.yml                # main push → Vercel 本番 / PR → プレビュー（api → web の 2 ジョブ）
 ├─ CLAUDE.md                    # エージェント向け規約（§18.4）
 ├─ turbo.json
 ├─ biome.json
@@ -1032,13 +1031,15 @@ export function resolveEmbeddingModel() { /* EMBEDDING_PROVIDER / EMBEDDING_MODE
 2. `pnpm lint`（ルートの Biome を全パッケージに一括適用）
 3. `pnpm turbo run typecheck test build`（Turborepo のキャッシュで未変更パッケージはスキップ）
 
-**`deploy-web.yml` / `deploy-api.yml`**（`main` push → 本番、PR → プレビュー）
-1. `pnpm install`
-2. `vercel pull --yes --environment=<production|preview> --token=$VERCEL_TOKEN`（`VERCEL_ORG_ID` / `VERCEL_PROJECT_ID` を env に）
-3. `vercel build [--prod]`
-4. `vercel deploy --prebuilt [--prod]` → URL を PR コメントに投稿
-- `paths` フィルタで `apps/web/**`・`packages/**` 変更時のみ web を、`apps/api/**`・`packages/**` 変更時のみ api をデプロイする。
-- マイグレーション: `deploy-api.yml` の前段で `pnpm --filter @dopamin/db migrate`（`DIRECT_DATABASE_URL`）。失敗時はデプロイしない。
+**`deploy.yml`**（`main` push → 本番、PR → プレビュー。`apps/**`・`packages/**`・lockfile 変更時のみ）
+- Web と API を 1 ワークフロー・2 ジョブで **api → web の順**にデプロイする。`apps/web/next.config.ts` の rewrites はビルド時に `API_ORIGIN` を読むため、プレビューでは直前にデプロイした API のプレビュー URL を Web のビルドに渡す必要がある（本番は Vercel プロジェクトに設定した固定の `API_ORIGIN` を使う）。
+- 各ジョブの手順（リポジトリルートで実行。Root Directory は Vercel プロジェクト設定から `vercel pull` が取り込む）:
+  1. `pnpm install --frozen-lockfile`
+  2. `vercel pull --yes --environment=<production|preview> --token=$VERCEL_TOKEN`（`VERCEL_ORG_ID` / `VERCEL_PROJECT_ID` を env に）
+  3. `vercel build [--prod]`
+  4. `vercel deploy --prebuilt [--prod]` → Web / API の URL を PR コメントに投稿（1 コメントを更新）
+- GitHub Secrets: `VERCEL_TOKEN` / `VERCEL_ORG_ID` / `VERCEL_PROJECT_ID_WEB` / `VERCEL_PROJECT_ID_API`。アプリの環境変数（§17）は Vercel プロジェクト側で管理する。
+- マイグレーション: `api` ジョブの前段で `pnpm --filter @dopamin/db migrate`（`DIRECT_DATABASE_URL`）。失敗時はデプロイしない。【要確認】マイグレーションが作成された時点で追加する。
 
 ### 16.3 Supabase
 
@@ -1246,3 +1247,4 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 |---|---|---|
 | v0.1 | 2026-08-25 | 初版。技術選定（Turborepo / Next.js + Hono 分離 / Drizzle / パスキー自前実装 / AI SDK / 埋め込みスコア）を反映 |
 | v0.1.1 | 2026-08-25 | モノレポ雛形の実装に合わせて §8（tsup / vercel.json、biome-config 廃止）と §16.2（CI 手順）を更新。判断は ADR-0001 |
+| v0.1.2 | 2026-08-25 | §15 / §16.2: デプロイワークフローを `deploy-web.yml` / `deploy-api.yml` の 2 ファイルから `deploy.yml`（api → web の 2 ジョブ）に変更。プレビューで API の URL を Web ビルドに渡すため |
