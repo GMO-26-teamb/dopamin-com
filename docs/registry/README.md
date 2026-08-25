@@ -1,0 +1,167 @@
+# レジストリ仕様メモ（EPP-over-REST）
+
+出典: 各レジストリの Swagger UI（`/v3/api-docs`）。**Swagger が仕様の正**であり、本メモは差分の要約。
+齟齬があれば Swagger を優先し、本メモを更新する。
+
+- Kitaqsign: <https://docs.kitaqsign.com/swagger-ui/index.html> — `registry-kitaqsign EPP-over-REST API (対応 TLD: .com .net .org .info)` v1 / OAS 3.0
+- Kitaqnic: <https://docs.kitaqnic.com/swagger-ui/index.html> — `registry-kitaqnic EPP-over-REST API (18 gTLD)` v1 / OAS 3.0
+- 取得日: 2026-08-25
+
+RFC 5730–5733 の EPP をトランスポートだけ HTTP/REST + JSON に置き換えた擬似レジストリ（ハッカソン教材）。
+コマンド体系と result code の意味論は本物準拠。
+
+## 1. 共通仕様（両レジストリで同一）
+
+### オリジンとベースパス
+
+| | 値 |
+|---|---|
+| API オリジン | `https://epp.kitaqsign.com` / `https://epp.kitaqnic.com` |
+| ベースパス | `/api/v1/epp` |
+| RDAP | `rdap.` サブドメインの `/rdap/v1/domain/{name}`。WHOIS は提供されない |
+
+`docs.*` は Swagger UI のホストであって API のホストではない。
+
+### 認証（2 段。両レジストリで方式は同一）
+
+1. **共通 Basic ゲート** — HTTP Basic（レジストリ側の `ADMIN_GATE_USER` / `ADMIN_GATE_PASSWORD`）。全エンドポイントに必要。
+2. **レジストラ API キー** — `X-Registrar-Id`（例 `KITAQ-TEST-001`）+ `X-Api-Key`（平文）。
+
+- 例外: `GET /sessions/hello` は API キー不要（Basic ゲートのみ）。疎通確認に使う。
+- `session:login` / `logout` は**任意**。リクエスト毎に認証するステートレス実装のため、呼ばなくても各コマンドを実行できる。
+- 環境変数は `apps/api/.env.example` の `KITAQSIGN_*` / `KITAQNIC_*` を参照（1 レジストリあたり gate user / gate password / registrar id / api key の 4 つ）。
+
+### clTRID（トレース ID）
+
+任意ヘッダ `X-Cl-TRID` に**毎回ユニークな値**を付ける（64 文字以内推奨・形式自由・一意性は強制されない）。
+レスポンスの `trID.clTRID` にエコーされ、`trID.svTRID` がサーバ採番。障害調査時のキーになるため両方 `operation_logs` に残す。
+ヘッダ名は大文字小文字を区別しない。
+
+### レスポンスエンベロープ
+
+```json
+{
+  "result": { "code": 1000, "msg": "Command completed successfully" },
+  "resData": { "...": "コマンドごとの結果" },
+  "extension": { "...": "レジストリ固有（kitaqnic の launch 等）" },
+  "trID": { "clTRID": "ABC-12345", "svTRID": "KQSGN-20260505-0001" }
+}
+```
+
+> ⚠️ **実測との差異**: Swagger 本文の例は `"msg"` だが、実際のレスポンスは `"message"` を返す（両レジストリとも `hello` で確認）。zod スキーマは `message` を必須にし、`msg` は受けない。
+
+エラー時は `resData` / `extension` が省略され、`result` に `reason` / `extValue` が付く（実測）:
+
+```json
+{
+  "result": { "code": 2303, "message": "Object does not exist",
+              "reason": "example.com not found", "extValue": null },
+  "trID": { "clTRID": "AUTHCHECK-...", "svTRID": "KQSGN-20260825-000037" }
+}
+```
+
+`reason` は人間向けの詳細メッセージ。`operation_logs` に残すが UI にはそのまま出さない（正規化エラーに変換する）。
+
+**成否は 2 段で判定する。** HTTP ステータス（トランスポート層）と `result.code`（業務結果）の両方を見る。
+HTTP 200 でも `result.code` が 2xxx なら失敗。アダプタはこの 2 段判定を行ってから正規化型に変換する。
+
+| result.code | 意味 | HTTP 対応（観測例） |
+|---|---|---|
+| 1000 | 成功 | 200 |
+| 2202 | authInfo 不一致 | — |
+| 2302 | 既に存在 | 409 ObjectExists |
+| 2303 | 存在しない | 404 ObjectNotFound |
+| 2306 | ポリシー違反 | — |
+
+### 値の制約（違反は 400）
+
+| 項目 | 制約 |
+|---|---|
+| コンタクト ID | 3〜16 文字。英数字とハイフン。先頭ハイフン不可。レジストラ内で一意 |
+| ドメイン名 | 全体 253 文字 / 各ラベル 63 文字。英数字とハイフン。ラベル先頭・末尾ハイフン不可 |
+| ホスト名 | 最大 255 文字。FQDN 形式 |
+| authInfo | 1〜64 文字（超過は 400）。RFC 9154 は 128bit 以上のエントロピー推奨 |
+| 氏名 | **許可されたダミー氏名のみ** — John Doe / Jane Doe / Taro Test / Hanako Test / Test User / Demo User / Sample Person / Example Contact |
+| メール | **予約ドメインのみ** — `@example.com` / `@example.net` / `@example.org` |
+
+氏名・メールの制約は要件の PII 方針（実在個人情報を登録しない）と一致する。バリデーションは `packages/shared` の zod スキーマ側でも掛け、レジストリに届く前に落とす。
+
+### 依存関係と実行順序
+
+```
+contact（登録者・各ロール）─┐
+                            ├─▶ domain
+host（ネームサーバ）────────┘
+```
+
+`domain:create` の `registrant` / `contacts` は**既存のコンタクト ID** を指す必要がある（存在チェックあり、無ければ 404）。
+`nameservers` はホスト名の文字列で、ホストオブジェクトの事前作成は推奨だが必須チェックはされない。
+
+### 非同期通知（Poll）
+
+`GET /messages` は**常に最古の未 ack メッセージを 1 件**返す FIFO（未 ack 件数も返る）。
+**ack するまで同じメッセージが返り続け、新しい通知を受け取れない。** 自動失効なし。
+移管の承認/拒否は専用 API で行うため、ack は業務処理をブロックしない（消し込み専用）。
+
+### 自動更新（Auto-Renew）
+
+exDate 超過でも廃止されず、レジストリが自動で 1 年延長（毎分のバッチ）。
+直後から 45 日間 RGP の `autoRenewPeriod` が付く（`domain:info` の `rgpStatus` / RDAP の status で確認）。
+**Poll 通知は積まれない**ため、レジストラ側は `exDate` / `rgpStatus` の照会で把握する。
+対象は `pendingDelete` / `pendingTransfer` 等にないドメインのみ（`clientHold` は自動更新される）。
+
+### 移管フロー
+
+1. gaining（移管先）が `POST /domains/{name}/transfer/request` に authInfo を付けて申請 → `pendingTransfer`、losing 側に Poll 通知
+2. losing が `approve` / `reject`
+3. gaining は承認前なら `cancel` 可能
+
+- **losing が放置すると申請から 20 分後にサーバが自動承認**（本来は 5 日。ハッカソン用に短縮）
+- ICANN の「登録後 60 日以内は移管拒否可」はレジストラ側ルールのため、本ハッカソンでは対応不要（登録直後でも移管できる）
+
+### ドメインステータス（RFC 5731）
+
+`ok` は他ステータスと排他（保留・制限・pending があると付かない）。
+`inactive`（NS 未設定）/ `pendingTransfer` / `pendingDelete` / `clientHold`（名前解決停止）/ `clientTransferProhibited` / `clientUpdateProhibited` / `clientDeleteProhibited` / `clientRenewProhibited`。
+`client*` はレジストラが `domain:update` で設定、`server*` はレジストリが設定。
+
+## 2. レジストリ差分（アダプタで吸収する箇所）
+
+| 項目 | kitaqsign | kitaqnic |
+|---|---|---|
+| 対応 TLD | `.com` `.net` `.org` `.info`（4） | `.xyz` `.online` `.site` `.tech` `.space` `.store` `.website` `.press` `.host` `.fun` `.icu` `.cyou` `.sbs` `.bond` `.cfd` `.art` `.build` `.ceo`（18）**重複なし** |
+| `domain:restore` | Swagger の Domain タグ未展開・概要の運用操作リストに記載なし | `POST /domains/{name}/restore` あり |
+| `rotate-auth-info` | 概要の運用操作リストに記載あり | あり（「kitaqnic 拡張」と表記） |
+| launch 拡張 | なし | `LaunchApplicationRequest` / `LaunchApplicationResult` スキーマあり |
+| `domain:info` の型 | `DomainResponse` / `EppResponseDomainResponse` | `DomainInfoResponse` / `EppResponseDomainInfoResponse` |
+| poll ack | 概要に「`POST /messages/{id}/ack` 等」 | `DELETE /api/v1/epp/messages/{id}` |
+| Poll のタグ名 | `Message` | `Messages` |
+| svTRID プレフィクス | `KQSGN-` | `KQNIC-` |
+| `hello` の TLD フィールド | `resData.tlds` | `resData.info.supportedTlds` |
+| `hello` の形状 | `resData` に `registryCode` / `tlds` / `message` | `resData` に `svID` / `svDate` / `svcMenu` / `info`（EPP greeting に近い） |
+| 宣言 extension | なし | `premium` / `launch` / `fee` |
+
+**認証・エンベロープ・result code・値の制約・移管フロー・Auto-Renew は両者で同一。**
+差分は「対応 TLD」「一部エンドポイントの有無とメソッド」「レスポンス型名」に限られるため、`RegistryAdapter`
+の正規化型（`packages/shared`）を変える必要はない見込み。
+
+## 3. 【要確認】
+
+実装前に潰す。判明したら本メモと `docs/requirements.md` を更新する。
+
+1. ~~kitaqnic の対応 18 gTLD の内訳~~ → **解決**（§2 の表・`hello` で取得済み）
+2. ~~TLD ルーティングの衝突~~ → **解決**。重複なし。TLD からレジストリが一意に決まる
+3. ~~`.jp` の扱い~~ → **解決**。両レジストリとも非対応。デモシナリオの `.jp` を差し替える必要あり
+4. **`authCode` の取得方法** — `RegistryAdapter.authCode()` が `domain:info` のレスポンスに含まれるのか、
+   `rotate-auth-info`（再生成）しか手段が無いのか。後者なら「移管 OUT のたびに authInfo が変わる」ことになる。
+5. **kitaqsign の `restore` の有無** — 無い場合、FR の restore は kitaqnic のみ対応になる。
+6. **kitaqsign の poll ack のメソッド** — `POST /messages/{id}/ack` か `DELETE /messages/{id}` か。
+7. **Basic ゲートの認証情報が両レジストリで共通か** — 共通なら env を 1 組に寄せられる。
+8. **`domain:check` のリクエスト形式** — `POST /domains/check` に `DomainNamesRequest`（複数名）を送る形。
+   1 リクエストあたりの上限件数が不明。
+
+## 4. 検証時の注意
+
+Swagger UI の「Try it out」は**実データに反映される**（create / update / delete / transfer）。
+動作確認は副作用のない `sessions/hello` → `domains/check` の順で始める。
+契約テストの fixture は本ディレクトリ配下に置く（`CLAUDE.md`）。
