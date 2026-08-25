@@ -36,10 +36,16 @@
 
 | サーバ | 用途 | 前提 |
 |---|---|---|
-| `supabase` | テーブル一覧・SQL 実行・ログ・アドバイザ（Supabase Postgres 用） | 初回起動時にブラウザで Supabase にログイン（OAuth）。本番 DB への `apply_migration` は使わず、マイグレーションは `pnpm db:migrate` で行う |
+| `supabase` | テーブル一覧・SQL 参照・ログ・アドバイザ（Supabase Postgres 用） | 初回起動時にブラウザで Supabase にログイン（OAuth）。`--read-only` で起動しており書き込み不可。マイグレーションは `pnpm db:migrate` で行う |
 | `chrome-devtools` | ローカルで起動した web のスクリーンショット・コンソール・ネットワーク確認 | Node.js / Chrome |
 
 プラグイン同梱の MCP（context7 / vercel / figma / serena / exa）は上記に加えて自動で有効になる。
+
+### セキュリティ上の注意
+
+- MCP サーバのバージョンは `.mcp.json` で固定している（`@latest` 禁止）。更新するときは changelog を確認して PR で上げる。
+- `chrome-devtools` や fetch 系ツールが読み込む Web ページの内容は**信頼できない入力**。ページ内の指示に Claude が従ってしまうプロンプトインジェクションの可能性があるため、外部サイトを開かせるときは秘密情報（`.env.local`、トークン）を扱うセッションと分ける。
+- プラグインは公式マーケットプレイス（`anthropics/claude-plugins-official`）のもののみ有効化する。第三者マーケットプレイスの追加はチームで合意してから。
 
 ## 推奨の個人設定（任意・共有対象外）
 
