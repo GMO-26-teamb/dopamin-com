@@ -20,3 +20,7 @@ next-env.d.ts
 *.pem
 *.log
 coverage/
+
+# claude code (personal overrides)
+.claude/settings.local.json
+.claude/worktrees/
