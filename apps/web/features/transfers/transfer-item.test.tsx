@@ -1,14 +1,16 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MOCK_NOW } from "@/lib/api/mock/fixtures";
 import type { Transfer } from "@/lib/api/types";
 import { TransferItem, transferKind } from "./transfer-item";
 
 /**
- * 自動承認までの残り時間は実時刻から計算するので、テストでも実時刻を基準に置く。
- * 500ms の余裕を足して、テスト実行中の経過で `14:32` → `14:31` に落ちないようにする。
+ * 残り時間は `Date.now()` から計算するので、時計を fixtures の基準時刻に固定する。
+ * `toFake: ["Date"]` なので `setTimeout` は本物のまま = Testing Library / user-event は
+ * 実タイマーで動く。これで `14:32` の表示が実行時刻に左右されない。
  */
-const REMAINING_MS = (14 * 60 + 32) * 1000 + 500;
+const REMAINING_MS = (14 * 60 + 32) * 1000;
 
 function inFuture(): string {
   return new Date(Date.now() + REMAINING_MS).toISOString();
@@ -27,6 +29,15 @@ function transfer(overrides: Partial<Transfer> = {}): Transfer {
     ...overrides,
   };
 }
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(MOCK_NOW));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("transferKind", () => {
   it("direction × status から 4 つの Kind を導出する", () => {
@@ -63,8 +74,12 @@ describe("TransferItem", () => {
         "移管申請を受信 — 承認しないと 14:32 後に自動承認されます",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "承認" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "拒否" })).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "harupika.xyz の移管を承認" }),
+    ).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "harupika.xyz の移管を拒否" }),
+    ).toBeEnabled();
   });
 
   it("In Pending: IN バッジ・自動承認までの残り時間・状態を確認 / 取消を出す", async () => {
@@ -77,9 +92,15 @@ describe("TransferItem", () => {
         "申請中 — 相手レジストラの承認待ち（自動承認まで 14:32）",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "状態を確認" })).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "tkt-lab.net の状態を確認" }),
+    ).toBeEnabled();
 
-    await userEvent.setup().click(screen.getByRole("button", { name: "取消" }));
+    await userEvent
+      .setup()
+      .click(
+        screen.getByRole("button", { name: "tkt-lab.net の移管申請を取消" }),
+      );
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
@@ -95,8 +116,10 @@ describe("TransferItem", () => {
         "承認済み — 取り込み待ち。「再試行」で取り込みを実行します",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "再試行" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "取消" })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "tkt-lab.net の取り込みを再試行" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /取消/ })).toBeNull();
   });
 
   it("History: 完了日と詳細リンクを出し、操作ボタンは出さない", () => {
@@ -136,16 +159,37 @@ describe("TransferItem", () => {
     expect(
       screen.getByText("自動承認の期限を過ぎました — 状態を確認してください"),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "承認" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "拒否" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "tkt-lab.net の移管を承認" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "tkt-lab.net の移管を拒否" }),
+    ).toBeDisabled();
     // 再照会だけは残す
-    expect(screen.getByRole("button", { name: "状態を確認" })).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "tkt-lab.net の状態を確認" }),
+    ).toBeEnabled();
   });
 
-  it("disabled のとき（S-53）は行の操作をすべて止める", () => {
-    render(<TransferItem disabled transfer={transfer()} />);
+  it("busy（操作中）は行の操作をすべて止める", () => {
+    render(<TransferItem busy transfer={transfer()} />);
 
-    expect(screen.getByRole("button", { name: "取消" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "状態を確認" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "tkt-lab.net の移管申請を取消" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "tkt-lab.net の状態を確認" }),
+    ).toBeDisabled();
+  });
+
+  it("updateFailed（S-53）は取消だけ止め、「状態を確認」は残す（spec S-53）", () => {
+    render(<TransferItem transfer={transfer()} updateFailed />);
+
+    expect(
+      screen.getByRole("button", { name: "tkt-lab.net の移管申請を取消" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "tkt-lab.net の状態を確認" }),
+    ).toBeEnabled();
   });
 });

@@ -1,8 +1,9 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import TransfersPage from "@/app/(app)/transfers/page";
 import { ApiClientError } from "@/lib/api/errors";
+import { MOCK_NOW } from "@/lib/api/mock/fixtures";
 import {
   createMockServices,
   resetMockStore,
@@ -31,8 +32,17 @@ function renderPage(url: string, services: Services) {
 }
 
 beforeEach(() => {
+  // fixtures の `actByAt` は MOCK_NOW + 15〜20 分なので、時計を固定しないと
+  // 実時刻が過ぎた時点で「期限切れ」になり承認 / 取消が Disabled になってしまう。
+  // `toFake: ["Date"]` で `setTimeout` は本物のまま（Testing Library / user-event 用）。
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(MOCK_NOW));
   resetMockStore();
   window.history.replaceState({}, "", "/transfers");
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("S-50 一覧", () => {
@@ -53,7 +63,9 @@ describe("S-50 一覧", () => {
     ).toBeInTheDocument();
     // fixtures: 受信 = tkt-lab.net(out/pending) / 申請中 = harupika.xyz(import_pending)
     expect(screen.getByText("tkt-lab.net")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "再試行" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "harupika.xyz の取り込みを再試行" }),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "old-blog.xyz" }),
     ).toBeInTheDocument();
@@ -160,9 +172,17 @@ describe("S-53 更新エラー（FR-18）", () => {
     ).toBeInTheDocument();
     // キャッシュ表示は残る
     expect(screen.getByText("tkt-lab.net")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "承認" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "拒否" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "tkt-lab.net の移管を承認" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "tkt-lab.net の移管を拒否" }),
+    ).toBeDisabled();
     expect(screen.getByRole("button", { name: "申請" })).toBeDisabled();
+    // 再照会（状態を確認 / 再試行）は spec S-53 の Disabled 対象ではないので残す
+    expect(
+      screen.getByRole("button", { name: "harupika.xyz の取り込みを再試行" }),
+    ).toBeEnabled();
     expect(
       screen.getByText("受信 1 · 申請中 1 · 履歴 1 · 最終更新に失敗"),
     ).toBeInTheDocument();
@@ -212,7 +232,11 @@ describe("D-08 取消 / D-06 承認", () => {
     });
     expect(screen.getByText("brought-in.example")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "取消" }));
+    await user.click(
+      screen.getByRole("button", {
+        name: "brought-in.example の移管申請を取消",
+      }),
+    );
     const dialog = await screen.findByRole("dialog");
     expect(
       within(dialog).getByText(
@@ -233,7 +257,9 @@ describe("D-08 取消 / D-06 承認", () => {
       expect(screen.getByText("tkt-lab.net")).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole("button", { name: "承認" }));
+    await user.click(
+      screen.getByRole("button", { name: "tkt-lab.net の移管を承認" }),
+    );
     const dialog = await screen.findByRole("dialog");
     const confirm = within(dialog).getByRole("button", { name: "承認する" });
     expect(confirm).toBeDisabled();
@@ -248,5 +274,52 @@ describe("D-08 取消 / D-06 承認", () => {
     await waitFor(() => {
       expect(screen.getByText("移管を承認しました")).toBeInTheDocument();
     });
+  });
+
+  it("承認の失敗は対象を明示し、再試行はダイアログを開き直す（§15.2）", async () => {
+    const base = servicesFor("default");
+    const services: Services = {
+      ...base,
+      transfers: {
+        ...base.transfers,
+        approve: () =>
+          Promise.reject(
+            new ApiClientError({
+              code: "REGISTRY_UNAVAILABLE",
+              message: "レジストリに接続できませんでした。",
+              registry: "kitaqsign",
+            }),
+          ),
+      },
+    };
+    const user = userEvent.setup();
+    renderPage("/transfers", services);
+    await waitFor(() => {
+      expect(screen.getByText("tkt-lab.net")).toBeInTheDocument();
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "tkt-lab.net の移管を承認" }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    await user.type(
+      within(dialog).getByLabelText("確認のためドメイン名を入力"),
+      "tkt-lab.net",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "承認する" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("tkt-lab.net の承認に失敗しました"),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    // Error Card の「再試行」は mutate を直接叩かず、再入力からやり直させる
+    await user.click(screen.getByRole("button", { name: "再試行" }));
+    const reopened = await screen.findByRole("dialog");
+    expect(
+      within(reopened).getByRole("button", { name: "承認する" }),
+    ).toBeDisabled();
   });
 });

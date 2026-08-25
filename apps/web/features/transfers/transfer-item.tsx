@@ -101,8 +101,13 @@ function statusText(
 
 export interface TransferItemProps {
   transfer: Transfer;
-  /** S-53（更新エラー）や他の操作中は承認 / 拒否 / 取消 / 再確認をすべて止める */
-  disabled?: boolean;
+  /** 申請 / 承認 / 拒否 / 取消 / 更新のいずれかが実行中。二重送信を避けるため行の操作をすべて止める */
+  busy?: boolean;
+  /**
+   * S-53（更新エラー）。仕様で Disabled にするのは承認 / 拒否 / 取消 / 申請だけなので、
+   * 「状態を確認」/「再試行」＝再照会の導線は残す（ui-screens S-53）。
+   */
+  updateFailed?: boolean;
   /** 「状態を確認」/「再試行」が実行中 */
   recheckPending?: boolean;
   onApprove?: (transfer: Transfer) => void;
@@ -113,7 +118,8 @@ export interface TransferItemProps {
 
 export function TransferItem({
   transfer,
-  disabled = false,
+  busy = false,
+  updateFailed = false,
   recheckPending = false,
   onApprove,
   onReject,
@@ -127,9 +133,12 @@ export function TransferItem({
   );
   // 0 到達で操作を止め、再照会を促す（ui-screens §4）
   const expired = remainingMs !== null && remainingMs <= 0;
-  const actionsDisabled = disabled || expired;
+  const actionsDisabled = busy || updateFailed || expired;
+  const recheckDisabled = busy || recheckPending;
   const isHistory = kind === "history";
   const linkable = isHistory && transfer.status === "approved";
+  // 同じラベルのボタンが行ごとに並ぶので、読み上げ名はドメイン名で一意にする
+  const name = transfer.domainName;
 
   return (
     <div
@@ -173,7 +182,8 @@ export function TransferItem({
             {/* 期限切れは承認 / 拒否を止め、再照会だけを残す（ui-screens §4） */}
             {expired ? (
               <Button
-                disabled={disabled || recheckPending}
+                aria-label={`${name} の状態を確認`}
+                disabled={recheckDisabled}
                 leadingIcon={<RefreshCw />}
                 loading={recheckPending}
                 onClick={() => onRecheck?.(transfer)}
@@ -184,6 +194,7 @@ export function TransferItem({
               </Button>
             ) : null}
             <Button
+              aria-label={`${name} の移管を拒否`}
               disabled={actionsDisabled}
               onClick={() => onReject?.(transfer)}
               size="sm"
@@ -192,6 +203,7 @@ export function TransferItem({
               拒否
             </Button>
             <Button
+              aria-label={`${name} の移管を承認`}
               disabled={actionsDisabled}
               leadingIcon={<Check />}
               onClick={() => onApprove?.(transfer)}
@@ -206,7 +218,8 @@ export function TransferItem({
         {kind === "in-pending" ? (
           <>
             <Button
-              disabled={disabled || recheckPending}
+              aria-label={`${name} の状態を確認`}
+              disabled={recheckDisabled}
               leadingIcon={<RefreshCw />}
               loading={recheckPending}
               onClick={() => onRecheck?.(transfer)}
@@ -216,6 +229,7 @@ export function TransferItem({
               {recheckPending ? "確認中…" : "状態を確認"}
             </Button>
             <Button
+              aria-label={`${name} の移管申請を取消`}
               disabled={actionsDisabled}
               onClick={() => onCancel?.(transfer)}
               size="sm"
@@ -228,7 +242,8 @@ export function TransferItem({
 
         {kind === "import-pending" ? (
           <Button
-            disabled={disabled || recheckPending}
+            aria-label={`${name} の取り込みを再試行`}
+            disabled={recheckDisabled}
             leadingIcon={<RefreshCw />}
             loading={recheckPending}
             onClick={() => onRecheck?.(transfer)}

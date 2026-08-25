@@ -9,6 +9,7 @@
  * - S-51 0 件: フォーム + Empty State
  * - S-52 申請エラー（AC-12-2）: フォーム下に Error Card（再試行なし）
  * - S-53 更新エラー（FR-18）: Banner Warn + キャッシュ表示、承認 / 拒否 / 取消 / 申請は Disabled
+ *   （「状態を確認」/「再試行」＝再照会は残す）
  * - D-08 取消ダイアログ、D-06 同型の承認（再入力）/ 拒否ダイアログ
  *
  * 60 日ルールは UI で強制しない（要件 FR-12「移管可否は EPP ステータスのみで判定する」）。
@@ -70,6 +71,13 @@ const ACTION_BANNER: Record<
   }),
 };
 
+/** Error Card で「どの移管の・どの操作が」失敗したかを添えるためのラベル */
+const ACTION_LABEL: Record<TransferAction, string> = {
+  approve: "承認",
+  reject: "拒否",
+  cancel: "取消",
+};
+
 export default function TransfersPage() {
   return (
     <Suspense fallback={<TransfersFallback />}>
@@ -114,7 +122,10 @@ function TransfersView() {
   const updateError =
     refresh.error ?? (transfers.data === undefined ? null : transfers.error);
   const busy = refresh.isPending || request.isPending || action.isPending;
-  const actionsDisabled = busy || updateError !== null;
+  // S-53 で Disabled にするのは承認 / 拒否 / 取消 / 申請だけ。
+  // 「状態を確認」/「再試行」＝再照会は、更新に失敗しているときこそ必要なので残す。
+  const updateFailed = updateError !== null;
+  const submitDisabled = busy || updateFailed;
 
   const runRefresh = (rowId: string | null) => {
     const before = transfers.data ?? [];
@@ -172,6 +183,21 @@ function TransfersView() {
     );
   };
 
+  /**
+   * Error Card の「再試行」。承認は所有権が移る破壊的操作なので、直接 mutate せず
+   * ダイアログ（ドメイン名の再入力）から解錠し直す（要件 §15.2）。
+   */
+  const retryLastAttempt = () => {
+    if (lastAttempt === null) {
+      return;
+    }
+    if (lastAttempt.action === "approve") {
+      setDialog({ action: "approve", transfer: lastAttempt.transfer });
+      return;
+    }
+    runAction(lastAttempt.transfer, lastAttempt.action);
+  };
+
   const confirmDialog = (transfer: Transfer) => {
     if (dialog !== null) {
       runAction(transfer, dialog.action);
@@ -185,7 +211,7 @@ function TransfersView() {
     transfers.data === undefined
       ? undefined
       : `受信 ${groups.received.length} · 申請中 ${groups.pending.length} · 履歴 ${groups.history.length} · ${
-          updateError === null ? "Poll 消化済み" : "最終更新に失敗"
+          updateFailed ? "最終更新に失敗" : "Poll 消化済み"
         }`;
 
   return (
@@ -247,20 +273,23 @@ function TransfersView() {
       )}
 
       {action.error === null ? null : (
-        <ErrorCard
-          error={action.error}
-          onRetry={
-            lastAttempt === null
-              ? undefined
-              : () => runAction(lastAttempt.transfer, lastAttempt.action)
-          }
-          showLogsLink
-        />
+        <div className="flex w-full flex-col gap-1.5">
+          {lastAttempt === null ? null : (
+            <p className="text-caption text-warn">
+              {`${lastAttempt.transfer.domainName} の${ACTION_LABEL[lastAttempt.action]}に失敗しました`}
+            </p>
+          )}
+          <ErrorCard
+            error={action.error}
+            onRetry={lastAttempt === null ? undefined : retryLastAttempt}
+            showLogsLink
+          />
+        </div>
       )}
 
       <TransferForm
         defaultDomain={prefillDomain}
-        disabled={actionsDisabled}
+        disabled={submitDisabled}
         error={request.error}
         onSubmit={submitRequest}
         submitting={request.isPending}
@@ -290,13 +319,14 @@ function TransfersView() {
 
       {transfers.data !== undefined && transfers.data.length > 0 ? (
         <TransferSections
-          disabled={actionsDisabled}
+          busy={busy}
           onApprove={(transfer) => setDialog({ action: "approve", transfer })}
           onCancel={(transfer) => setDialog({ action: "cancel", transfer })}
           onRecheck={(transfer) => runRefresh(transfer.id)}
           onReject={(transfer) => setDialog({ action: "reject", transfer })}
           recheckingId={recheckingId}
           transfers={transfers.data}
+          updateFailed={updateFailed}
         />
       ) : null}
 

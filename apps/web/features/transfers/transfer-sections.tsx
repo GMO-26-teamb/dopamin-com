@@ -58,8 +58,10 @@ function Section({ id, title, items, children }: SectionProps) {
 
 export interface TransferSectionsProps {
   transfers: Transfer[];
-  /** S-53（更新エラー）や操作中はすべての行の操作を止める */
-  disabled?: boolean;
+  /** いずれかの操作が実行中。行のボタンをすべて止める（二重送信防止） */
+  busy?: boolean;
+  /** S-53（更新エラー）。承認 / 拒否 / 取消だけを止め、再照会の導線は残す */
+  updateFailed?: boolean;
   /** 「状態を確認」/「再試行」実行中の transfer id */
   recheckingId?: string | null;
   onApprove: (transfer: Transfer) => void;
@@ -70,7 +72,8 @@ export interface TransferSectionsProps {
 
 export function TransferSections({
   transfers,
-  disabled = false,
+  busy = false,
+  updateFailed = false,
   recheckingId = null,
   onApprove,
   onReject,
@@ -81,7 +84,7 @@ export function TransferSections({
 
   const row = (transfer: Transfer) => (
     <TransferItem
-      disabled={disabled}
+      busy={busy}
       key={transfer.id}
       onApprove={onApprove}
       onCancel={onCancel}
@@ -89,6 +92,7 @@ export function TransferSections({
       onReject={onReject}
       recheckPending={recheckingId === transfer.id}
       transfer={transfer}
+      updateFailed={updateFailed}
     />
   );
 
