@@ -1,3 +1,4 @@
+export * from "./ai";
 export * from "./api";
 export * from "./auth";
 export * from "./constants";
@@ -6,6 +7,8 @@ export * from "./display-status";
 export * from "./domain-name";
 export * from "./errors";
 export * from "./health";
+export * from "./logs";
+export * from "./operation-log";
 export * from "./operations";
 export * from "./registry";
 export * from "./subdomains";
