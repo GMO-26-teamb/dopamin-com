@@ -1,0 +1,214 @@
+import type { PasskeySummary } from "@dopamin/shared";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
+import { describe, expect, it, vi } from "vitest";
+import { ApiClientError } from "@/lib/api/errors";
+import { ServicesProvider } from "@/lib/api/provider";
+import type { Services } from "@/lib/api/services";
+import { PasskeySection } from "./passkey-section";
+
+/** radix は body に pointer-events:none を敷くので、user-event の判定は切る */
+const user = () => userEvent.setup({ pointerEventsCheck: 0 });
+
+const PASSKEYS: PasskeySummary[] = [
+  {
+    id: "pk_1",
+    name: "MacBook Touch ID",
+    deviceType: "multiDevice",
+    backedUp: true,
+    createdAt: "2026-08-25T10:00:00+09:00",
+    lastUsedAt: "2026-08-26T09:57:00+09:00",
+  },
+  {
+    id: "pk_2",
+    name: "iPhone Face ID",
+    deviceType: "singleDevice",
+    backedUp: false,
+    createdAt: "2026-08-25T10:00:00+09:00",
+    lastUsedAt: null,
+  },
+];
+
+type AuthOverrides = Partial<Services["auth"]>;
+
+function createServices(auth: AuthOverrides): Services {
+  const notImplemented = () => {
+    throw new Error("この経路はテストで使わない");
+  };
+  return {
+    auth: {
+      isSupported: () => true,
+      signup: notImplemented,
+      login: notImplemented,
+      logout: notImplemented,
+      addPasskey: () => Promise.reject(new Error("未設定")),
+      listPasskeys: () => Promise.resolve([...PASSKEYS]),
+      deletePasskey: () => Promise.resolve(),
+      ...auth,
+    },
+    // 設定画面のパスキーセクションは auth しか触らない
+    domains: {} as Services["domains"],
+    candidates: {} as Services["candidates"],
+    subdomains: {} as Services["subdomains"],
+    transfers: {} as Services["transfers"],
+    logs: {} as Services["logs"],
+    settings: {} as Services["settings"],
+  };
+}
+
+function renderSection(auth: AuthOverrides = {}) {
+  const onNotify = vi.fn();
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={queryClient}>
+      <ServicesProvider services={createServices(auth)}>
+        {children}
+      </ServicesProvider>
+    </QueryClientProvider>
+  );
+
+  render(<PasskeySection onNotify={onNotify} />, { wrapper });
+  return { onNotify };
+}
+
+describe("PasskeySection", () => {
+  it("読み込み中は骨組みを出し、取得できたら一覧に切り替わる", async () => {
+    renderSection();
+
+    expect(document.querySelector('[aria-busy="true"]')).not.toBeNull();
+    expect(screen.queryByText("MacBook Touch ID")).not.toBeInTheDocument();
+
+    expect(await screen.findByText("MacBook Touch ID")).toBeInTheDocument();
+    expect(screen.getByText("iPhone Face ID")).toBeInTheDocument();
+    // 作成日と最終利用（Figma S-70 の「作成 8/25 · 最終利用 …」）
+    expect(screen.getByText(/^作成 8\/25 · 最終利用 /)).toBeInTheDocument();
+    expect(screen.getByText("作成 8/25 · 未使用")).toBeInTheDocument();
+  });
+
+  it("取得に失敗したら Error Card と再試行を出す", async () => {
+    renderSection({
+      listPasskeys: () =>
+        Promise.reject(
+          new ApiClientError({
+            code: "INTERNAL",
+            message: "パスキーの一覧を取得できませんでした。",
+          }),
+        ),
+    });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("INTERNAL");
+    expect(screen.getByRole("button", { name: "再試行" })).toBeInTheDocument();
+  });
+
+  it("0 件なら Empty State と追加ボタンを出す", async () => {
+    renderSection({ listPasskeys: () => Promise.resolve([]) });
+
+    expect(await screen.findByText("パスキーがありません")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "パスキーを追加" }),
+    ).toBeInTheDocument();
+  });
+
+  it("最後の 1 つは削除ボタンを Disabled にする（D-09 を開かせない）", async () => {
+    const only = PASSKEYS[0];
+    if (only === undefined) throw new Error("fixture が壊れている");
+    renderSection({ listPasskeys: () => Promise.resolve([only]) });
+
+    // Disabled の理由はアクセシブルネームにも残す
+    const remove = await screen.findByRole("button", {
+      name: "MacBook Touch ID のパスキーを削除（最後の1つは不可）",
+    });
+    expect(remove).toBeDisabled();
+    expect(remove).toHaveTextContent("削除（最後の1つは不可）");
+  });
+
+  it("削除は D-09 を開いてから実行し、成功したら Banner Ok を親に渡す", async () => {
+    const deletePasskey = vi.fn(() => Promise.resolve());
+    const { onNotify } = renderSection({ deletePasskey });
+
+    await user().click(
+      await screen.findByRole("button", {
+        name: "iPhone Face ID のパスキーを削除",
+      }),
+    );
+
+    expect(
+      await screen.findByText("パスキーを削除しますか？"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "iPhone Face ID のパスキーを削除します。最後の 1 つは削除できません。",
+      ),
+    ).toBeInTheDocument();
+
+    await user().click(screen.getByRole("button", { name: "削除する" }));
+
+    await waitFor(() => expect(deletePasskey).toHaveBeenCalledWith("pk_2"));
+    await waitFor(() =>
+      expect(onNotify).toHaveBeenCalledWith({
+        tone: "ok",
+        title: "パスキーを削除しました",
+        body: "iPhone Face ID を削除しました。",
+      }),
+    );
+  });
+
+  it("削除が 409 なら D-09 を閉じて CONFLICT の Error Card を出す", async () => {
+    const { onNotify } = renderSection({
+      deletePasskey: () =>
+        Promise.reject(
+          new ApiClientError({
+            code: "CONFLICT",
+            message: "最後のパスキーは削除できません。",
+          }),
+        ),
+    });
+
+    await user().click(
+      await screen.findByRole("button", {
+        name: "iPhone Face ID のパスキーを削除",
+      }),
+    );
+    await user().click(await screen.findByRole("button", { name: "削除する" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("CONFLICT");
+    expect(alert).toHaveTextContent("最後のパスキーは削除できません。");
+    await waitFor(() =>
+      expect(screen.queryByText("パスキーを削除しますか？")).toBeNull(),
+    );
+    expect(onNotify).not.toHaveBeenCalled();
+  });
+
+  it("追加に失敗したら S-70b の Banner Warn を親に渡す", async () => {
+    const { onNotify } = renderSection({
+      addPasskey: () =>
+        Promise.reject(
+          new ApiClientError({
+            code: "INTERNAL",
+            message: "パスキーを登録できませんでした。",
+          }),
+        ),
+    });
+
+    await user().click(
+      await screen.findByRole("button", { name: "パスキーを追加" }),
+    );
+
+    await waitFor(() =>
+      expect(onNotify).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tone: "warn",
+          title: "パスキーを追加できませんでした",
+        }),
+      ),
+    );
+  });
+});

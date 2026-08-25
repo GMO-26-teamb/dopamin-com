@@ -374,6 +374,10 @@ export function createMockServices(
       },
       async addPasskey() {
         await wait();
+        if (isError) {
+          // S-70b: Banner Warn「パスキーを追加できませんでした」
+          fail("INTERNAL", "パスキーを登録できませんでした。");
+        }
         const store = getMockStore();
         store.sequence += 1;
         const passkey: PasskeySummary = {
@@ -394,7 +398,8 @@ export function createMockServices(
       async deletePasskey(id) {
         await wait();
         const store = getMockStore();
-        if (store.passkeys.length <= 1) {
+        // UI は最後の 1 つを Disabled にするので、409 の見た目は conflict シナリオで再現する（D-09）
+        if (scenario === "conflict" || store.passkeys.length <= 1) {
           fail("CONFLICT", "最後のパスキーは削除できません。");
         }
         store.passkeys = store.passkeys.filter((p) => p.id !== id);
