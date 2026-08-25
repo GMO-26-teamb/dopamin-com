@@ -182,8 +182,14 @@ export function useCheckDomains(): Mutation<
   DomainCheckRequest
 > {
   const services = useServices();
+  const queryClient = useQueryClient();
+  const keys = useQueryKeys();
   return useMutation({
     mutationFn: (input) => services.domains.check(input),
+    // check は独自性スコア（FR-05）も返す = AI 呼び出しなので、成否どちらでも AI ログに積まれる
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.aiLogs() });
+    },
   });
 }
 
