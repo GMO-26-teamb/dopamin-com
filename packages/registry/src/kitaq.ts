@@ -140,7 +140,7 @@ class KitaqRegistryAdapter implements RegistryAdapter {
           method: "GET",
           path: `/hosts/${encodeURIComponent(host)}`,
           kind: "read",
-          command: "host:info",
+          command: "host_info",
           resDataSchema: unitResDataSchema,
         });
         continue;
@@ -155,7 +155,7 @@ class KitaqRegistryAdapter implements RegistryAdapter {
           path: "/hosts",
           body: { name: host },
           kind: "write",
-          command: "host:create",
+          command: "host_create",
           resDataSchema: unitResDataSchema,
         });
       } catch (err) {
@@ -218,7 +218,7 @@ class KitaqRegistryAdapter implements RegistryAdapter {
         authInfo: randomUUID(),
       },
       kind: "write",
-      command: "contact:create",
+      command: "contact_create",
       resDataSchema: unitResDataSchema,
     });
 
@@ -329,7 +329,7 @@ class KitaqRegistryAdapter implements RegistryAdapter {
       path: `/domains/${encodeURIComponent(name)}/transfer/request`,
       body: { op: "request", authInfo: authCode },
       kind: "write",
-      command: "transfer:request",
+      command: "transfer_request",
       resDataSchema: transferResDataSchema,
     });
     return {
@@ -356,7 +356,7 @@ class KitaqRegistryAdapter implements RegistryAdapter {
       method: "POST",
       path: `/domains/${encodeURIComponent(name)}/rotate-auth-info`,
       kind: "write",
-      command: "rotate-auth-info",
+      command: "auth_info",
       resDataSchema: authInfoResDataSchema,
     });
     const entry = Object.entries(resData).find(

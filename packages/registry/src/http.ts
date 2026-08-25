@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { RegistryId } from "@dopamin/shared";
+import type { OperationCommand, RegistryId } from "@dopamin/shared";
 import type { z } from "zod";
 import {
   type EppEnvelope,
@@ -29,8 +29,11 @@ interface CommandOptions<T> {
   body?: unknown;
   /** 参照系 read（5s）/ 更新系 write（15s）。 */
   kind: "read" | "write";
-  /** エラーメッセージに使うコマンド名（check / info / create ...）。 */
-  command: string;
+  /**
+   * コマンドの正準名（`packages/shared` の `OPERATION_COMMANDS`）。
+   * エラーメッセージと `operation_logs.command`（§9.1）で同じ値を使う。
+   */
+  command: OperationCommand;
   resDataSchema: z.ZodType<T>;
 }
 

@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.1.6（2026-08-26） |
+| 版 | v0.1.7（2026-08-26） |
 | プロダクト | ドパ民.com / dopamin.com — Z世代向けドメイン管理プラットフォーム（疑似レジストラ） |
 | チーム | チームドパ民（Team B）: 佐々木 琢登・星 はるか・上原 拓也 |
 | 位置づけ | GMO Internet Internship in kitaQ Webアプリケーションコース（2026/08/24–28）成果物 |
@@ -706,7 +706,7 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。すべてのテーブル
 | request_id | text | `X-Cl-TRID` に送る値（clTRID）と一致させる |
 | sv_trid | text | レジストリ採番の svTRID（障害調査・他チームとの突合キー） |
 | registry | text NOT NULL | |
-| command | text NOT NULL | `check` / `info` / `create` / `renew` / `update` / `delete` / `restore` / `transfer_request` / `transfer_query` / `transfer_approve` / `transfer_reject` / `transfer_cancel` / `auth_info` / `poll` / `ack`（`packages/shared` の enum） |
+| command | text NOT NULL | 主コマンド 15 種: `check` / `info` / `create` / `renew` / `update` / `delete` / `restore` / `transfer_request` / `transfer_query` / `transfer_approve` / `transfer_reject` / `transfer_cancel` / `auth_info` / `poll` / `ack`。補助コマンド 4 種: `hello`（疎通確認。親コマンドを持たない）/ `host_info` / `host_create`（NS の自動作成）/ `contact_create`。いずれも `packages/shared` の `OPERATION_COMMANDS` が正。レジストリ側の HTTP パス（`rotate-auth-info` 等）とは別語彙で、対応付けは `packages/registry` の中だけで行う |
 | domain_name | text | |
 | status | text NOT NULL | `success` / `error` / `timeout` / `spec_mismatch` |
 | error_code | text | §10.3 のコード |
@@ -1346,4 +1346,5 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | v0.1.3 | 2026-08-25 | §15 / §16.2 / §16.4: PR ごとの Vercel プレビューデプロイを廃止し、`deploy.yml` を `main` push → 本番のみに変更。preview 環境の行を削除 |
 | v0.1.4 | 2026-08-25 | 他チーム（別レジストラ ID）との移管 IN / OUT に対応し、両レジストリの OpenAPI 定義精査で【要確認】3〜6を解決。FR-12 を全面改訂（Poll・承認 / 拒否を P0、取消を P1、60 日ルールの自前強制を撤回、AC-12-3〜6 追加）し、renew の `curExpDate` 必須、restore 1 段階、AuthCode は `rotate-auth-info`、Client ステータス 5 種更新可を関連仕様へ反映。詳細は `docs/specs/registry-api.md` |
 | v0.1.5 | 2026-08-26 | FR-04 の入力を「ニックネームまたはアプリ名」に変更（API は `nickname` のまま）。FR-13 をアプリ内の疑似 DNS ゾーンへの「反映」まで拡張（差分確認 → `dns_records` へ upsert、ドパ民 DNS への NS 切替、反映状態バッジ、AC-13-4〜7）。§2.2 / §3 / §9.1（`dns_records`、`subdomain_plans.applied_at`）/ §10.1（`apply`・`dns`）/ §15 / §21 を追随 |
+| v0.1.7 | 2026-08-26 | §9.1 operation_logs.command: レジストリアダプタが実際に発行する補助コマンド 4 種（`hello` / `host_info` / `host_create` / `contact_create`）を enum に追加。`hello` は親コマンドを持たず、NS・コンタクトの自動作成は主コマンドの内部で個別に失敗し得るため、親名に寄せず独立した値で記録する（AC-15-1）。正は `packages/shared/src/operation-log.ts` の `OPERATION_COMMANDS` で、`packages/registry` の `command` もこの語彙に統一（`host:info` → `host_info`、`rotate-auth-info` → `auth_info` 等） |
 | v0.1.6 | 2026-08-26 | §8 / §11.2: 対応 TLD の定数を `packages/shared/src/tlds.ts` に一本化し、`packages/registry` のルーティングと `apps/web` の TLD 選択肢は shared を参照する形に統一（`@dopamin/registry` は `node:crypto` 依存でブラウザから import できない） |
