@@ -1022,7 +1022,7 @@ export function resolveEmbeddingModel() { /* EMBEDDING_PROVIDER / EMBEDDING_MODE
 | `dopamin-api` | `apps/api` | Hono（Vercel の Hono プリセット、なければ `hono/vercel` の `handle(app)` を `api/index.ts` で export） | Node.js 22 ランタイム |
 
 - Git 連携は使わない（組織リポジトリ + Hobby プランの制約）。GitHub Actions から Vercel CLI でデプロイする。
-- 本番ドメイン: 初期は `*.vercel.app`。独自ドメイン取得時は `WEBAUTHN_RP_ID` / `WEBAUTHN_ORIGIN` / `API_ORIGIN` を更新する。
+- 本番ドメイン: Web `dopamin.ut42tech.com` / API `dopamin-api.ut42tech.com`（`*.vercel.app` も併存）。ドメイン変更時は `WEBAUTHN_RP_ID` / `WEBAUTHN_ORIGIN` / `API_ORIGIN` / `NEXT_PUBLIC_APP_ORIGIN` を更新する。
 
 ### 16.2 GitHub Actions
 
@@ -1053,7 +1053,7 @@ export function resolveEmbeddingModel() { /* EMBEDDING_PROVIDER / EMBEDDING_MODE
 |---|---|---|---|---|
 | local | `localhost:3000` | `localhost:8787` | Supabase（開発用スキーマ or ローカル Supabase） | `mock` または実レジストリ |
 | preview | PR ごとの URL | PR ごとの URL | 本番と同じ Supabase（`DEMO_RESET_ENABLED=false`） | 実レジストリ |
-| production | `dopamin-web.vercel.app` | `dopamin-api.vercel.app` | Supabase | 実レジストリ |
+| production | `dopamin.ut42tech.com` | `dopamin-api.ut42tech.com` | Supabase | 実レジストリ |
 
 ---
 
@@ -1063,7 +1063,7 @@ export function resolveEmbeddingModel() { /* EMBEDDING_PROVIDER / EMBEDDING_MODE
 
 | 変数 | 用途 |
 |---|---|
-| `API_ORIGIN` | rewrites 先（`https://dopamin-api.vercel.app`）。サーバー専用 |
+| `API_ORIGIN` | rewrites 先（`https://dopamin-api.ut42tech.com`）。サーバー専用 |
 | `NEXT_PUBLIC_APP_ORIGIN` | 表示・OGP 用 |
 
 ### `apps/api`
@@ -1247,4 +1247,4 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 |---|---|---|
 | v0.1 | 2026-08-25 | 初版。技術選定（Turborepo / Next.js + Hono 分離 / Drizzle / パスキー自前実装 / AI SDK / 埋め込みスコア）を反映 |
 | v0.1.1 | 2026-08-25 | モノレポ雛形の実装に合わせて §8（tsup / vercel.json、biome-config 廃止）と §16.2（CI 手順）を更新。判断は ADR-0001 |
-| v0.1.2 | 2026-08-25 | §15 / §16.2: デプロイワークフローを `deploy-web.yml` / `deploy-api.yml` の 2 ファイルから `deploy.yml`（api → web の 2 ジョブ）に変更。プレビューで API の URL を Web ビルドに渡すため |
+| v0.1.2 | 2026-08-25 | §15 / §16.2: デプロイワークフローを `deploy-web.yml` / `deploy-api.yml` の 2 ファイルから `deploy.yml`（api → web の 2 ジョブ）に変更。プレビューで API の URL を Web ビルドに渡すため。§16.1 / §16.4 / §17: 本番ドメインを `dopamin.ut42tech.com` / `dopamin-api.ut42tech.com` に |
