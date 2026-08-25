@@ -4,12 +4,9 @@ import { ArrowLeftRight, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { DomainDetail } from "@/lib/api/types";
-import {
-  formatRelative,
-  isTransferLocked,
-  statusBadgeLabel,
-  statusBadgeTone,
-} from "./derive";
+import { formatRelativeTime } from "../format";
+import { statusBadgeTone, statusBadgeVariant } from "../status-badge";
+import { isTransferLocked, statusBadgeLabel } from "./derive";
 
 /**
  * Figma: S-30 `83:2444` header（`83:2447`）
@@ -38,6 +35,7 @@ export function DetailHeader({
       <Badge
         icon={isTransferring ? <ArrowLeftRight /> : undefined}
         tone={statusBadgeTone(domain.displayStatus)}
+        variant={statusBadgeVariant(domain.displayStatus)}
       >
         {statusBadgeLabel(domain, now)}
       </Badge>
@@ -46,7 +44,7 @@ export function DetailHeader({
       ) : null}
       <div aria-hidden="true" className="min-w-0 flex-1" />
       <p className="shrink-0 text-caption text-muted">
-        最終同期 {formatRelative(domain.syncedAt, now)}
+        最終同期 {formatRelativeTime(domain.syncedAt, now)}
       </p>
       <Button
         leadingIcon={<RefreshCw />}

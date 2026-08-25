@@ -145,6 +145,18 @@ describe("toErrorCopy", () => {
     expect(copy.body).toContain("ローカルの情報は変更されていません");
   });
 
+  it("REGISTRY_REJECTED の本文は『理由 → FR-18 の 1 文』の順で句点が重ならない", () => {
+    const copy = copyFor("REGISTRY_REJECTED", {
+      registry: "kitaqsign",
+      registryCode: "2202",
+      message: "AuthCode が正しくありません。",
+    });
+    expect(copy.body).toBe(
+      "2202: AuthCode が正しくありません。ローカルの情報は変更されていません。入力内容を確認して、もう一度お試しください。",
+    );
+    expect(copy.body).not.toMatch(/。。/);
+  });
+
   it("REGISTRY_TIMEOUT は message があっても FR-18 の 1 文を落とさない", () => {
     const copy = toErrorCopy(
       new ApiClientError({

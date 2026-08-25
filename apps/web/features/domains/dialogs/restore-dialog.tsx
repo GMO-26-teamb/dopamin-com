@@ -2,7 +2,7 @@
 
 import { FormDialog } from "@/components/ui/dialog";
 import type { DomainDetail } from "@/lib/api/types";
-import { daysUntil } from "../detail/derive";
+import { remainingDays } from "../format";
 
 /**
  * Figma: D-04 `83:3826`（汎用 Dialog）
@@ -28,7 +28,7 @@ export function RestoreDialog({
   busy,
   onSubmit,
 }: RestoreDialogProps) {
-  const remaining = daysUntil(domain.rgpUntil, now);
+  const remaining = remainingDays(domain.rgpUntil, now);
 
   return (
     <FormDialog

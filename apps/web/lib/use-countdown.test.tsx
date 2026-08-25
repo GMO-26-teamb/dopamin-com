@@ -1,6 +1,8 @@
 import { act, renderHook } from "@testing-library/react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  type Countdown,
   formatCountdown,
   isUrgent,
   remainingMsUntil,
@@ -15,15 +17,21 @@ describe("formatCountdown", () => {
     expect(formatCountdown(9_000)).toBe("00:09");
     expect(formatCountdown(65_000)).toBe("01:05");
     expect(formatCountdown(15 * 60_000)).toBe("15:00");
+    expect(formatCountdown((14 * 60 + 32) * 1_000)).toBe("14:32");
   });
 
   it("60 分を超えても mm:ss のまま（分を繰り上げない）", () => {
     expect(formatCountdown(75 * 60_000)).toBe("75:00");
+    expect(formatCountdown(3 * 60 * 60_000)).toBe("180:00");
   });
 
   it("秒は切り上げる（表示 00:00 の間に操作できてしまわないように）", () => {
     expect(formatCountdown(1)).toBe("00:01");
     expect(formatCountdown(1_001)).toBe("00:02");
+  });
+
+  it("負値は 00:00", () => {
+    expect(formatCountdown(-1_000)).toBe("00:00");
   });
 });
 
@@ -37,19 +45,20 @@ describe("remainingMsUntil", () => {
     ).toBe(15 * 60_000);
   });
 
-  it("過去・null・不正な値は 0", () => {
+  it("過去は 0、null・不正な値は null", () => {
     const now = Date.parse(NOW.toISOString());
     expect(remainingMsUntil("2026-08-26T00:00:00.000Z", now)).toBe(0);
-    expect(remainingMsUntil(null, now)).toBe(0);
-    expect(remainingMsUntil("not-a-date", now)).toBe(0);
+    expect(remainingMsUntil(null, now)).toBeNull();
+    expect(remainingMsUntil("not-a-date", now)).toBeNull();
   });
 });
 
 describe("isUrgent", () => {
-  it("5 分以下で true、0 は false", () => {
+  it("5 分以下で true、0 と null は false", () => {
     expect(isUrgent(5 * 60_000)).toBe(true);
     expect(isUrgent(5 * 60_000 + 1)).toBe(false);
     expect(isUrgent(0)).toBe(false);
+    expect(isUrgent(null)).toBe(false);
   });
 });
 
@@ -102,6 +111,7 @@ describe("useCountdown", () => {
     const { result } = renderHook(() => useCountdown(null));
 
     expect(result.current.label).toBe("--:--");
+    expect(result.current.remainingMs).toBeNull();
     expect(result.current.expired).toBe(false);
   });
 
@@ -118,5 +128,16 @@ describe("useCountdown", () => {
 
     rerender({ target: new Date(NOW.getTime() + 10_000).toISOString() });
     expect(result.current.label).toBe("00:10");
+  });
+
+  it("サーバー描画では時刻を読まない（ハイドレーション不一致を避ける）", () => {
+    function Probe({ target }: { target: string }): React.ReactNode {
+      const countdown: Countdown = useCountdown(target);
+      return <span>{countdown.label}</span>;
+    }
+    const html = renderToStaticMarkup(
+      <Probe target={new Date(NOW.getTime() + 60_000).toISOString()} />,
+    );
+    expect(html).toContain("--:--");
   });
 });

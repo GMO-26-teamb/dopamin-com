@@ -19,13 +19,13 @@ import {
   useUpdateDomain,
 } from "@/lib/api/hooks";
 import type { DomainContactsInput } from "@/lib/api/types";
+import { useCountdown } from "@/lib/use-countdown";
 import { AuthCodeDialog } from "../dialogs/auth-code-dialog";
 import { DeleteDialog } from "../dialogs/delete-dialog";
 import { NsEditDialog } from "../dialogs/ns-edit-dialog";
 import { RenewDialog } from "../dialogs/renew-dialog";
 import { RestoreDialog } from "../dialogs/restore-dialog";
 import { TransferDecisionDialog } from "../dialogs/transfer-decision-dialog";
-import { useCountdown } from "../use-countdown";
 import { ActionsPanel } from "./actions-panel";
 import { ContactCard } from "./contact-card";
 import { DetailHeader } from "./detail-header";

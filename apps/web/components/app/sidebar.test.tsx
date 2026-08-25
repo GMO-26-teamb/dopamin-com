@@ -90,8 +90,11 @@ describe("Sidebar", () => {
 describe("activeNavKey", () => {
   it.each([
     ["/dashboard", "dashboard"],
+    // 取得フローだけが「ドメイン取得」（最長一致が勝つ）
     ["/domains/new", "domains"],
-    ["/domains/foo/subdomains", "domains"],
+    // 保有ドメインの画面はダッシュボードの続き（Figma S-30 / S-40）
+    ["/domains/takutaku.com", "dashboard"],
+    ["/domains/foo/subdomains", "dashboard"],
     ["/transfers", "transfers"],
     ["/settings/passkeys", "settings"],
     ["/logs", "logs"],
