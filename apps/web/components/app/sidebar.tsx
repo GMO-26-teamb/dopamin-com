@@ -27,37 +27,58 @@ interface NavDef {
   key: SidebarNavKey;
   href: string;
   label: string;
-  /** Active 判定に使う pathname の前方一致（`/domains/foo` も「ドメイン取得」） */
-  match: string;
+  /** Active 判定に使う pathname の前方一致（複数可）。最長一致が勝つ */
+  match: readonly string[];
 }
 
-/** ナビの並びは Figma の nav-0〜nav-4 と同じ */
+/**
+ * ナビの並びは Figma の nav-0〜nav-4 と同じ。
+ *
+ * 保有ドメインの画面（`/domains/<name>` / `.../subdomains`）はダッシュボードの
+ * 続きなので「ダッシュボード」を光らせる。「ドメイン取得」が Active になるのは
+ * 取得フロー（`/domains/new`）だけ（Figma S-30 / S-40）。
+ */
 export const SIDEBAR_NAV: readonly NavDef[] = [
   {
     key: "dashboard",
     href: "/dashboard",
     label: "ダッシュボード",
-    match: "/dashboard",
+    match: ["/dashboard", "/domains"],
   },
   {
     key: "domains",
     href: "/domains/new",
     label: "ドメイン取得",
-    match: "/domains",
+    match: ["/domains/new"],
   },
-  { key: "transfers", href: "/transfers", label: "移管", match: "/transfers" },
-  { key: "settings", href: "/settings", label: "設定", match: "/settings" },
-  { key: "logs", href: "/logs", label: "ログ", match: "/logs" },
+  {
+    key: "transfers",
+    href: "/transfers",
+    label: "移管",
+    match: ["/transfers"],
+  },
+  { key: "settings", href: "/settings", label: "設定", match: ["/settings"] },
+  { key: "logs", href: "/logs", label: "ログ", match: ["/logs"] },
 ];
 
 /**
- * pathname からナビの Active を決める。どれにも当たらないパス（`/` など）は
- * `undefined` を返し、どの項目も光らせない。
+ * pathname からナビの Active を決める。より長い（＝具体的な）前方一致が勝つので、
+ * `/domains/new` は「ドメイン取得」、`/domains/<name>` は「ダッシュボード」になる。
+ * どれにも当たらないパス（`/` など）は `undefined` を返し、どの項目も光らせない。
  */
 export function activeNavKey(pathname: string): SidebarNavKey | undefined {
-  return SIDEBAR_NAV.find(
-    ({ match }) => pathname === match || pathname.startsWith(`${match}/`),
-  )?.key;
+  let best: { key: SidebarNavKey; length: number } | undefined;
+  for (const { key, match } of SIDEBAR_NAV) {
+    for (const prefix of match) {
+      if (pathname !== prefix && !pathname.startsWith(`${prefix}/`)) {
+        continue;
+      }
+      if (best === undefined || prefix.length > best.length) {
+        best = { key, length: prefix.length };
+      }
+    }
+  }
+  return best?.key;
 }
 
 export interface SidebarProps {
