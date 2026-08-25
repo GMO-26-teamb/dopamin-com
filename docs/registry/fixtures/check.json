@@ -1,0 +1,10 @@
+{
+  "result": { "code": 1000, "message": "Command completed successfully" },
+  "resData": {
+    "results": [
+      { "name": "available-example.com", "avail": true },
+      { "name": "taken-example.com", "avail": false, "reason": "in use" }
+    ]
+  },
+  "trID": { "clTRID": "dp-fixture-0004", "svTRID": "KQSGN-20260825-000003" }
+}

@@ -254,7 +254,7 @@
 ### FR-08 更新（有効期限延長）【P0】
 
 - **概要**: 有効期限を延長する（EPP `renew`）。
-- **振る舞い**: 期間（1〜10年）と現在の有効期限を入力して `renew` → 新しい有効期限を表示。`renew` には現在の有効期限（curExpDate）を渡す【要確認: 両レジストリの `renew` の必須パラメータ】。
+- **振る舞い**: 期間（1〜10年）と現在の有効期限を入力して `renew` → 新しい有効期限を表示。`renew` には現在の有効期限（`curExpDate`、YYYY-MM-DD）を渡す（両レジストリとも必須。Swagger で確定・2026-08-25）。API は直前の `info` から取得して渡す。
 - **AC**:
   - AC-08-1: 成功後、詳細・一覧の有効期限が更新される。
   - AC-08-2: 合計有効期間が上限（10年）を超える要求は送信前に弾く。
@@ -265,7 +265,8 @@
 - **振る舞い**:
   - NS: 2〜13 件のホスト名を追加・削除（差分を `add` / `rem` として送る）。
   - コンタクト: 登録者（Registrant）必須、技術（Technical）任意。管理（Admin）・請求（Billing）は扱わない（ICANN Registration Data Policy 2025-08-21 準拠）。
-  - Client ステータスの付与・解除（`clientTransferProhibited` 等）を「ロック」トグルとして提供【要確認: レジストリが Client ステータス更新に対応しているか】。
+  - Client ステータスの付与・解除（`clientTransferProhibited` 等）を「ロック」トグルとして提供。Swagger 上は `domain:update` で 5 種の client ステータスに対応（2026-08-25 確定）。ただし【要確認】実測では `add.statuses` が成功応答のまま反映されない（両レジストリ・spec-notes 要確認 10。運営確認まで UI のロックトグルは保留）。
+  - NS 変更はレジストリ側でホストオブジェクトの事前作成が必須（実測）。アダプタが `ensureHosts` で自動作成して吸収する。
 - **AC**:
   - AC-09-1: NS 変更後 `info` で反映を確認し、画面に表示される。
   - AC-09-2: `serverUpdateProhibited` 中は操作を受け付けない。
@@ -281,7 +282,7 @@
 ### FR-11 復旧（RGP）【P0】
 
 - **概要**: 削除猶予期間内のドメインを復旧する（EPP `restore`、RFC 3915 の `rgp:restore`）。
-- **振る舞い**: `redemptionPeriod` のドメインにのみ「復旧」ボタンを表示。実行時に復旧費用が発生する旨を表示（金額はダミー）。レジストリが 2 段階（request → report）を要求する場合は両方を実行する【要確認: 各レジストリの restore フロー】。
+- **振る舞い**: `redemptionPeriod` のドメインにのみ「復旧」ボタンを表示。実行時に復旧費用が発生する旨を表示（金額はダミー）。restore は両レジストリとも 1 段階（`POST /domains/{name}/restore`。request → report の 2 段階ではない。Swagger で確定・2026-08-25）。
 - **AC**:
   - AC-11-1: 復旧後、状態が `ok`（Active）に戻る。
   - AC-11-2: `pendingDelete` のドメインでは復旧ボタンが表示されない。
@@ -295,11 +296,11 @@
   - レジストリは ICANN の 60 日ルールを強制しない（登録直後でも移管できる）。
 - **振る舞い（移管 IN = 本アプリが gaining）**:
   - ドメイン名 + AuthCode を入力 → `transferRequest` → 受理されたら `transfers(direction = in, status = pending)` を作成し `/transfers` に「移管申請中」として表示する。`domains` 行はこの時点では作らない（保有一覧 FR-02 には出さない）。
-  - 完了検知: `/transfers` 表示時・`GET /transfers/:id`・Poll 消化時に `transferQuery`（または Poll 通知）で状態を照会する。承認（相手の approve / サーバ自動承認）を検知したら `info` で取り込み、`domains` 行を作成（`last_transfer_at` を設定）し、`transfers` を `approved` にして `domain_id` を紐付ける。拒否・取消は `rejected` / `cancelled` として履歴に残す。
+  - 完了検知: `/transfers` 表示時・`GET /transfers/:id`・Poll 消化時に `domain:info` の `pendingTransfer`（または Poll 通知）で状態を照会する。承認（相手の approve / サーバ自動承認）を検知したら `info` で取り込み、`domains` 行を作成（`last_transfer_at` を設定）し、`transfers` を `approved` にして `domain_id` を紐付ける。拒否・取消は `rejected` / `cancelled` として履歴に残す。
   - 取り込み後のコンタクト: ドメインが参照するコンタクトは相手レジストラ発行の ID のままなので、自ユーザーの登録者プロファイル（対象レジストリに未作成なら `contact create` を先に実行）へ `update` で差し替える。差し替えに失敗しても取り込みは成功扱いとし、詳細画面に「コンタクト未移行」警告を出す【要確認: §21.2 #14】。
   - 承認前の取消（`transferCancel`）を `/transfers` から実行できる（P1）。
 - **振る舞い（移管 OUT = 本アプリが losing）**:
-  - AuthCode 表示: 詳細画面の「移管」から AuthCode を取得して表示する（コピー可）。取得手段が `rotate-auth-info`（再発行）しか無い場合は、ボタンを「AuthCode を発行」とし、発行のたびに前の値が無効になる旨を表示する【要確認: §21.2 #5】。AuthCode は DB に保存しない。表示イベントは操作ログに記録し、値はマスクする（AC-15-2）。
+  - AuthCode 表示: 詳細画面の「移管」に「AuthCode を発行」ボタンを置き、`rotate-auth-info` で再発行した値を表示する（コピー可）。発行のたびに前の値が無効になる旨を表示する。AuthCode は DB に保存しない。表示イベントは操作ログに記録し、値はマスクする（AC-15-2）。
   - 受信申請の検知: Poll（`poll` → DB 反映 → `ackMessage`）で相手レジストラからの transfer request 通知を取り込み、`transfers(direction = out, status = pending)` を作成する。Poll は `/transfers` 表示時・`POST /domains/sync`・`POST /registry/poll` で消化し、未 ack のメッセージを残さない（FIFO のため残すと以降の通知が読めない）。`info` で `pendingTransfer` を検知した場合も同様に `transfers(out)` を作る。
   - 承認 / 拒否: `/transfers` と詳細画面に「移管申請を受信」を表示し、承認（`transferApprove`）/ 拒否（`transferReject`）ボタンと自動承認までの残り時間（申請 + 20 分）を出す。
   - 完了反映: 承認（自分の approve / サーバ自動承認）を検知したら `domains` 行を `ownership = transferred_out` に遷移させ、保有一覧から除外する（§6.5、§9.1）。以後その行への書き込み系操作は `OPERATION_NOT_ALLOWED`。
@@ -843,7 +844,7 @@ export interface RegistryAdapter {
   transferApprove(name: string): Promise<TransferResult>;  // losing（自レジストラがスポンサー）
   transferReject(name: string): Promise<TransferResult>;   // losing
   transferCancel(name: string): Promise<TransferResult>;   // gaining（承認前）
-  getAuthInfo(name: string): Promise<string>;   // 移管 OUT 用【要確認: info に含まれるか rotate-auth-info のみか】
+  authCode(name: string): Promise<string>;      // 移管 OUT 用。rotate-auth-info で再生成して取得
   poll(): Promise<PollMessage | null>;          // 最古の未 ack 通知（無ければ null）
   ackMessage(id: string): Promise<void>;        // kitaqsign / kitaqnic でエンドポイントが異なる（spec-notes §2）
 }
@@ -1243,10 +1244,10 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 |---|---|---|---|
 | 1 | 両レジストリの認証方式・ベース URL・エンドポイント・リクエスト/レスポンス形式 | Swagger UI | 8/25 午前 |
 | 2 | 対応 TLD と TLD → レジストリのルーティング | Swagger / 運営 | 8/25 |
-| 3 | `renew` の必須パラメータ（現在の有効期限が必要か） | Swagger | 8/26 |
-| 4 | `restore` が 1 段階か 2 段階（request / report）か | Swagger | 8/26 |
-| 5 | ~~`transfer` の承認フロー~~ → **解決**（承認待ち + 20 分自動承認、spec-notes §1）。AuthCode の取得方法（`info` に含まれるか / `rotate-auth-info` のみか / `create` で authInfo 指定が必須か）は未解決 | Swagger / 実測 | 8/26 |
-| 6 | Client ステータス（ロック）の更新可否 | Swagger | 8/26 |
+| 3 | ~~`renew` の必須パラメータ~~ → 解決: `curExpDate` 必須（8/25） | Swagger | 済 |
+| 4 | ~~`restore` が 1 段階か 2 段階か~~ → 解決: 両レジストリとも 1 段階（8/25） | Swagger | 済 |
+| 5 | ~~`transfer` の承認フロー、AuthCode の取得方法~~ → 解決: 承認待ち + 20 分自動承認 / AuthCode は `rotate-auth-info` のみ（8/25） | Swagger | 済 |
+| 6 | ~~Client ステータス（ロック）の更新可否~~ → 解決: 5 種の client ステータスを更新可（8/25） | Swagger | 済 |
 | 7 | テスト用ドメインの削除・再利用制約（デモリセットの実現方法） | 運営 | 8/26 |
 | 8 | コンタクトのダミー値として許可される形式 | 運営 | 8/25 |
 | 9 | 独自性スコアの閾値較正結果と、編集距離ガード併用の要否 | チーム（較正後） | 8/27 |
@@ -1317,4 +1318,4 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | v0.1.1 | 2026-08-25 | モノレポ雛形の実装に合わせて §8（tsup / vercel.json、biome-config 廃止）と §16.2（CI 手順）を更新。判断は ADR-0001 |
 | v0.1.2 | 2026-08-25 | §15 / §16.2: デプロイワークフローを `deploy-web.yml` / `deploy-api.yml` の 2 ファイルから `deploy.yml`（api → web の 2 ジョブ）に変更。プレビューで API の URL を Web ビルドに渡すため。§16.1 / §16.4 / §17: 本番ドメインを `dopamin.ut42tech.com` / `dopamin-api.ut42tech.com` に |
 | v0.1.3 | 2026-08-25 | §15 / §16.2 / §16.4: PR ごとの Vercel プレビューデプロイを廃止し、`deploy.yml` を `main` push → 本番のみに変更。preview 環境の行を削除 |
-| v0.1.4 | 2026-08-25 | 他チーム（別レジストラ ID）との移管 IN / OUT に対応。FR-12 を全面改訂（Poll・承認 / 拒否を P0、取消を P1、60 日ルールの自前強制を撤回、アプリ内ユーザー間移管を非スコープ化、AC-12-3〜6 追加）。追随: §2.2 / §3.3 / FR-02 / FR-07 / FR-16 / FR-18 / §6.4 / §6.5 / §9.1（`domains.ownership` ほか、`transfers` 列追加、`operation_logs.sv_trid`）/ §9.2 / §10.1（承認・拒否・取消・Poll ルート、auth-code を POST）/ §10.3 / §11.1（`RegistryAdapter` に移管 5 操作・Poll、`mock` の相手レジストラ）/ §11.3 / §15.1 / §17 / §19 / §20 / §21 / §22 |
+| v0.1.4 | 2026-08-25 | 他チーム（別レジストラ ID）との移管 IN / OUT に対応し、両レジストリの OpenAPI 定義精査で【要確認】3〜6を解決。FR-12 を全面改訂（Poll・承認 / 拒否を P0、取消を P1、60 日ルールの自前強制を撤回、AC-12-3〜6 追加）し、renew の `curExpDate` 必須、restore 1 段階、AuthCode は `rotate-auth-info`、Client ステータス 5 種更新可を関連仕様へ反映。詳細は `docs/specs/registry-api.md` |

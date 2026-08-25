@@ -6,6 +6,7 @@
 - Kitaqsign: <https://docs.kitaqsign.com/swagger-ui/index.html> — `registry-kitaqsign EPP-over-REST API (対応 TLD: .com .net .org .info)` v1 / OAS 3.0
 - Kitaqnic: <https://docs.kitaqnic.com/swagger-ui/index.html> — `registry-kitaqnic EPP-over-REST API (18 gTLD)` v1 / OAS 3.0
 - 取得日: 2026-08-25
+- OpenAPI 定義の実物（`/v3/api-docs`、Basic ゲート認証付きで取得）: [`kitaqsign.openapi.json`](kitaqsign.openapi.json) / [`kitaqnic.openapi.json`](kitaqnic.openapi.json)
 
 RFC 5730–5733 の EPP をトランスポートだけ HTTP/REST + JSON に置き換えた擬似レジストリ（ハッカソン教材）。
 コマンド体系と result code の意味論は本物準拠。
@@ -97,6 +98,17 @@ host（ネームサーバ）────────┘
 `domain:create` の `registrant` / `contacts` は**既存のコンタクト ID** を指す必要がある（存在チェックあり、無ければ 404）。
 `nameservers` はホスト名の文字列で、ホストオブジェクトの事前作成は推奨だが必須チェックはされない。
 
+### domain:update の実測制約（2026-08-25・両レジストリで確認）
+
+- **`add.nameservers` はホストオブジェクトの事前作成が必須**（create と異なり存在チェックされる）。
+  未作成のホストを指定すると 2303 / reason `"<host> not found"`。`POST /hosts`（`{name, addrs?}`）で
+  作成すれば通る。対象 TLD 外のホスト名（kitaqnic に `*.example.net` 等）の作成可否は未検証のため、
+  アダプタ（`packages/registry` の `ensureHosts`）が参照前に info → create で自動作成する。
+- ドメイン配下のホスト（`ns1.<domain>`）を NS に設定していても `domain:delete` は成功する（実測）。
+- **`add.statuses` / `rem.statuses` は result 1000 を返すが status に反映されない**（clientHold /
+  clientTransferProhibited / clientDeleteProhibited で確認。Swagger の記述と矛盾 →【要確認】10）。
+- リクエストボディの未知フィールドは 400 / 2001 `Malformed JSON` で拒否される（厳格パース）。
+
 ### 非同期通知（Poll）
 
 `GET /messages` は**常に最古の未 ack メッセージを 1 件**返す FIFO（未 ack 件数も返る）。
@@ -130,10 +142,11 @@ exDate 超過でも廃止されず、レジストリが自動で 1 年延長（�
 | 項目 | kitaqsign | kitaqnic |
 |---|---|---|
 | 対応 TLD | `.com` `.net` `.org` `.info`（4） | `.xyz` `.online` `.site` `.tech` `.space` `.store` `.website` `.press` `.host` `.fun` `.icu` `.cyou` `.sbs` `.bond` `.cfd` `.art` `.build` `.ceo`（18）**重複なし** |
-| `domain:restore` | Swagger の Domain タグ未展開・概要の運用操作リストに記載なし | `POST /domains/{name}/restore` あり |
-| `rotate-auth-info` | 概要の運用操作リストに記載あり | あり（「kitaqnic 拡張」と表記） |
+| `domain:restore` | `POST /domains/{name}/restore` **あり**（openapi.json で確認。1 段階） | `POST /domains/{name}/restore` あり（1 段階） |
+| `rotate-auth-info` | `POST /domains/{name}/rotate-auth-info` あり | あり（「kitaqnic 拡張」と表記） |
 | launch 拡張 | なし | `LaunchApplicationRequest` / `LaunchApplicationResult` スキーマあり |
 | `domain:info` の型 | `DomainResponse` / `EppResponseDomainResponse` | `DomainInfoResponse` / `EppResponseDomainInfoResponse` |
+| `domain:update`（PUT）の応答 | `EppResponseDomainResponse`（更新後のドメイン情報が返る） | `EppResponseUnit`（**空**。更新後の情報は `info` で取り直す） |
 | poll ack | 概要に「`POST /messages/{id}/ack` 等」 | `DELETE /api/v1/epp/messages/{id}` |
 | Poll のタグ名 | `Message` | `Messages` |
 | svTRID プレフィクス | `KQSGN-` | `KQNIC-` |
@@ -152,24 +165,34 @@ exDate 超過でも廃止されず、レジストリが自動で 1 年延長（�
 1. ~~kitaqnic の対応 18 gTLD の内訳~~ → **解決**（§2 の表・`hello` で取得済み）
 2. ~~TLD ルーティングの衝突~~ → **解決**。重複なし。TLD からレジストリが一意に決まる
 3. ~~`.jp` の扱い~~ → **解決**。両レジストリとも非対応。デモシナリオの `.jp` を差し替える必要あり
-4. **`authCode` の取得方法** — `RegistryAdapter.getAuthInfo()` の元データが `domain:info` のレスポンスに含まれるのか、
-   `rotate-auth-info`（再生成）しか手段が無いのか。後者なら「移管 OUT のたびに authInfo が変わる」ことになる。
-5. **kitaqsign の `restore` の有無** — 無い場合、FR の restore は kitaqnic のみ対応になる。
-6. **kitaqsign の poll ack のメソッド** — `POST /messages/{id}/ack` か `DELETE /messages/{id}` か。
+4. ~~`authCode` の取得方法~~ → **解決**（openapi.json で確認）。`domain:info` の resData に authInfo は
+   **含まれない**。`POST /domains/{name}/rotate-auth-info`（再生成）が唯一の手段
+   （レスポンスは `EppResponseMapStringString`、resData に `authInfo`）。
+   **移管 OUT のたびに authInfo が変わる**仕様として UI に明示する。
+5. ~~kitaqsign の `restore` の有無~~ → **解決**。kitaqsign にも `POST /domains/{name}/restore` が**ある**
+   （openapi.json の paths で確認）。両レジストリとも **1 段階**（request/report の 2 段階ではない）。
+6. ~~kitaqsign の poll ack のメソッド~~ → **解決**。kitaqsign は `GET /messages/poll` + `POST /messages/{id}/ack`、
+   kitaqnic は `GET /messages` + `DELETE /messages/{id}`（アダプタで吸収する）。
 7. **Basic ゲートの認証情報が両レジストリで共通か** — 共通なら env を 1 組に寄せられる。
-8. **`domain:check` のリクエスト形式** — `POST /domains/check` に `DomainNamesRequest`（複数名）を送る形。
-   1 リクエストあたりの上限件数が不明。
+8. **`domain:check` の 1 リクエストあたりの上限件数** — 形式は `DomainNamesRequest`（`{names: []}`）で確定。
+   上限は Swagger に記載なし（アプリ側は 20 件に制限して運用）。
 9. **レジストラ ID はチームごとに別か** — 別でなければ他チームとの移管は同一レジストラ内の操作になり成立しない。
    テスト用の第 2 レジストラ資格情報が出るかも併せて確認（requirements §21.2 #11）。
-10. **非スポンサーからの `domain:info` / `transfer/query` の応答** — 2201 で拒否されるのか、限定情報が返るのか。
+10. **`domain:update` の `add.statuses` が反映されない** — Swagger は clientHold 等 5 種の設定・解除に
+    対応と記述しているが、実測（2026-08-25・両レジストリ）では 1000 成功を返しつつ status が変化しない。
+    レジストリ側の未実装かバグの疑い。運営に確認する。解決までは FR-09 の「ロック」トグルは動作しない前提。
+11. **非スポンサーからの `domain:info` の応答** — 2201 で拒否されるのか、限定情報が返るのか。
     `clID`（現スポンサー）はレスポンスに含まれるか。移管 OUT 完了の検知がこれに依存する（§21.2 #12）。
-11. **Poll 通知の種別と形状** — transfer request / approve / reject / 自動承認のそれぞれで何が積まれるか、
-    gaining 側にも積まれるか。`transfer/query` 応答の trStatus / acDate / exDate の有無（§21.2 #13）。
-12. **移管時のコンタクトの扱い** — 相手レジストラ発行のコンタクト ID を参照したまま `domain:update` できるか、
+12. **Poll 通知の種別と形状** — transfer request / approve / reject / 自動承認のそれぞれで何が積まれるか、
+    gaining 側にも積まれるか。通知内の trStatus / acDate / exDate の有無（§21.2 #13）。
+13. **移管時のコンタクトの扱い** — 相手レジストラ発行のコンタクト ID を参照したまま `domain:update` できるか、
     自コンタクトへの差し替えが必須か。非スポンサーの `contact:info` は可か（§21.2 #14）。
-13. **同一レジストラ ID からの `transfer/request`** — 自分がスポンサーのドメインに送ったときの result code（§21.2 #15）。
-14. **移管系の result code と `period`** — 実際に返るコード（2202 / 2106 / 2300 / 2301 / 2304 …）。
+14. **同一レジストラ ID からの `transfer/request`** — 自分がスポンサーのドメインに送ったときの result code（§21.2 #15）。
+15. **移管系の result code と `period`** — 実際に返るコード（2202 / 2106 / 2300 / 2301 / 2304 …）。
     `transfer/request` に `period` を渡せるか、完了時に exDate が延びるか（§21.2 #16）。
+16. **transfer query の専用エンドポイントは無い**（確定事項として記録）。`DomainTransferRequest.op` の enum に
+   `query` はあるが、paths には request / approve / reject / cancel しか無い。
+   移管状態の照会は `domain:info` の `pendingTransfer` ステータスで代替する。
 
 ## 4. 検証時の注意
 

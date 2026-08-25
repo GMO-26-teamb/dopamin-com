@@ -1,0 +1,9 @@
+{
+  "result": {
+    "code": 2303,
+    "message": "Object does not exist",
+    "reason": "example.com not found",
+    "extValue": null
+  },
+  "trID": { "clTRID": "AUTHCHECK-fixture", "svTRID": "KQSGN-20260825-000037" }
+}

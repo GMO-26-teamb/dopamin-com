@@ -17,6 +17,7 @@ pnpm dev   # web: http://localhost:3000 / api: http://localhost:8787
 - `pnpm check` — lint / format / typecheck / test（PR 前に必須）
 - `pnpm build` — 全パッケージのビルド
 - `pnpm db:generate` / `pnpm db:migrate` — Drizzle マイグレーション
+- `pnpm --filter @dopamin/api test:connect` — 実レジストリ疎通テスト（**実データに反映される**。実行条件は [`docs/testing.md`](docs/testing.md) を必読）
 
 ## デプロイ（Vercel）
 
