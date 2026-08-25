@@ -784,6 +784,13 @@ export function createMockServices(
             registryCode: "2202",
           });
         }
+        if (scenario === "conflict") {
+          // S-52: すでに移管申請中（AC-12-2 の「pendingTransfer 中」/ 2300）
+          fail("REGISTRY_REJECTED", "すでに移管申請中です。", {
+            registry: mockRegistryForName(input.name),
+            registryCode: "2300",
+          });
+        }
         const store = getMockStore();
         store.sequence += 1;
         const transfer: Transfer = {
