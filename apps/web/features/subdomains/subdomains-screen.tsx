@@ -1,7 +1,7 @@
 "use client";
 
 import { Zap } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useId, useState } from "react";
 import { PageHeader } from "@/components/app/page-header";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
@@ -464,12 +464,16 @@ function PolicyBar({
   policy: string;
   onChange: (value: string) => void;
 }) {
+  const id = useId();
   return (
     <div className="flex w-full items-center gap-2 border-2 border-line border-solid bg-panel px-3 py-2">
-      <span className="shrink-0 text-label text-ink">全体方針</span>
+      <label className="shrink-0 text-label text-ink" htmlFor={id}>
+        全体方針
+      </label>
       <input
-        aria-label="全体方針"
         className="min-w-0 flex-1 bg-transparent text-body-sm text-ink focus:outline-none"
+        id={id}
+        name="policy"
         onChange={(event) => onChange(event.target.value)}
         value={policy}
       />
