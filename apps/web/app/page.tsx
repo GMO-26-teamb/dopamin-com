@@ -1,4 +1,4 @@
-import { serverApi } from "@/lib/api";
+import { serverApi } from "@/lib/server-api";
 
 // API の状態を毎回取得するため静的化しない
 export const dynamic = "force-dynamic";

@@ -1,0 +1,151 @@
+/*
+ * GENERATED — edit lib/theme/tokens.json
+ * このファイルは手で編集しない。Figma からトークンを書き出して
+ * `pnpm --filter @dopamin/web tokens` を実行し、生成物ごとコミットする。
+ * source: lib/theme/tokens.json / generator: scripts/gen-tokens.ts
+ */
+
+:root {
+  /* data-theme が付いていないときは標準モードで描画する（保険） */
+  --color-bg: #f3f2f2;
+  --color-panel: #ffffff;
+  --color-track: #eceae6;
+  --color-ink: #201e1d;
+  --color-hover: #201e1d12;
+  --color-muted: #77726c;
+  --color-warn: #d6300f;
+  --color-ok: #201e1d;
+  --color-code-bg: #0d0c10;
+  --color-overlay: #201e1d80;
+  --color-on-brand: #ffffff;
+  --color-link: #a21caf;
+  --color-link-hover: #701a75;
+  --color-code-fg: #c8f5e4;
+  --color-line: #201e1d;
+  --color-soft: #dcd9d4;
+  --color-brand-1: #7c3aed;
+  --color-brand-mid: #a83bb4;
+  --color-brand-2: #db2777;
+  --glow-1: #00000000;
+  --glow-2: #00000000;
+}
+
+:root[data-theme="standard"] {
+  --color-bg: #f3f2f2;
+  --color-panel: #ffffff;
+  --color-track: #eceae6;
+  --color-ink: #201e1d;
+  --color-hover: #201e1d12;
+  --color-muted: #77726c;
+  --color-warn: #d6300f;
+  --color-ok: #201e1d;
+  --color-code-bg: #0d0c10;
+  --color-overlay: #201e1d80;
+  --color-on-brand: #ffffff;
+  --color-link: #a21caf;
+  --color-link-hover: #701a75;
+  --color-code-fg: #c8f5e4;
+  --color-line: #201e1d;
+  --color-soft: #dcd9d4;
+  --color-brand-1: #7c3aed;
+  --color-brand-mid: #a83bb4;
+  --color-brand-2: #db2777;
+  --glow-1: #00000000;
+  --glow-2: #00000000;
+}
+
+:root[data-theme="goku"] {
+  --color-bg: #151318;
+  --color-panel: #1d1b24;
+  --color-track: #2c2a33;
+  --color-ink: #eceaf2;
+  --color-hover: #eceaf214;
+  --color-muted: #9b97ab;
+  --color-warn: #ff4d6d;
+  --color-ok: #22d3ee;
+  --color-code-bg: #0d0c10;
+  --color-overlay: #00000099;
+  --color-on-brand: #0d0c10;
+  --color-link: #22d3ee;
+  --color-link-hover: #22d3ee;
+  --color-code-fg: #c8f5e4;
+  --color-line: #3a3746;
+  --color-soft: #2c2a33;
+  --color-brand-1: #ff2fb3;
+  --color-brand-mid: #8b5cf6;
+  --color-brand-2: #22d3ee;
+  --glow-1: #ff2fb359;
+  --glow-2: #22d3ee40;
+}
+
+:root {
+  /* dimensions（px 固定。Figma の値をそのまま） */
+  --space-2: 2px;
+  --space-4: 4px;
+  --space-6: 6px;
+  --space-8: 8px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-20: 20px;
+  --space-24: 24px;
+  --space-32: 32px;
+  --space-40: 40px;
+  --space-48: 48px;
+  --radius-none: 0px;
+  --stroke-thin: 1px;
+  --stroke-medium: 1.5px;
+  --stroke-strong: 2px;
+  --stroke-accent: 3px;
+  --size-control-sm: 28px;
+  --size-control-md: 36px;
+  --size-control-lg: 44px;
+  --size-icon-sm: 14px;
+  --size-icon-md: 16px;
+  --size-icon-lg: 20px;
+  --size-bar-thin: 4px;
+  --size-bar: 6px;
+  --size-sidebar: 190px;
+  --size-page: 1120px;
+  --size-auth-card: 440px;
+  --size-dialog: 420px;
+
+  /* opacity */
+  --opacity-disabled: 0.45;
+  --opacity-muted: 0.75;
+
+  /* fonts（var(--font-*) は app/layout.tsx の next/font が注入する） */
+  --font-jp: var(--font-noto-sans-jp), "Noto Sans JP", sans-serif;
+  --font-latin: var(--font-archivo), "Archivo", sans-serif;
+  --font-goku: var(--font-yuji-boku), "Yuji Boku", serif;
+  --font-mono: var(--font-jetbrains-mono), "JetBrains Mono", monospace;
+
+  /* brand（テーマごとの色を参照するので :root に置いても両テーマで正しく解決する） */
+  --gradient-brand: linear-gradient(
+    90deg,
+    var(--color-brand-1),
+    var(--color-brand-mid),
+    var(--color-brand-2)
+  );
+  --glow-brand: 0 0 12px var(--glow-1), 0 0 22px var(--glow-2);
+}
+
+@keyframes gradient-pan {
+  from {
+    background-position: 0% 50%;
+  }
+  to {
+    background-position: 200% 50%;
+  }
+}
+
+.gradient-animated {
+  background-image: var(--gradient-brand);
+  background-size: 200% 100%;
+}
+
+/* 極ドパモードのときだけ、かつ動きを減らす設定でないときだけ動かす（設計 §3） */
+@media (prefers-reduced-motion: no-preference) {
+  :root[data-theme="goku"] .gradient-animated {
+    animation: gradient-pan 6s linear infinite;
+  }
+}
