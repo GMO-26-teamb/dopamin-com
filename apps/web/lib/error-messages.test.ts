@@ -67,6 +67,7 @@ describe("toErrorCopy", () => {
     expect(copy.title).toBe("Kitaqsign が拒否しました");
     expect(copy.body).toContain("2202");
     expect(copy.body).toContain("AuthCode");
+    expect(copy.body).toContain("ローカルの情報は変更されていません");
   });
 
   it("OPERATION_NOT_ALLOWED は details.statuses を添える", () => {
@@ -90,15 +91,58 @@ describe("toErrorCopy", () => {
     expect(copy.action).toBe("retry");
   });
 
-  it("サーバーの message があれば本文に使う", () => {
+  it("サーバーの message があれば本文の先頭に使う", () => {
     const copy = toErrorCopy(
       new ApiClientError({
         code: "CONFLICT",
         message: "このドメインは取得できません。",
       }),
     );
-    expect(copy.body).toBe("このドメインは取得できません。");
+    expect(copy.body.startsWith("このドメインは取得できません。")).toBe(true);
     expect(copy.action).toBe("none");
+  });
+
+  // ---- 更新系エラーの必須文（FR-18 / ui-screens §4 / D-07） ----
+
+  it.each([
+    "CONFLICT",
+    "OPERATION_NOT_ALLOWED",
+    "REGISTRY_REJECTED",
+    "REGISTRY_TIMEOUT",
+    "REGISTRY_UNAVAILABLE",
+  ] as const)(
+    "%s は message の有無にかかわらず FR-18 の 1 文を含む",
+    (code) => {
+      expect(copyFor(code).body).toContain(
+        "ローカルの情報は変更されていません",
+      );
+      expect(
+        copyFor(code, { message: "レジストリ側で処理できませんでした。" }).body,
+      ).toContain("ローカルの情報は変更されていません");
+    },
+  );
+
+  it("OPERATION_NOT_ALLOWED は Server ステータス優先の理由を本文に出す（D-07）", () => {
+    const copy = copyFor("OPERATION_NOT_ALLOWED", {
+      details: { statuses: ["serverUpdateProhibited"] },
+    });
+    expect(copy.title).toBe("ロック中のため実行できません");
+    expect(copy.body).toContain(
+      "レジストリ側のステータス（Server 系）が優先されるため、ローカルからは変更できません",
+    );
+    expect(copy.body).toContain("ローカルの情報は変更されていません");
+    expect(copy.body).toContain("serverUpdateProhibited");
+  });
+
+  it("REGISTRY_REJECTED は registryCode の理由に FR-18 の 1 文を足す（D-07）", () => {
+    const copy = copyFor("REGISTRY_REJECTED", {
+      registry: "kitaqsign",
+      registryCode: "2304",
+    });
+    expect(copy.title).toBe("Kitaqsign が拒否しました");
+    expect(copy.body).toContain("2304");
+    expect(copy.body).toContain("現在のステータスでは移管できません");
+    expect(copy.body).toContain("ローカルの情報は変更されていません");
   });
 
   it("REGISTRY_TIMEOUT は message があっても FR-18 の 1 文を落とさない", () => {

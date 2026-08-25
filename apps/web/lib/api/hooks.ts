@@ -19,7 +19,7 @@ import {
 import { useMemo } from "react";
 import type { ApiClientError } from "./errors";
 import { type QueryScope, useQueryScope, useServices } from "./provider";
-import type { CandidateService } from "./services";
+import type { CandidateService, DomainUpdateInput } from "./services";
 import type {
   AiLog,
   AiSettings,
@@ -230,9 +230,9 @@ export function useRenewDomain(
 
 export function useUpdateDomain(
   name: string,
-): Mutation<DomainDetail, { nameservers?: string[] }> {
+): Mutation<DomainDetail, DomainUpdateInput> {
   const services = useServices();
-  return useDomainMutation(name, (input: { nameservers?: string[] }) =>
+  return useDomainMutation(name, (input: DomainUpdateInput) =>
     services.domains.update(name, input),
   );
 }

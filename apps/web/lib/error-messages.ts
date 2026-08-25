@@ -7,7 +7,9 @@
  * 本文はサーバー / モックの `message` を先頭の 1 文として使い、テンプレート側の本文は
  * `required` かどうかで扱いを分ける:
  * - `required: true`  … 必ず後ろに続ける（FR-18 の「ローカルの情報は変更されていません」など、
- *                        message に置き換えられては困る文）
+ *                        message に置き換えられては困る文）。更新系で出るコード
+ *                        （`CONFLICT` / `OPERATION_NOT_ALLOWED` / `REGISTRY_REJECTED` /
+ *                        `REGISTRY_TIMEOUT` / `REGISTRY_UNAVAILABLE`）はこちら
  * - `required` なし   … message が無いときだけ使うフォールバック
  * message がタイトルの言い換えでしかないときは捨てる（本文がタイトルの複製にならないように）。
  */
@@ -79,18 +81,24 @@ const COPY: Record<ClientErrorCode, CopyTemplate> = {
     action: "dashboard",
   },
   CONFLICT: {
+    // FR-18: 更新系の失敗なのでローカル未変更の 1 文を必ず出す
     title: "操作を完了できませんでした",
-    body: "すでに取得済みか、いまは操作できない状態です。最新の状態を確認してください。",
+    body: "ローカルの情報は変更されていません。すでに取得済みか、いまは操作できない状態です。最新の状態を確認してください。",
+    required: true,
     action: "none",
   },
   OPERATION_NOT_ALLOWED: {
+    // D-07: FR-18 の 1 文 +「Server ステータス優先」の理由（ui-screens §2.4 D-07）
     title: "ロック中のため実行できません",
-    body: "ドメインのステータスにより、この操作は実行できません。",
+    body: "ローカルの情報は変更されていません。レジストリ側のステータス（Server 系）が優先されるため、ローカルからは変更できません。",
+    required: true,
     action: "none",
   },
   REGISTRY_REJECTED: {
+    // D-07: レジストリが拒否した = ローカルは書き換えていない（FR-18）
     title: "{registry}が拒否しました",
-    body: "入力内容を確認して、もう一度お試しください。",
+    body: "ローカルの情報は変更されていません。入力内容を確認して、もう一度お試しください。",
+    required: true,
     action: "none",
   },
   REGISTRY_TIMEOUT: {
@@ -101,8 +109,9 @@ const COPY: Record<ClientErrorCode, CopyTemplate> = {
     action: "retry",
   },
   REGISTRY_UNAVAILABLE: {
+    // FR-18: 更新系でも参照系でも「ローカルは変更されていない」ことを明示する
     title: "{registry}に接続できません",
-    body: "しばらく時間をおいてから、もう一度お試しください。",
+    body: "ローカルの情報は変更されていません。しばらく時間をおいてから、もう一度お試しください。",
     required: true,
     action: "retry",
   },
@@ -204,17 +213,25 @@ function isTitleEcho(message: string, template: CopyTemplate): boolean {
   );
 }
 
+/**
+ * `required` なテンプレート本文を後ろに続ける（FR-18 の「ローカルの情報は変更されていません」など、
+ * サーバー / レジストリ由来の文で置き換えられては困る文を落とさないため）。
+ */
+function appendRequired(text: string, template: CopyTemplate): string {
+  if (template.required !== true || text.includes(template.body)) {
+    return text;
+  }
+  const separator = /[。．.!！?？]$/u.test(text) ? "" : "。";
+  return `${text}${separator}${template.body}`;
+}
+
 /** message を先頭の 1 文に、`required` なテンプレート本文をその後ろに続ける。 */
 function composeBody(error: ApiClientError, template: CopyTemplate): string {
   const message = error.message.trim();
   if (message === "" || isTitleEcho(message, template)) {
     return template.body;
   }
-  if (template.required !== true || message.includes(template.body)) {
-    return message;
-  }
-  const separator = /[。．.!！?？]$/u.test(message) ? "" : "。";
-  return `${message}${separator}${template.body}`;
+  return appendRequired(message, template);
 }
 
 /** union 外のコードが実行時に来ても落ちないようにする（API が新コードを返した場合など）。 */
@@ -238,7 +255,11 @@ export function toErrorCopy(error: ApiClientError): ErrorCopy {
         error.registryCode === undefined
           ? undefined
           : REGISTRY_REJECT_REASON[error.registryCode];
-      const detail = reason ?? composeBody(error, template);
+      // registryCode 由来の理由でも FR-18 の 1 文は落とさない
+      const detail =
+        reason === undefined
+          ? composeBody(error, template)
+          : appendRequired(reason, template);
       return {
         title,
         body:

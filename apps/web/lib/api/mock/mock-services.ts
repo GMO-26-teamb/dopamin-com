@@ -572,7 +572,12 @@ export function createMockServices(
           nameservers.length === 0
             ? [...new Set([...current.statuses, "inactive"])]
             : current.statuses.filter((s) => s !== "inactive");
-        return patchDomain(store, name, { nameservers, statuses });
+        // コンタクトを差し替えたら「移行済み」になる（S-39 の解消）
+        const registrant =
+          input.contacts === undefined
+            ? current.registrant
+            : { ...input.contacts.registrant, migrated: true };
+        return patchDomain(store, name, { nameservers, statuses, registrant });
       },
 
       /** DELETE /domains/:name */
