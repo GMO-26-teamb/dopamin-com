@@ -3,15 +3,15 @@
 /**
  * アプリ全体のプロバイダ（fe-ui 設計 §4.5）。
  *
- * TanStack Query + `Services` + radix の Tooltip Provider をまとめる。
+ * TanStack Query + `Services` + `TooltipProvider`（components/ui）をまとめる。
  * 参照系は自動再試行 2 回（指数バックオフ）まで。再試行しても意味の無いエラー
  * （`NOT_IMPLEMENTED` / 4xx 相当）は `ApiClientError.retryable` で弾く（ui-screens §4）。
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Tooltip } from "radix-ui";
 import type { ReactNode } from "react";
 import { useState } from "react";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { ApiClientError } from "./errors";
 import { ServicesProvider } from "./provider";
 import type { Services } from "./services";
@@ -51,9 +51,7 @@ export function AppProviders(props: {
       <ServicesProvider
         {...(props.services ? { services: props.services } : {})}
       >
-        <Tooltip.Provider delayDuration={200}>
-          {props.children}
-        </Tooltip.Provider>
+        <TooltipProvider>{props.children}</TooltipProvider>
       </ServicesProvider>
     </QueryClientProvider>
   );

@@ -20,7 +20,7 @@ export const apiClient = hc<AppType>("");
 
 /**
  * 応答を受け取り、エラーなら `ApiClientError`、成功ならスキーマ検証済みの JSON を返す。
- * fetch 自体の失敗は `NETWORK`、スキーマ不一致は `REGISTRY_SPEC_MISMATCH` にする。
+ * fetch 自体の失敗は `NETWORK`、成功応答のスキーマ不一致は `INTERNAL` にする。
  */
 export async function unwrap<T>(
   request: Promise<Response>,
@@ -42,8 +42,10 @@ export async function unwrap<T>(
 
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
+    // 200 が返ったのに形が違うのは自前 API 側の問題。REGISTRY_SPEC_MISMATCH は
+    // 「レジストリの仕様変更」を指す文言なのでレジストリのせいにしない。
     throw new ApiClientError({
-      code: "REGISTRY_SPEC_MISMATCH",
+      code: "INTERNAL",
       message: "API の応答が想定した形式ではありませんでした。",
       details: parsed.error.issues,
     });

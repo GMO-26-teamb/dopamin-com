@@ -3,7 +3,13 @@
  *
  * 文言は表の「文言（例）」列に合わせる。`{registry}` は `error.registry` から
  * 「Kitaqsign」/「Kitaqnic」に差し替える（fe-ui 設計 §4.3）。
- * 本文はサーバーが返した `message` を優先し、無ければ既定文を使う。
+ *
+ * 本文はサーバー / モックの `message` を先頭の 1 文として使い、テンプレート側の本文は
+ * `required` かどうかで扱いを分ける:
+ * - `required: true`  … 必ず後ろに続ける（FR-18 の「ローカルの情報は変更されていません」など、
+ *                        message に置き換えられては困る文）
+ * - `required` なし   … message が無いときだけ使うフォールバック
+ * message がタイトルの言い換えでしかないときは捨てる（本文がタイトルの複製にならないように）。
  */
 
 import type { RegistryId } from "@dopamin/shared";
@@ -41,6 +47,8 @@ const REGISTRY_REJECT_REASON: Record<string, string> = {
 interface CopyTemplate {
   title: string;
   body: string;
+  /** true なら本文を必ず出す（message があってもその後ろに続ける）。 */
+  required?: boolean;
   action: ErrorCopy["action"];
 }
 
@@ -53,6 +61,7 @@ const COPY: Record<ClientErrorCode, CopyTemplate> = {
   UNAUTHORIZED: {
     title: "セッションの有効期限が切れました",
     body: "もう一度ログインしてください。",
+    required: true,
     action: "login",
   },
   FORBIDDEN: {
@@ -81,13 +90,16 @@ const COPY: Record<ClientErrorCode, CopyTemplate> = {
     action: "none",
   },
   REGISTRY_TIMEOUT: {
+    // FR-18: 更新系のタイムアウトでは「ローカルの情報は変更されていません」を必ず出す
     title: "{registry}が応答しませんでした",
     body: "ローカルの情報は変更されていません。結果を確認してから、もう一度お試しください。",
+    required: true,
     action: "retry",
   },
   REGISTRY_UNAVAILABLE: {
     title: "{registry}に接続できません",
     body: "しばらく時間をおいてから、もう一度お試しください。",
+    required: true,
     action: "retry",
   },
   REGISTRY_SPEC_MISMATCH: {
@@ -96,8 +108,10 @@ const COPY: Record<ClientErrorCode, CopyTemplate> = {
     action: "none",
   },
   AI_UNAVAILABLE: {
+    // ui-screens §4:「AI が利用できません。手入力で探せます」— 手入力の導線は必ず残す
     title: "AI が利用できません",
     body: "手入力で探せます。",
+    required: true,
     action: "none",
   },
   RATE_LIMITED: {
@@ -113,11 +127,13 @@ const COPY: Record<ClientErrorCode, CopyTemplate> = {
   NOT_IMPLEMENTED: {
     title: "この機能はまだ利用できません",
     body: "API が未実装です。モックモード（NEXT_PUBLIC_API_MODE=mock）でお試しください。",
+    required: true,
     action: "none",
   },
   NETWORK: {
     title: "通信に失敗しました",
     body: "ネットワーク接続を確認して、もう一度お試しください。",
+    required: true,
     action: "retry",
   },
 };
@@ -140,13 +156,48 @@ function fillRegistry(
   return template.replaceAll("{registry}", `${label}${separator}`);
 }
 
-function bodyFor(error: ApiClientError, fallback: string): string {
+/** 末尾の句読点と空白を落として比較用に正規化する。 */
+function normalize(text: string): string {
+  return text.trim().replace(/[。．.!！?？\s]+$/u, "");
+}
+
+/**
+ * message がタイトルの言い換え（レジストリ名の有無だけが違う場合を含む）かどうか。
+ * 例: title「Kitaqsign が応答しませんでした」に対する
+ *     message「レジストリが応答しませんでした。」/「Kitaqsign が応答しませんでした。」
+ */
+function isTitleEcho(message: string, template: CopyTemplate): boolean {
+  const normalized = normalize(message);
+  const registries: (RegistryId | undefined)[] = [
+    undefined,
+    ...(Object.keys(REGISTRY_LABEL) as RegistryId[]),
+  ];
+  return registries.some(
+    (registry) =>
+      normalize(fillRegistry(template.title, registry)) === normalized,
+  );
+}
+
+/** message を先頭の 1 文に、`required` なテンプレート本文をその後ろに続ける。 */
+function composeBody(error: ApiClientError, template: CopyTemplate): string {
   const message = error.message.trim();
-  return message === "" ? fallback : message;
+  if (message === "" || isTitleEcho(message, template)) {
+    return template.body;
+  }
+  if (template.required !== true || message.includes(template.body)) {
+    return message;
+  }
+  const separator = /[。．.!！?？]$/u.test(message) ? "" : "。";
+  return `${message}${separator}${template.body}`;
+}
+
+/** union 外のコードが実行時に来ても落ちないようにする（API が新コードを返した場合など）。 */
+function templateFor(code: ClientErrorCode): CopyTemplate {
+  return (COPY as Partial<Record<string, CopyTemplate>>)[code] ?? COPY.INTERNAL;
 }
 
 export function toErrorCopy(error: ApiClientError): ErrorCopy {
-  const template = COPY[error.code];
+  const template = templateFor(error.code);
   const title = fillRegistry(template.title, error.registry);
 
   switch (error.code) {
@@ -155,7 +206,7 @@ export function toErrorCopy(error: ApiClientError): ErrorCopy {
         error.registryCode === undefined
           ? undefined
           : REGISTRY_REJECT_REASON[error.registryCode];
-      const detail = reason ?? bodyFor(error, template.body);
+      const detail = reason ?? composeBody(error, template);
       return {
         title,
         body:
@@ -167,7 +218,7 @@ export function toErrorCopy(error: ApiClientError): ErrorCopy {
     }
     case "OPERATION_NOT_ALLOWED": {
       const parsed = statusesSchema.safeParse(error.details);
-      const base = bodyFor(error, template.body);
+      const base = composeBody(error, template);
       return {
         title,
         body: parsed.success
@@ -182,12 +233,12 @@ export function toErrorCopy(error: ApiClientError): ErrorCopy {
         title,
         body: parsed.success
           ? `${parsed.data.retryAfter} 秒後に再試行してください。`
-          : bodyFor(error, template.body),
+          : composeBody(error, template),
         action: template.action,
       };
     }
     case "INTERNAL": {
-      const base = bodyFor(error, template.body);
+      const base = composeBody(error, template);
       return {
         title,
         body:
@@ -200,7 +251,7 @@ export function toErrorCopy(error: ApiClientError): ErrorCopy {
     default:
       return {
         title,
-        body: bodyFor(error, template.body),
+        body: composeBody(error, template),
         action: template.action,
       };
   }

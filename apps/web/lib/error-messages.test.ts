@@ -101,6 +101,75 @@ describe("toErrorCopy", () => {
     expect(copy.action).toBe("none");
   });
 
+  it("REGISTRY_TIMEOUT は message があっても FR-18 の 1 文を落とさない", () => {
+    const copy = toErrorCopy(
+      new ApiClientError({
+        code: "REGISTRY_TIMEOUT",
+        message: "Kitaqnic が応答しませんでした。",
+        registry: "kitaqnic",
+      }),
+    );
+    expect(copy.body).toContain("ローカルの情報は変更されていません");
+    // タイトルの言い換えでしかない message は本文に複製しない
+    expect(copy.body).not.toContain("応答しませんでした");
+  });
+
+  it("REGISTRY_TIMEOUT は固有の message を先頭に置いてから FR-18 の 1 文を足す", () => {
+    const copy = toErrorCopy(
+      new ApiClientError({
+        code: "REGISTRY_TIMEOUT",
+        message: "登録の結果を確認できませんでした。",
+      }),
+    );
+    expect(copy.body.startsWith("登録の結果を確認できませんでした。")).toBe(
+      true,
+    );
+    expect(copy.body).toContain("ローカルの情報は変更されていません");
+  });
+
+  it("AI_UNAVAILABLE は message があっても手入力の導線を残す", () => {
+    const copy = toErrorCopy(
+      new ApiClientError({
+        code: "AI_UNAVAILABLE",
+        message: "AI が利用できません。",
+      }),
+    );
+    expect(copy.body).toContain("手入力");
+  });
+
+  it("REGISTRY_UNAVAILABLE は message があっても再試行の案内を残す", () => {
+    const copy = toErrorCopy(
+      new ApiClientError({
+        code: "REGISTRY_UNAVAILABLE",
+        message: "レジストリに接続できませんでした。",
+        registry: "kitaqsign",
+      }),
+    );
+    expect(copy.body).toContain("しばらく時間をおいて");
+  });
+
+  it("NOT_IMPLEMENTED は message（ルート名）と案内の両方を出す", () => {
+    const copy = toErrorCopy(
+      new ApiClientError({
+        code: "NOT_IMPLEMENTED",
+        message: "GET /domains はまだ実装されていません。",
+      }),
+    );
+    expect(copy.body).toContain("GET /domains");
+    expect(copy.body).toContain("NEXT_PUBLIC_API_MODE=mock");
+  });
+
+  it("union 外のコードでも落ちず INTERNAL の文言に落とす", () => {
+    const copy = toErrorCopy(
+      new ApiClientError({
+        code: "SOMETHING_NEW" as ClientErrorCode,
+        message: "未知のエラーです。",
+      }),
+    );
+    expect(copy.title).toBe("エラーが発生しました");
+    expect(copy.action).toBe("retry");
+  });
+
   it("NOT_IMPLEMENTED / NETWORK の action", () => {
     expect(copyFor("NOT_IMPLEMENTED").action).toBe("none");
     expect(copyFor("NETWORK").action).toBe("retry");

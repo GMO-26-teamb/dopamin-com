@@ -20,6 +20,7 @@ import {
   logout,
   signupWithPasskey,
 } from "../../webauthn";
+import { transferEligibleAt } from "../derive";
 import { notImplemented, toApiClientError } from "../errors";
 import type { Services } from "../services";
 import type { DomainDetail, SearchResult, Transfer } from "../types";
@@ -33,17 +34,6 @@ import {
   transferEnvelopeSchema,
   unwrap,
 } from "./client";
-
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-/**
- * ICANN 60 日ルールの参考表示（docs/requirements.md §9.1 `transferEligibleAt`）。
- * 可否判定には使わない（§11.3 の EPP ステータスだけで判定する）。
- */
-function transferEligibleAt(info: DomainInfoResponse): string {
-  const base = new Date(info.lastTransferAt ?? info.registeredAt);
-  return new Date(base.getTime() + 60 * DAY_MS).toISOString();
-}
 
 /**
  * `DomainInfo` を画面用の `DomainDetail` に写像する。
@@ -81,7 +71,10 @@ function toDomainDetail(info: DomainInfoResponse): DomainDetail {
     nameservers: info.nameservers,
     registrant: { name: info.registrant, email: "", migrated: true },
     gracePeriods: [],
-    transferableFrom: transferEligibleAt(info),
+    transferableFrom: transferEligibleAt(
+      info.registeredAt,
+      info.lastTransferAt,
+    ),
     subdomainPlan: null,
   };
 }

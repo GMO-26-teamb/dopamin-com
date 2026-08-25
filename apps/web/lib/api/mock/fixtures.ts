@@ -14,6 +14,7 @@ import {
   splitDomainName,
   uniquenessLabel,
 } from "@dopamin/shared";
+import { transferEligibleAt } from "../derive";
 import type {
   AiLog,
   Candidate,
@@ -43,15 +44,6 @@ export function at(offsetMs: number): string {
 export const minutes = (n: number): number => n * MINUTE;
 export const hours = (n: number): number => n * HOUR;
 export const days = (n: number): number => n * DAY;
-
-/** ICANN 60 日ルールの参考表示（docs/requirements.md §9.1 transferEligibleAt）。可否判定には使わない。 */
-function transferEligibleAt(
-  registeredAt: string,
-  lastTransferAt: string | null,
-): string {
-  const base = new Date(lastTransferAt ?? registeredAt);
-  return new Date(base.getTime() + days(60)).toISOString();
-}
 
 const OTHER_NAMESERVERS = ["ns1.example-dns.com", "ns2.example-dns.com"];
 
