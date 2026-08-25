@@ -5,6 +5,7 @@ import {
   Noto_Sans_JP,
   Yuji_Boku,
 } from "next/font/google";
+import { AppProviders } from "@/lib/api/query-client";
 import { ThemeProvider } from "@/lib/theme/theme-provider";
 import "./globals.css";
 
@@ -66,7 +67,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="flex min-h-full flex-col">
         {/* biome-ignore lint/security/noDangerouslySetInnerHtml: ハイドレーション前に走らせる必要のある静的スクリプト（外部入力なし） */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          <AppProviders>{children}</AppProviders>
+        </ThemeProvider>
       </body>
     </html>
   );
