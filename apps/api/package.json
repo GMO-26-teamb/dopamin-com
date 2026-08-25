@@ -13,8 +13,14 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@dopamin/db": "workspace:*",
     "@dopamin/shared": "workspace:*",
-    "hono": "^4.13.4"
+    "@hono/zod-validator": "^0.9.0",
+    "@simplewebauthn/server": "^13.3.2",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.13.4",
+    "postgres": "^3.4.9",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@dopamin/tsconfig": "workspace:*",
