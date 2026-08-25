@@ -89,3 +89,27 @@ describe("requireSession (AC-01-3)", () => {
     },
   );
 });
+
+describe("requestId (§10.2 / §10.3)", () => {
+  it("issues an x-request-id and echoes it in the error body", async () => {
+    const res = await app.request("/api/v1/auth/me");
+    const id = res.headers.get("x-request-id");
+    expect(id).toMatch(/^req_[0-9a-f-]{36}$/);
+    const body = (await res.json()) as { error: { requestId?: string } };
+    expect(body.error.requestId).toBe(id);
+  });
+
+  it("keeps a well-formed incoming x-request-id", async () => {
+    const res = await app.request("/api/v1/health", {
+      headers: { "x-request-id": "trace-abc_123" },
+    });
+    expect(res.headers.get("x-request-id")).toBe("trace-abc_123");
+  });
+
+  it("replaces a malformed incoming x-request-id", async () => {
+    const res = await app.request("/api/v1/health", {
+      headers: { "x-request-id": "bad id with spaces & symbols!" },
+    });
+    expect(res.headers.get("x-request-id")).toMatch(/^req_/);
+  });
+});
