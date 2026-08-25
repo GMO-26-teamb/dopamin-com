@@ -58,7 +58,7 @@ export function OperationLogRow({ log }: OperationLogRowProps) {
           エラーコード: {log.errorCode}
         </p>
       )}
-      <div className="flex w-full items-start gap-3">
+      <div className="flex w-full flex-col items-start gap-3 md:flex-row">
         <LogDetailColumn code={formatJson(log.request)} label="request" />
         <LogDetailColumn code={formatJson(log.response)} label="response" />
       </div>

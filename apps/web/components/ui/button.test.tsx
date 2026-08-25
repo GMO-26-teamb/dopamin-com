@@ -10,7 +10,7 @@ describe("Button", () => {
     const button = screen.getByRole("button", { name: "登録する" });
     expect(button).toHaveAttribute("type", "button");
     expect(button).toHaveClass(
-      "bg-[image:var(--gradient-brand)]",
+      "brand-gradient",
       "text-on-brand",
       "shadow-[var(--glow-brand)]",
     );
@@ -55,11 +55,7 @@ describe("Button", () => {
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     const link = screen.getByRole("link", { name: "ラベル" });
     expect(link).toHaveAttribute("href", "#x");
-    expect(link).toHaveClass(
-      "bg-[image:var(--gradient-brand)]",
-      "text-on-brand",
-      "h-control-md",
-    );
+    expect(link).toHaveClass("brand-gradient", "text-on-brand", "h-control-md");
 
     await user.click(link);
     expect(onClick).toHaveBeenCalledTimes(1);

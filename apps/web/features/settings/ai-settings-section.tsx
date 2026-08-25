@@ -79,7 +79,7 @@ export function AiSettingsSection({
 
   return (
     <Card className={className} kicker="AI 設定">
-      <div className="flex w-full items-start gap-2">
+      <div className="flex w-full flex-col items-start gap-2 sm:flex-row">
         <Select
           disabled={update.isPending}
           label="プロバイダ"

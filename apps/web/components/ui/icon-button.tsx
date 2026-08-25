@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
  * アイコンのみの正方形ボタン。Style（Solid / Outline / Subtle）× Size（Medium 36 / Small 28）。
  */
 export const iconButtonVariants = cva(
-  "inline-flex shrink-0 items-center justify-center transition-[color,background-color,opacity] disabled:pointer-events-none disabled:opacity-[var(--opacity-disabled)]",
+  "inline-flex shrink-0 items-center justify-center transition-[color,background-color,opacity,transform] duration-150 ease-out active:scale-[0.94] disabled:pointer-events-none disabled:opacity-[var(--opacity-disabled)] motion-reduce:transition-none motion-reduce:active:scale-100",
   {
     variants: {
       variant: {

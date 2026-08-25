@@ -42,7 +42,7 @@ export function ApproveTransferDialog({
       open={open}
       primaryLabel={busy ? "承認中…" : "承認する"}
       primaryVariant="solid"
-      subtitle="移管 OUT（FR-12）"
+      subtitle="移管 OUT — 他社へ渡す"
       title={`${transfer.domainName} の移管を承認しますか？`}
     />
   );

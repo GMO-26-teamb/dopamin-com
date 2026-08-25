@@ -1,6 +1,8 @@
 "use client";
 
-import { Fragment, type ReactNode, useRef } from "react";
+import { motion } from "motion/react";
+import { Fragment, type ReactNode, useId, useRef } from "react";
+import { useReducedMotion } from "@/lib/theme/use-reduced-motion";
 import { cn } from "@/lib/utils";
 
 export interface SegmentedControlOption<T extends string> {
@@ -28,6 +30,7 @@ const SEGMENT_SIZE = {
  * 2 択のトグル（Figma: Segmented Control 47:41）。
  * ラジオではなくトグルボタン群として実装し、`aria-pressed` で選択状態を伝える。
  * ← → で選択とフォーカスを移す。
+ * 選択面（ink）は `layoutId` を共有する 1 枚なので、切り替えると左右へ滑る。
  */
 export function SegmentedControl<T extends string>({
   options,
@@ -38,6 +41,8 @@ export function SegmentedControl<T extends string>({
   className,
 }: SegmentedControlProps<T>) {
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const reduced = useReducedMotion();
+  const thumbId = useId();
 
   const move = (index: number, delta: number) => {
     const nextIndex = (index + delta + options.length) % options.length;
@@ -73,9 +78,9 @@ export function SegmentedControl<T extends string>({
             <button
               aria-pressed={selected}
               className={cn(
-                "inline-flex items-center justify-center gap-0.5 transition-colors",
+                "relative inline-flex items-center justify-center gap-0.5 transition-colors",
                 SEGMENT_SIZE[size],
-                selected ? "bg-ink text-bg" : "text-ink hover:bg-hover",
+                selected ? "text-bg" : "text-ink hover:bg-hover",
               )}
               onClick={() => onChange(option.value)}
               onKeyDown={(event) => {
@@ -92,7 +97,21 @@ export function SegmentedControl<T extends string>({
               }}
               type="button"
             >
-              {option.label}
+              {selected ? (
+                <motion.span
+                  aria-hidden="true"
+                  className="absolute inset-0 bg-ink"
+                  layoutId={thumbId}
+                  transition={
+                    reduced
+                      ? { duration: 0 }
+                      : { type: "spring", stiffness: 500, damping: 40 }
+                  }
+                />
+              ) : null}
+              <span className="relative inline-flex items-center gap-0.5">
+                {option.label}
+              </span>
             </button>
           </Fragment>
         );

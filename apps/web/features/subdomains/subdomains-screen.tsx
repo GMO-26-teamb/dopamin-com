@@ -342,8 +342,8 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
           onChange={(policy) => updateDraft({ ...draft, policy })}
           policy={draft.policy}
         />
-        <div className="flex w-full items-start gap-4">
-          <div className="min-w-0 flex-1">
+        <div className="flex w-full flex-col items-start gap-4 lg:flex-row">
+          <div className="w-full min-w-0 flex-1">
             <PlanTree
               domain={domain}
               hosts={draft.hosts}
@@ -352,7 +352,7 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
               selectedId={selected?.id ?? null}
             />
           </div>
-          <div className="flex w-96 shrink-0 flex-col gap-3 border-2 border-line border-solid bg-panel px-4 py-3">
+          <div className="flex w-full shrink-0 flex-col gap-3 border-2 border-line border-solid bg-panel px-4 py-3 lg:w-96">
             {selected === null ? (
               <p className="w-full text-body-sm text-muted">
                 ホストを追加すると編集できます。

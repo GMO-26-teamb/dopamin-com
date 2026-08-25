@@ -13,16 +13,16 @@ export function DetailSkeleton() {
         <div aria-hidden="true" className="min-w-0 flex-1" />
         <Skeleton className="h-control-sm w-24" />
       </div>
-      <div className="flex w-full items-start gap-3.5">
+      <div className="flex w-full flex-col items-start gap-4 lg:flex-row">
         <div className="flex min-w-0 flex-1 flex-col gap-3">
           <Skeleton shape="card" />
           <Skeleton className="h-24" shape="card" />
-          <div className="flex w-full items-start gap-3">
+          <div className="flex w-full flex-col items-start gap-3 md:flex-row">
             <Skeleton className="h-20" shape="card" />
             <Skeleton className="h-20" shape="card" />
           </div>
         </div>
-        <Skeleton className="h-72 w-80 shrink-0" shape="card" />
+        <Skeleton className="h-72 w-full shrink-0 lg:w-80" shape="card" />
       </div>
       <span className="sr-only">読み込み中…</span>
     </div>

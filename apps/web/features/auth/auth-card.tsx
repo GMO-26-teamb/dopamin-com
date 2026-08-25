@@ -28,7 +28,7 @@ export function AuthCard({
 }: AuthCardProps) {
   return (
     <main className="flex flex-1 items-center justify-center bg-bg px-6 py-12">
-      <div className="flex w-full max-w-auth-card flex-col gap-4">
+      <div className="flex w-full max-w-auth-card flex-col gap-5">
         <Logo />
         {title === undefined ? null : (
           <h1 className="text-heading-page text-ink">{title}</h1>

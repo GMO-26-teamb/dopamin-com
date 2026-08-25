@@ -26,13 +26,12 @@ const TONE = {
   brand: {
     outline:
       "border-transparent [border-image:var(--gradient-brand)_1] text-brand-1",
-    solid: "bg-[image:var(--gradient-brand)] text-on-brand",
+    solid: "brand-gradient text-on-brand",
   },
 } as const;
 
 /** Brand の Outline は文字もグラデーションで塗る（アイコンは brand-1 のまま） */
-const BRAND_OUTLINE_LABEL =
-  "bg-[image:var(--gradient-brand)] bg-clip-text text-transparent";
+const BRAND_OUTLINE_LABEL = "brand-text";
 
 export interface BadgeProps {
   tone?: "neutral" | "ok" | "warn" | "muted" | "brand";

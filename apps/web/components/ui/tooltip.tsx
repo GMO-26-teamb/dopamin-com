@@ -36,7 +36,8 @@ export function Tooltip({
       <TooltipPrimitive.Portal>
         <TooltipPrimitive.Content
           className={cn(
-            "z-50 max-w-64 bg-ink px-2 py-1 text-bg text-caption",
+            "z-50 max-w-72 bg-ink px-2.5 py-1.5 text-bg text-caption leading-snug",
+            "tooltip-enter",
             className,
           )}
           side={side}

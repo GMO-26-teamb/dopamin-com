@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
  * 閾値は requirements §11 の `UNIQUENESS_THETA_LOW` / `_HIGH`、ui-screens §2.3）。
  */
 const TIER_CLASS = {
-  SSR: "bg-[image:var(--gradient-brand)] bg-clip-text text-transparent",
+  SSR: "brand-text",
   R: "text-link",
   N: "text-muted",
 } as const;

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   fontSlug,
   generateTokensCss,
+  rem,
   type TextStyle,
   type TokensFile,
   uniqueColors,
@@ -24,15 +25,13 @@ const FONT_VAR: Record<TextStyle["font"], string> = {
 };
 
 function utilityBlock(style: TextStyle): string {
-  const letterSpacing =
-    style.letterSpacing === 0 ? "0" : `${style.letterSpacing}px`;
   return [
     `@utility ${style.utility} {`,
     `  font-family: var(${FONT_VAR[style.font]});`,
     `  font-weight: ${style.weight};`,
-    `  font-size: ${style.size}px;`,
-    `  line-height: ${style.lineHeight}px;`,
-    `  letter-spacing: ${letterSpacing};`,
+    `  font-size: ${rem(style.size)};`,
+    `  line-height: ${rem(style.lineHeight)};`,
+    `  letter-spacing: ${rem(style.letterSpacing)};`,
     "}",
   ].join("\n");
 }
@@ -58,6 +57,22 @@ describe("gen-tokens", () => {
     for (const family of Object.values(tokens.fonts)) {
       expect(tokensCss).toContain(`var(--font-${fontSlug(family)})`);
     }
+  });
+
+  it("寸法は rem、線幅は px で書き出す", () => {
+    expect(rem(16)).toBe("1rem");
+    expect(rem(0)).toBe("0");
+    expect(rem(1.5)).toBe("0.0938rem");
+    expect(tokensCss).toContain("--size-control-md: 2.375rem;");
+    expect(tokensCss).toContain("--stroke-medium: 1.5px;");
+  });
+
+  it("極ドパモードだけグラデーションが流れる", () => {
+    expect(tokensCss).toMatch(
+      /:root\[data-theme="goku"\] \{[^}]*--gradient-motion: gradient-pan/,
+    );
+    expect(tokensCss).toContain("--gradient-motion: none;");
+    expect(tokensCss).toContain("@media (prefers-reduced-motion: reduce)");
   });
 
   it("矛盾した色トークンがあれば投げる", () => {

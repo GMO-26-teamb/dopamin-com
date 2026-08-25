@@ -6,6 +6,7 @@ import { ProgressBar } from "@/components/ui/progress-bar";
 import { Tooltip } from "@/components/ui/tooltip";
 import type { DomainDetail } from "@/lib/api/types";
 import { formatDate, remainingDays, remainingPercent } from "../format";
+import { REGISTRY_HELP, REGISTRY_LABEL } from "../registry-label";
 import { EXPIRY_WARN_DAYS, GRACE_PERIOD_LABEL } from "./derive";
 import { eppStatusCopy } from "./epp-status";
 
@@ -15,12 +16,6 @@ import { eppStatusCopy } from "./epp-status";
  * レジストリ / EPP ステータス一覧 / 登録日 / 有効期限（残日数 + 進捗）/ Grace Period /
  * 移管可能日（ツールチップで参考表示である旨）。
  */
-const REGISTRY_LABEL: Record<DomainDetail["registry"], string> = {
-  kitaqsign: "kitaqsign",
-  kitaqnic: "kitaqnic",
-  mock: "モックレジストリ",
-};
-
 export interface InfoCardProps {
   domain: DomainDetail;
   now: number;
@@ -35,8 +30,13 @@ export function InfoCard({ domain, now }: InfoCardProps) {
 
   return (
     <Card kicker="基本情報">
-      <KeyValueRow label="レジストリ" value={REGISTRY_LABEL[domain.registry]} />
       <KeyValueRow
+        help={REGISTRY_HELP}
+        label="レジストリ"
+        value={REGISTRY_LABEL[domain.registry]}
+      />
+      <KeyValueRow
+        help="レジストリが付けている状態フラグです。バッジにマウスを乗せると英語名と意味が出ます。"
         label="EPP ステータス"
         value={
           <span className="flex flex-wrap items-center justify-end gap-1">
@@ -68,6 +68,7 @@ export function InfoCard({ domain, now }: InfoCardProps) {
         />
       ))}
       <KeyValueRow
+        help="登録・移管から 60 日間は他社へ移管できないという業界ルール（ICANN）の目安です。"
         label="移管可能日"
         value={
           <Tooltip content="ICANN 実運用の参考。可否判定には使いません">

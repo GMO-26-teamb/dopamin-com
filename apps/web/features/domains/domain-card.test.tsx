@@ -101,7 +101,7 @@ describe("DomainCard の 8 ステータス（ui-screens §2.2）", () => {
       "href",
       "/domains/takutaku.com",
     );
-    expect(screen.getByText("kitaqsign")).toBeInTheDocument();
+    expect(screen.getByText("Kitaqsign")).toBeInTheDocument();
   });
 
   it("Expiring: 残日数バッジ（Warn）+ 今すぐ更新", () => {
@@ -208,7 +208,7 @@ describe("DomainCard の操作", () => {
   it("Stale のカードは Stale バッジ + 最終同期を出し、更新系を Disabled にする（S-13）", () => {
     renderCard({ stale: true, syncedAt: minutesAgo(42) });
 
-    expect(screen.getByText("Stale")).toBeInTheDocument();
+    expect(screen.getByText("未同期")).toBeInTheDocument();
     expect(screen.getByText("最終同期 42分前")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "更新" })).toBeDisabled();
     // 参照系（詳細）は塞がない

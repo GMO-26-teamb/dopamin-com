@@ -47,7 +47,7 @@ describe("Badge", () => {
     render(<Badge tone="brand">おすすめ</Badge>);
 
     const label = screen.getByText("おすすめ");
-    expect(label).toHaveClass("bg-clip-text", "text-transparent");
+    expect(label).toHaveClass("brand-text");
     expect(label.parentElement).toHaveClass(
       "[border-image:var(--gradient-brand)_1]",
     );

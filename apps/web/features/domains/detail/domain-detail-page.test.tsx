@@ -80,7 +80,7 @@ describe("DomainDetailPage", () => {
       await screen.findByRole("heading", { name: "takutaku.com" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Active")).toBeInTheDocument();
-    expect(screen.getByText("kitaqsign")).toBeInTheDocument();
+    expect(screen.getByText("Kitaqsign")).toBeInTheDocument();
     expect(screen.getByText("基本情報")).toBeInTheDocument();
 
     const panel = actionsPanel();

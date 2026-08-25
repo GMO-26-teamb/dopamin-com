@@ -89,7 +89,7 @@ export function EditPanel({ host, onChange, onRemove }: EditPanelProps) {
                 className={cn(
                   "inline-flex shrink-0 items-center px-2 py-0.5 text-label-xs transition-colors",
                   selected
-                    ? "bg-[image:var(--gradient-brand)] text-on-brand"
+                    ? "brand-gradient text-on-brand"
                     : "border-[length:var(--stroke-medium)] border-muted border-solid text-muted hover:bg-hover",
                 )}
                 key={priority}

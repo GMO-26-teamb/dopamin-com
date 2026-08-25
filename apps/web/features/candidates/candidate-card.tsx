@@ -6,6 +6,7 @@ import { useId, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { HelpTip } from "@/components/ui/help-tip";
 import { ScoreGauge } from "@/components/ui/score-gauge";
 import { SimilarityRow } from "@/components/ui/similarity-row";
 import type { Candidate } from "@/lib/api/types";
@@ -74,7 +75,13 @@ export function CandidateCard({
     >
       <div className="flex w-full items-start justify-between gap-2">
         <DomainLabel muted={availability === "unavailable"} name={name} />
-        <RarityMark availability={availability} uniqueness={uniqueness} />
+        <span className="inline-flex items-center gap-1">
+          <RarityMark availability={availability} uniqueness={uniqueness} />
+          <HelpTip
+            content="独自性スコア（0〜100）: 既存のドメインとどれだけ紛らわしくないかの目安です。70 以上が SSR、40 未満は似た名前があるので注意。ゲージを押すと似ている候補が見られます。"
+            label="独自性スコアとは"
+          />
+        </span>
       </div>
 
       {uniqueness === null ? null : (

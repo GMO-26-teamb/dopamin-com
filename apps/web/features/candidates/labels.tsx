@@ -42,14 +42,7 @@ export function DomainLabel({
       )}
     >
       {sld}
-      <span
-        className={cn(
-          !muted &&
-            "bg-[image:var(--gradient-brand)] bg-clip-text text-transparent",
-        )}
-      >
-        .{tld}
-      </span>
+      <span className={cn(!muted && "brand-text")}>.{tld}</span>
     </span>
   );
 }

@@ -8,7 +8,7 @@ import { Card } from "@/components/ui/card";
  * テーマは `ThemeProvider` が localStorage に保存するだけで API を持たない（FR-01 の範囲外）。
  */
 const THEME_NOTE =
-  "極ドパモード: ダーク地 + RGBアクセント。prefers-reduced-motion時はグラデーションの動きを停止（NFR-08）";
+  "極ドパモードは見た目だけが変わります（ダーク地 + 流れる RGB アクセント）。OS で「視差効果を減らす」をオンにしていると、動きは止まります。";
 
 export function ThemeSection() {
   return (

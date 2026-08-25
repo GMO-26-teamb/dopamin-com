@@ -9,9 +9,11 @@ import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorCard } from "@/components/ui/error-card";
+import { HelpTip } from "@/components/ui/help-tip";
 import { DomainGridSkeleton } from "@/features/domains/domain-card-skeleton";
 import { DomainGrid, visibleDomains } from "@/features/domains/domain-grid";
 import { formatRelativeTime } from "@/features/domains/format";
+import { REGISTRY_LABEL } from "@/features/domains/registry-label";
 import type { ApiClientError } from "@/lib/api/errors";
 import { useDomains, useSyncDomains } from "@/lib/api/hooks";
 import { useQueryScope } from "@/lib/api/provider";
@@ -23,12 +25,6 @@ import type { DomainSummary } from "@/lib/api/types";
  * `GET /domains`（DB キャッシュ）を先に描画し、`POST /domains/sync` は背後で 1 回だけ走らせる
  * （ui-screens S-12）。同期に失敗したら Banner Warn を出し、キャッシュ表示を続ける。
  */
-
-const REGISTRY_LABEL: Record<RegistryId, string> = {
-  kitaqsign: "Kitaqsign",
-  kitaqnic: "Kitaqnic",
-  mock: "モックレジストリ",
-};
 
 /** S-13: 落ちているレジストリ名から見出しを作る。特定できなければ総称にする。 */
 function syncErrorTitle(
@@ -141,11 +137,27 @@ export default function DashboardPage() {
     lastSyncedAt === null
       ? ""
       : ` · 最終同期 ${formatRelativeTime(lastSyncedAt, now)}`;
-  const meta = domains.isPending
+  const metaText = domains.isPending
     ? "読み込み中…"
     : domains.isError
       ? undefined
       : `${list.length}件${syncedMeta}${hasStale ? "（キャッシュ）" : ""}`;
+  const meta =
+    metaText === undefined ? undefined : (
+      <span className="inline-flex items-center gap-1">
+        {metaText}
+        {domains.isSuccess ? (
+          <HelpTip
+            content={
+              hasStale
+                ? "レジストリに繋がらなかったので、前回取り込んだ内容を表示しています。「最新化」で取り直せます。"
+                : "レジストリから最後に取り込んだ時刻です。開くたびに自動で最新化され、「最新化」でいつでも取り直せます。"
+            }
+            label="最終同期とは"
+          />
+        ) : null}
+      </span>
+    );
 
   let content: ReactNode;
   if (domains.isPending) {

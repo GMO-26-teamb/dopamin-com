@@ -1,5 +1,6 @@
 import type { ComponentProps, ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { HelpTip } from "./help-tip";
 
 /**
  * Figma: Card `50:31` / Key Value Row `50:36` / Divider `50:41`
@@ -61,6 +62,8 @@ export interface KeyValueRowProps {
   value: ReactNode;
   /** ドメイン名・AuthCode などを等幅で見せる */
   mono?: boolean;
+  /** ラベル横の「？」で出す補足（専門用語の説明など） */
+  help?: string;
   className?: string;
 }
 
@@ -68,6 +71,7 @@ export function KeyValueRow({
   label,
   value,
   mono = false,
+  help,
   className,
 }: KeyValueRowProps) {
   return (
@@ -77,7 +81,12 @@ export function KeyValueRow({
         className,
       )}
     >
-      <span className="shrink-0 text-muted">{label}</span>
+      <span className="inline-flex shrink-0 items-center gap-1 text-muted">
+        {label}
+        {help === undefined ? null : (
+          <HelpTip content={help} label={`${label}とは`} />
+        )}
+      </span>
       <span
         className={cn("min-w-0 text-right text-ink", mono && "text-code-input")}
       >

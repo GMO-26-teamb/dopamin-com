@@ -23,7 +23,7 @@ export default function LandingPage() {
         }
       />
       <main className="flex flex-1 justify-center">
-        <div className="grid w-full max-w-page grid-cols-2">
+        <div className="grid w-full max-w-page grid-cols-1 lg:grid-cols-2">
           <LandingHero />
           <TrialScore />
         </div>
