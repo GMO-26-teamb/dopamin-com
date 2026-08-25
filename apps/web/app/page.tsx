@@ -22,12 +22,12 @@ export default function LandingPage() {
           </Button>
         }
       />
-      <div className="flex flex-1 justify-center">
+      <main className="flex flex-1 justify-center">
         <div className="grid w-full max-w-page grid-cols-2">
           <LandingHero />
           <TrialScore />
         </div>
-      </div>
+      </main>
       <BrandBar variant="rule" />
     </div>
   );

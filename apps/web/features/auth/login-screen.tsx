@@ -14,7 +14,12 @@ import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { AuthCard } from "./auth-card";
-import { nextPathOrDefault, safeNextPath, withNext } from "./next-path";
+import {
+  nextPathLabel,
+  nextPathOrDefault,
+  safeNextPath,
+  withNext,
+} from "./next-path";
 import { SignedInRedirect } from "./signed-in-redirect";
 import { UNSUPPORTED_BODY, UNSUPPORTED_TITLE } from "./unsupported-copy";
 import { usePasskeyAuth } from "./use-passkey";
@@ -110,13 +115,15 @@ function LoginBanner({
     );
   }
   if (expired) {
-    // S-03: API 401 からの復帰
+    // S-03: API 401 からの復帰。`next` の生値は出さず、パスだけを見せる
+    // （クエリに載った値がそのまま画面に反射するのを避ける）。
+    const label = nextPathLabel(next);
     return (
       <Banner
         body={
-          next === null
+          label === null
             ? "安全のため、もう一度ログインしてください。"
-            : `安全のため、もう一度ログインしてください。ログイン後は元のページ（${next}）に戻ります。`
+            : `安全のため、もう一度ログインしてください。ログイン後は元のページ（${label}）に戻ります。`
         }
         title="セッションの有効期限が切れました"
         tone="info"
