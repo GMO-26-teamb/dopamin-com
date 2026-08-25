@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@dopamin/shared": "workspace:*",
+    "@simplewebauthn/browser": "^13.3.0",
     "hono": "^4.13.4",
     "next": "16.3.2",
     "react": "19.2.8",
