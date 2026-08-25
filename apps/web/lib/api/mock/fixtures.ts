@@ -1,8 +1,15 @@
 /**
  * モックの固定データ（fe-ui 設計 §4.4）。
  *
- * 日付はすべて固定基準 {@link MOCK_NOW} からの相対で生成するため、いつ実行しても
- * 「残 23 日」「復旧猶予 残 18 日」などの表示が変わらない。
+ * 日付はすべて基準時刻 {@link MOCK_NOW} からの相対で生成するので、
+ * 「残 23 日」「復旧猶予 残 18 日」といった相対表示はいつ実行しても変わらない。
+ *
+ * 基準時刻の決め方（P9 統合 QA のルール）:
+ * - テスト（`NODE_ENV === "test"`）… 固定値。テスト側は
+ *   `vi.setSystemTime(new Date(MOCK_NOW))` で時計を合わせれば結果が決まる。
+ * - dev / デモ … 読み込み時の実時刻（分単位に丸め）。固定値のままだと移管の
+ *   カウントダウンがブラウザでは常に期限切れになり、「最終同期 たった今」も実時刻とずれる。
+ *
  * `displayStatus` は `packages/shared` の `deriveDisplayStatus` から導出する（UI では再解釈しない）。
  * コンタクト情報はレジストリが許可するダミー値のみ（docs/registry/spec-notes.md）。
  */
@@ -29,8 +36,17 @@ import type {
   UniquenessScore,
 } from "../types";
 
-/** 固定基準時刻（2026-08-26T10:00:00+09:00）。 */
-export const MOCK_NOW = new Date("2026-08-26T10:00:00+09:00");
+/** テストで使う固定基準時刻（2026-08-26T10:00:00+09:00）。 */
+const FIXED_MOCK_NOW = new Date("2026-08-26T10:00:00+09:00");
+
+/**
+ * モックの基準時刻。テストだけ固定値、それ以外は読み込み時の実時刻（分単位に丸め）。
+ * ファイル冒頭のコメントも参照。
+ */
+export const MOCK_NOW: Date =
+  process.env.NODE_ENV === "test"
+    ? FIXED_MOCK_NOW
+    : new Date(Math.floor(Date.now() / 60_000) * 60_000);
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
