@@ -37,7 +37,7 @@ URL の `?mock=<scenario>` で状態を切り替える（`apps/web/lib/api/mock/
 - `unsupported` — WebAuthn 非対応ブラウザ（S-01c / S-02c）
 
 - デザイントークン: `pnpm --filter @dopamin/web tokens` で `lib/theme/tokens.json` から `app/tokens.css` を再生成する（手で `tokens.css` を編集しない）。
-- 設計ドキュメント: [`docs/superpowers/specs/2026-08-26-fe-ui-design.md`](docs/superpowers/specs/2026-08-26-fe-ui-design.md)（データ層・コンポーネント）、[`docs/specs/ui-screens.md`](docs/specs/ui-screens.md)（画面 ID と文言）、[`docs/ui-design/`](docs/ui-design/)（Figma の書き出し）。
+- 設計ドキュメント: [`docs/superpowers/specs/2026-08-26-fe-ui-design.md`](docs/superpowers/specs/2026-08-26-fe-ui-design.md)（データ層・コンポーネント）、[`docs/specs/ui-screens.md`](docs/specs/ui-screens.md)（画面 ID と文言）、[`docs/specs/web-ui.md`](docs/specs/web-ui.md)（Figma 参照情報・デザイントークン対応表）、[`docs/ui-design/`](docs/ui-design/)（Figma の書き出し）。
 
 ## デプロイ（Vercel）
 

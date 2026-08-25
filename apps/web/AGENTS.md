@@ -1,3 +1,10 @@
+# dopamin-com/apps/web
+
+UI 実装は先に以下を読む:
+
+- [`docs/specs/web-ui.md`](../../docs/specs/web-ui.md) — Figma リンク・画面 ID ↔ ルート ↔ ノード ID、デザイントークン対応表、テーマ・モックモードの扱い、画面実装の手順
+- [`docs/specs/ui-screens.md`](../../docs/specs/ui-screens.md) — 画面ごとの状態・遷移・文言の SSOT
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know
