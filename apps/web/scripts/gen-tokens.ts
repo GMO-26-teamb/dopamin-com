@@ -94,6 +94,12 @@ function block(selector: string, lines: string[]): string {
 export function generateTokensCss(tokens: TokensFile): string {
   const colors = uniqueColors(tokens.color);
 
+  // data-theme 属性が無い / 消えたときの保険。属性セレクタの方が詳細度が高いので純粋に追加。
+  const fallbackBlock = block(":root", [
+    "/* data-theme が付いていないときは標準モードで描画する（保険） */",
+    ...colors.map((token) => `${token.css}: ${token.standard};`),
+  ]);
+
   const themeBlocks = (["standard", "goku"] satisfies ThemeName[]).map(
     (theme) =>
       block(
@@ -164,7 +170,7 @@ export function generateTokensCss(tokens: TokensFile): string {
     "}",
   ].join("\n");
 
-  return `${[HEADER, ...themeBlocks, block(":root", rootLines), motion].join("\n\n")}\n`;
+  return `${[HEADER, fallbackBlock, ...themeBlocks, block(":root", rootLines), motion].join("\n\n")}\n`;
 }
 
 function main(): void {

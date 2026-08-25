@@ -20,9 +20,12 @@ describe("cn", () => {
 
   it("後ろの text-* スタイルは前の font-size / weight / leading を打ち消す", () => {
     expect(cn("text-sm font-bold leading-6", "text-body")).toBe("text-body");
+    expect(cn("font-mono tracking-wide", "text-body")).toBe("text-body");
   });
 
-  it("text-* スタイルの後ろに置いた個別指定は生き残る", () => {
+  // 注: 両方残るのは tailwind-merge の判断。どちらが効くかは Tailwind の出力順
+  // （@utility は core より後）で決まるので、text-* と個別指定の併用は避ける。
+  it("text-* スタイルの後ろに置いた個別指定は削除されない", () => {
     expect(cn("text-body", "font-bold")).toBe("text-body font-bold");
   });
 

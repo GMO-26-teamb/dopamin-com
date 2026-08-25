@@ -5,6 +5,31 @@
  * source: lib/theme/tokens.json / generator: scripts/gen-tokens.ts
  */
 
+:root {
+  /* data-theme が付いていないときは標準モードで描画する（保険） */
+  --color-bg: #f3f2f2;
+  --color-panel: #ffffff;
+  --color-track: #eceae6;
+  --color-ink: #201e1d;
+  --color-hover: #201e1d12;
+  --color-muted: #77726c;
+  --color-warn: #d6300f;
+  --color-ok: #201e1d;
+  --color-code-bg: #0d0c10;
+  --color-overlay: #201e1d80;
+  --color-on-brand: #ffffff;
+  --color-link: #a21caf;
+  --color-link-hover: #701a75;
+  --color-code-fg: #c8f5e4;
+  --color-line: #201e1d;
+  --color-soft: #dcd9d4;
+  --color-brand-1: #7c3aed;
+  --color-brand-mid: #a83bb4;
+  --color-brand-2: #db2777;
+  --glow-1: #00000000;
+  --glow-2: #00000000;
+}
+
 :root[data-theme="standard"] {
   --color-bg: #f3f2f2;
   --color-panel: #ffffff;

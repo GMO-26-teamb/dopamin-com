@@ -1,6 +1,6 @@
 /**
  * globals.css の `@utility text-*`（Figma の Text Style 25 種）と 1:1。
- * tokens.json の textStyles[].utility と一致させること（text-styles.test.ts が守る）。
+ * tokens.json の textStyles[].utility と一致させること（lib/utils.test.ts が守る）。
  * `cn()` がこれらを font-size / font-weight / font-family / leading / tracking と
  * 競合するグループとして扱うために使う。
  */
