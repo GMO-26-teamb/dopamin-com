@@ -1,0 +1,28 @@
+{
+  "name": "@dopamin/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=.env.local src/dev.ts",
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@dopamin/shared": "workspace:*",
+    "hono": "^4.13.4"
+  },
+  "devDependencies": {
+    "@dopamin/tsconfig": "workspace:*",
+    "@hono/node-server": "^2.1.1",
+    "@types/node": "^22",
+    "tsup": "^8.5.1",
+    "tsx": "^4.23.12",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.11"
+  }
+}
