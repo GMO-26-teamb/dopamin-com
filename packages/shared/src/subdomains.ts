@@ -1,0 +1,444 @@
+/**
+ * サブドメイン設計支援（FR-13）の zod スキーマと、疑似 DNS ゾーンとの差分計算。
+ *
+ * - 設計そのもの（`SubdomainItem` / 提案）は docs/requirements.md FR-13 と §9.1 `subdomain_plans.proposal`
+ * - 反映先のレコードは §9.1 `dns_records`
+ * - API 入出力は §10.1 の `/domains/:name/subdomain-plan`（POST / PUT / GET）・`/subdomain-plan/apply`・`/domains/:name/dns`
+ *
+ * ドパ民 DNS への NS 切替判定は `constants.ts` の `DOPAMIN_NAMESERVERS` /
+ * {@link isDopaminNameservers} を再利用する（ここで定数を二重に持たない）。
+ */
+
+import { z } from "zod";
+import { isDopaminNameservers } from "./constants";
+import { domainNameSchema, hostNameSchema, isValidLabel } from "./domain-name";
+
+// ---------------------------------------------------------------------------
+// ホスト / レコードの基本要素
+// ---------------------------------------------------------------------------
+
+/** apex（ドメイン自身）を表すホスト表記。 */
+export const SUBDOMAIN_APEX_HOST = "@";
+
+/** ホスト名の比較キー（大文字小文字・前後空白の違いを無視する）。 */
+function hostKey(host: string): string {
+  return host.trim().toLowerCase();
+}
+
+/** 設計 / レコードのホスト。1 ラベル（例: `www` / `api`）または apex の `@`。 */
+export const subdomainHostSchema = z
+  .string()
+  .min(1)
+  .max(63)
+  .transform((v) => v.trim().toLowerCase())
+  .refine((v) => v === SUBDOMAIN_APEX_HOST || isValidLabel(v), {
+    message:
+      "ホストは 1 ラベル（英数字とハイフン）または apex の `@` で指定してください",
+  });
+
+/** 疑似 DNS ゾーンで扱うレコード種別（§9.1 dns_records.record_type）。 */
+export const DNS_RECORD_TYPES = ["A", "CNAME", "ALIAS"] as const;
+export const dnsRecordTypeSchema = z.enum(DNS_RECORD_TYPES);
+export type DnsRecordType = z.infer<typeof dnsRecordTypeSchema>;
+
+const IPV4_PATTERN =
+  /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
+
+/** IPv4 アドレス表記か判定する（A レコードの target 判定に使う）。 */
+export function isIpv4(value: string): boolean {
+  return IPV4_PATTERN.test(value);
+}
+
+/** target を比較・保存用に正規化する（小文字化 + 末尾ドット除去）。 */
+function normalizeTarget(target: string): string {
+  const lower = target.trim().toLowerCase();
+  return lower.endsWith(".") ? lower.slice(0, -1) : lower;
+}
+
+/**
+ * レコードの向き先。ホスト名（例: `cname.vercel-dns.com.`）または IPv4。
+ * 末尾ドットは落として保持する。
+ */
+export const dnsTargetSchema = z
+  .string()
+  .min(1)
+  .max(255)
+  .transform(normalizeTarget)
+  .refine((v) => isIpv4(v) || hostNameSchema.safeParse(v).success, {
+    message: "target は IPv4 アドレスまたはホスト名で指定してください",
+  });
+
+/** TTL（秒）。既定 3600（§9.1）。 */
+export const DEFAULT_DNS_TTL = 3600;
+export const dnsTtlSchema = z
+  .number()
+  .int()
+  .min(60)
+  .max(604800)
+  .default(DEFAULT_DNS_TTL);
+
+/** レコードの出自。現状は設計からの反映のみ（将来の手動編集用に予約）。 */
+export const DNS_RECORD_SOURCES = ["subdomain_plan"] as const;
+export const dnsRecordSourceSchema = z
+  .enum(DNS_RECORD_SOURCES)
+  .default("subdomain_plan");
+
+const isoDateTimeSchema = z.iso.datetime({ offset: true });
+
+// ---------------------------------------------------------------------------
+// 設計（SubdomainItem / 提案）
+// ---------------------------------------------------------------------------
+
+/** 各ホストの重要度（FR-13 の 必須 / 推奨 / 任意）。識別子は英語で持つ。 */
+export const SUBDOMAIN_PRIORITIES = [
+  "required",
+  "recommended",
+  "optional",
+] as const;
+export const subdomainPrioritySchema = z.enum(SUBDOMAIN_PRIORITIES);
+export type SubdomainPriority = z.infer<typeof subdomainPrioritySchema>;
+
+const subdomainItemShape = {
+  host: subdomainHostSchema,
+  /** そのホストの用途（例: ランディングページ）。 */
+  purpose: z.string().min(1).max(100),
+  recordType: dnsRecordTypeSchema,
+  target: dnsTargetSchema,
+  priority: subdomainPrioritySchema,
+};
+
+/** A は IPv4、CNAME / ALIAS はホスト名という DNS 上の対応を検証する。 */
+function checkRecordTypeAgainstTarget(
+  value: { recordType: DnsRecordType; target: string },
+  ctx: z.RefinementCtx,
+): void {
+  if (value.recordType === "A" && !isIpv4(value.target)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["target"],
+      message: "A レコードの target は IPv4 アドレスで指定してください",
+    });
+    return;
+  }
+  if (value.recordType !== "A" && isIpv4(value.target)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["target"],
+      message: `${value.recordType} レコードの target はホスト名で指定してください`,
+    });
+  }
+}
+
+/** 設計の 1 項目（§9.1 `subdomain_plans.proposal.items[]`）。 */
+export const subdomainItemSchema = z
+  .object(subdomainItemShape)
+  .superRefine(checkRecordTypeAgainstTarget);
+export type SubdomainItem = z.infer<typeof subdomainItemSchema>;
+
+function hasUniqueHosts(items: readonly { host: string }[]): boolean {
+  return new Set(items.map((item) => hostKey(item.host))).size === items.length;
+}
+
+const UNIQUE_HOSTS_MESSAGE = "同じホストを複数回指定することはできません";
+
+/**
+ * AI が返した提案の再検証（structured output は必ず再検証する）。
+ * FR-13 の「3〜8 件」に加え、ホスト重複なしと `www` の存在を要求する。
+ */
+export const subdomainProposalSchema = z.object({
+  /** 全体方針（120 字以内）。 */
+  policy: z.string().min(1).max(120),
+  items: z
+    .array(subdomainItemSchema)
+    .min(3)
+    .max(8)
+    .refine(hasUniqueHosts, { message: UNIQUE_HOSTS_MESSAGE })
+    .refine((items) => items.some((item) => hostKey(item.host) === "www"), {
+      message: "提案には www を含めてください",
+    }),
+});
+export type SubdomainProposal = z.infer<typeof subdomainProposalSchema>;
+
+// ---------------------------------------------------------------------------
+// API 入出力（§10.1）
+// ---------------------------------------------------------------------------
+
+/** 公開リポジトリの URL（`https://github.com/<owner>/<repo>`）。末尾の `/` と `.git` は落とす。 */
+export const githubRepoUrlSchema = z
+  .string()
+  .min(1)
+  .max(255)
+  .transform((v) =>
+    v
+      .trim()
+      .replace(/\/+$/, "")
+      .replace(/\.git$/i, ""),
+  )
+  .refine((v) => /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+$/.test(v), {
+    message:
+      "リポジトリ URL は https://github.com/<owner>/<repo> の形式で指定してください",
+  });
+
+/** `POST /domains/:name/subdomain-plan` の入力。リポ URL か概要テキストのどちらかが要る（AC-13-2）。 */
+export const subdomainPlanGenerateRequestSchema = z
+  .object({
+    repoUrl: githubRepoUrlSchema.optional(),
+    /** リポジトリを取得できない場合の代替入力（AC-13-2）。 */
+    description: z.string().min(1).max(2000).optional(),
+  })
+  .refine((v) => v.repoUrl !== undefined || v.description !== undefined, {
+    message:
+      "リポジトリ URL またはプロジェクト概要のどちらかを指定してください",
+  });
+export type SubdomainPlanGenerateRequest = z.infer<
+  typeof subdomainPlanGenerateRequestSchema
+>;
+
+/** `POST /domains/:name/subdomain-plan` の応答（保存前の提案）。 */
+export const subdomainPlanProposalResponseSchema = z.object({
+  domain: domainNameSchema,
+  repoUrl: z.string().nullable(),
+  policy: z.string().min(1).max(120),
+  items: z.array(subdomainItemSchema),
+});
+export type SubdomainPlanProposalResponse = z.infer<
+  typeof subdomainPlanProposalResponseSchema
+>;
+
+/**
+ * `PUT /domains/:name/subdomain-plan` の入力（ユーザーが編集した設計の保存）。
+ * 編集で `www` を外すこともあるため、提案と違い `www` 必須は課さない。
+ */
+export const subdomainPlanSaveRequestSchema = z.object({
+  repoUrl: githubRepoUrlSchema.optional(),
+  policy: z.string().min(1).max(120),
+  items: z
+    .array(subdomainItemSchema)
+    .min(1)
+    .max(8)
+    .refine(hasUniqueHosts, { message: UNIQUE_HOSTS_MESSAGE }),
+});
+export type SubdomainPlanSaveRequest = z.infer<
+  typeof subdomainPlanSaveRequestSchema
+>;
+
+/** ホストごとの反映状態（FR-13 の 未反映 / 反映済み / 変更あり）。 */
+export const applyStateSchema = z.enum(["unapplied", "applied", "changed"]);
+export type ApplyState = z.infer<typeof applyStateSchema>;
+
+/** 保存済み設計の 1 項目（反映状態つき）。 */
+export const subdomainPlanItemSchema = z
+  .object({ ...subdomainItemShape, applyState: applyStateSchema })
+  .superRefine(checkRecordTypeAgainstTarget);
+export type SubdomainPlanItem = z.infer<typeof subdomainPlanItemSchema>;
+
+/** `GET /domains/:name/subdomain-plan` の応答。 */
+export const subdomainPlanResponseSchema = z.object({
+  domain: domainNameSchema,
+  repoUrl: z.string().nullable(),
+  policy: z.string(),
+  items: z.array(subdomainPlanItemSchema),
+  /** 設計を保存した日時（§9.1 `subdomain_plans.updated_at`）。 */
+  savedAt: isoDateTimeSchema,
+  /** 最後に DNS へ反映した日時。未反映は null（§9.1 `subdomain_plans.applied_at`）。 */
+  appliedAt: isoDateTimeSchema.nullable(),
+});
+export type SubdomainPlanResponse = z.infer<typeof subdomainPlanResponseSchema>;
+
+/** `POST /domains/:name/subdomain-plan/apply` の入力。追加パラメータは持たない（将来の拡張点）。 */
+export const subdomainPlanApplyRequestSchema = z.object({}).default({});
+export type SubdomainPlanApplyRequest = z.infer<
+  typeof subdomainPlanApplyRequestSchema
+>;
+
+/**
+ * apply の応答（§10.1）。件数の名前は仕様どおり `updated`。
+ * 差分計算側（{@link diffDnsRecords}）は反映状態の `changed`（変更あり）に名前を揃えているため、
+ * `updated: diff.changed.length` で対応させる。
+ */
+export const subdomainPlanApplyResponseSchema = z.object({
+  added: z.number().int().min(0),
+  updated: z.number().int().min(0),
+  removed: z.number().int().min(0),
+  /** ドパ民 DNS へ NS を切り替えたか（FR-09 / AC-13-5）。 */
+  nameserversChanged: z.boolean(),
+});
+export type SubdomainPlanApplyResponse = z.infer<
+  typeof subdomainPlanApplyResponseSchema
+>;
+
+// ---------------------------------------------------------------------------
+// 疑似 DNS ゾーン（§9.1 dns_records / §10.1 GET /domains/:name/dns）
+// ---------------------------------------------------------------------------
+
+/** 疑似 DNS ゾーンに保存されているレコード。 */
+export const dnsRecordSchema = z.object({
+  host: subdomainHostSchema,
+  recordType: dnsRecordTypeSchema,
+  target: dnsTargetSchema,
+  ttl: dnsTtlSchema,
+  source: dnsRecordSourceSchema,
+  appliedAt: isoDateTimeSchema,
+});
+export type DnsRecord = z.infer<typeof dnsRecordSchema>;
+
+/** 設計から導出した「あるべきレコード」。反映前なので `source` / `appliedAt` を持たない。 */
+export const desiredDnsRecordSchema = z.object({
+  host: subdomainHostSchema,
+  recordType: dnsRecordTypeSchema,
+  target: dnsTargetSchema,
+  ttl: dnsTtlSchema,
+});
+export type DesiredDnsRecord = z.infer<typeof desiredDnsRecordSchema>;
+
+/** 差分計算が必要とする最小のレコード形（DB 行・ビューモデルのどちらでも満たせる）。 */
+export interface DnsRecordLike {
+  host: string;
+  recordType: DnsRecordType;
+  target: string;
+  ttl?: number;
+}
+
+/** 内容が変わるホスト。反映前後の両方を持つ（差分ダイアログ表示用）。 */
+export interface DnsRecordChange<
+  C extends DnsRecordLike = DnsRecord,
+  D extends DnsRecordLike = DesiredDnsRecord,
+> {
+  current: C;
+  desired: D;
+}
+
+/** 保存済み設計と疑似 DNS ゾーンの差分（AC-13-7 の確認ダイアログ / apply の件数）。 */
+export interface DnsRecordDiff<
+  C extends DnsRecordLike = DnsRecord,
+  D extends DnsRecordLike = DesiredDnsRecord,
+> {
+  added: D[];
+  changed: DnsRecordChange<C, D>[];
+  removed: C[];
+  unchanged: D[];
+}
+
+export const dnsRecordDiffSchema = z.object({
+  added: z.array(desiredDnsRecordSchema),
+  changed: z.array(
+    z.object({ current: dnsRecordSchema, desired: desiredDnsRecordSchema }),
+  ),
+  removed: z.array(dnsRecordSchema),
+  unchanged: z.array(desiredDnsRecordSchema),
+});
+
+/** `GET /domains/:name/dns` の応答（レコード一覧と保存済み設計との差分）。 */
+export const dnsZoneResponseSchema = z.object({
+  records: z.array(dnsRecordSchema),
+  diff: dnsRecordDiffSchema,
+});
+export type DnsZoneResponse = z.infer<typeof dnsZoneResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// 純粋関数（API の apply と Web の差分ダイアログ・バッジで共用する）
+// ---------------------------------------------------------------------------
+
+/** 設計の 1 項目から「あるべきレコード」を導出する。 */
+export function subdomainItemToDnsRecord(
+  item: Pick<SubdomainItem, "host" | "recordType" | "target">,
+  ttl: number = DEFAULT_DNS_TTL,
+): DesiredDnsRecord {
+  return {
+    host: hostKey(item.host),
+    recordType: item.recordType,
+    target: normalizeTarget(item.target),
+    ttl,
+  };
+}
+
+/**
+ * 2 つのレコードが同じ内容かを判定する。target は末尾ドット・大文字小文字を無視し、
+ * TTL は両方が値を持つときだけ比較する。
+ */
+export function isSameDnsRecord(a: DnsRecordLike, b: DnsRecordLike): boolean {
+  if (a.recordType !== b.recordType) {
+    return false;
+  }
+  if (normalizeTarget(a.target) !== normalizeTarget(b.target)) {
+    return false;
+  }
+  return a.ttl === undefined || b.ttl === undefined || a.ttl === b.ttl;
+}
+
+/** 同じホストのレコード群から比較対象を選ぶ（同種があれば優先、なければ先頭）。 */
+function pickMatch<C extends DnsRecordLike>(
+  bucket: readonly C[],
+  desired: DnsRecordLike,
+): C | undefined {
+  return bucket.find((r) => r.recordType === desired.recordType) ?? bucket[0];
+}
+
+/**
+ * 現在の疑似 DNS ゾーン（`current`）とあるべきレコード（`desired`）の差分を求める。
+ *
+ * - ホスト単位で対応づける（設計はホスト重複なしが前提。§9.1 の UNIQUE(domain_id, host, record_type)
+ *   により同一ホストに複数レコードが残っている場合、対応づかなかった分は `removed` に入る）
+ * - 反映（upsert + 削除）を行うと `desired` と一致するため、続けて計算した差分は空になる
+ */
+export function diffDnsRecords<
+  C extends DnsRecordLike,
+  D extends DnsRecordLike,
+>(current: readonly C[], desired: readonly D[]): DnsRecordDiff<C, D> {
+  const currentByHost = new Map<string, C[]>();
+  for (const record of current) {
+    const key = hostKey(record.host);
+    const bucket = currentByHost.get(key);
+    if (bucket) {
+      bucket.push(record);
+    } else {
+      currentByHost.set(key, [record]);
+    }
+  }
+
+  const added: D[] = [];
+  const changed: DnsRecordChange<C, D>[] = [];
+  const unchanged: D[] = [];
+  const matched = new Set<C>();
+
+  for (const item of desired) {
+    const bucket = currentByHost.get(hostKey(item.host)) ?? [];
+    const match = pickMatch(bucket, item);
+    if (match === undefined) {
+      added.push(item);
+      continue;
+    }
+    matched.add(match);
+    if (isSameDnsRecord(match, item)) {
+      unchanged.push(item);
+    } else {
+      changed.push({ current: match, desired: item });
+    }
+  }
+
+  const removed = current.filter((record) => !matched.has(record));
+  return { added, changed, removed, unchanged };
+}
+
+/** 設計の 1 項目の反映状態（FR-13 のバッジ / AC-13-6）を、現在のゾーンから導出する。 */
+export function subdomainApplyState(
+  item: Pick<SubdomainItem, "host" | "recordType" | "target">,
+  records: readonly DnsRecordLike[],
+  ttl: number = DEFAULT_DNS_TTL,
+): ApplyState {
+  const desired = subdomainItemToDnsRecord(item, ttl);
+  const bucket = records.filter((r) => hostKey(r.host) === desired.host);
+  const match = pickMatch(bucket, desired);
+  if (match === undefined) {
+    return "unapplied";
+  }
+  return isSameDnsRecord(match, desired) ? "applied" : "changed";
+}
+
+/**
+ * 反映時に FR-09 の NS 切替が要るか（AC-13-5）。
+ * ドパ民 DNS（`DOPAMIN_NAMESERVERS`）でなければ切替が必要。
+ */
+export function needsNameserverSwitch(nameservers: readonly string[]): boolean {
+  return !isDopaminNameservers(nameservers);
+}
