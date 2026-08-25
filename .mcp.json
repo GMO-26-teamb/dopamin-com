@@ -3,12 +3,12 @@
     "supabase": {
       "type": "stdio",
       "command": "pnpm",
-      "args": ["dlx", "@supabase/mcp-server-supabase"]
+      "args": ["dlx", "@supabase/mcp-server-supabase@0.11.0", "--read-only"]
     },
     "chrome-devtools": {
       "type": "stdio",
       "command": "npx",
-      "args": ["chrome-devtools-mcp@latest"]
+      "args": ["chrome-devtools-mcp@1.7.0"]
     }
   }
 }
