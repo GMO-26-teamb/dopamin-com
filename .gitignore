@@ -20,3 +20,5 @@ next-env.d.ts
 *.pem
 *.log
 coverage/
+.vercel
+.env*
