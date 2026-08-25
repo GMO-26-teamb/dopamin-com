@@ -1,0 +1,137 @@
+name: Deploy
+
+# main push → Vercel 本番、PR → プレビュー（docs/requirements.md §16.2）
+# Git 連携は使わず Vercel CLI でデプロイする（組織リポジトリ + Hobby プランの制約）。
+# API → Web の順で実行する。Web の rewrites はビルド時に API_ORIGIN を読むため、
+# プレビューでは直前にデプロイした API の URL を渡す必要がある。
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "pnpm-lock.yaml"
+      - "package.json"
+      - "turbo.json"
+      - ".github/workflows/deploy.yml"
+  pull_request:
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "pnpm-lock.yaml"
+      - "package.json"
+      - "turbo.json"
+      - ".github/workflows/deploy.yml"
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VERCEL_CLI_VERSION: 59.5.0
+  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  VERCEL_ENV: ${{ github.event_name == 'push' && 'production' || 'preview' }}
+  PROD_FLAG: ${{ github.event_name == 'push' && '--prod' || '' }}
+
+jobs:
+  api:
+    name: Deploy API
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'push' && 'production' || 'preview' }}
+    env:
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_API }}
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm add -g vercel@${{ env.VERCEL_CLI_VERSION }}
+      - name: Pull Vercel project settings / env
+        run: vercel pull --yes --environment=${{ env.VERCEL_ENV }} --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Build
+        run: vercel build ${{ env.PROD_FLAG }} --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Deploy
+        id: deploy
+        # CLI は環境によって URL のみ / JSON を出力するため、どちらからも URL を取り出す
+        run: |
+          vercel deploy --prebuilt ${{ env.PROD_FLAG }} --token=${{ secrets.VERCEL_TOKEN }} | tee deploy.out
+          url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.vercel\.app' deploy.out | head -1)
+          test -n "$url"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+  web:
+    name: Deploy Web
+    needs: api
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'push' && 'production' || 'preview' }}
+    env:
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_WEB }}
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm add -g vercel@${{ env.VERCEL_CLI_VERSION }}
+      - name: Pull Vercel project settings / env
+        run: vercel pull --yes --environment=${{ env.VERCEL_ENV }} --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Build
+        # プレビューは PR ごとに API の URL が変わるため、Vercel 側の API_ORIGIN を上書きする。
+        # 本番は Vercel プロジェクトに設定した固定の API_ORIGIN を使う。
+        env:
+          API_ORIGIN: ${{ github.event_name == 'pull_request' && needs.api.outputs.url || '' }}
+        run: |
+          if [ -n "$API_ORIGIN" ]; then
+            sed -i "/^API_ORIGIN=/d" .vercel/.env.${{ env.VERCEL_ENV }}.local
+            echo "API_ORIGIN=$API_ORIGIN" >> .vercel/.env.${{ env.VERCEL_ENV }}.local
+          fi
+          vercel build ${{ env.PROD_FLAG }} --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Deploy
+        id: deploy
+        # CLI は環境によって URL のみ / JSON を出力するため、どちらからも URL を取り出す
+        run: |
+          vercel deploy --prebuilt ${{ env.PROD_FLAG }} --token=${{ secrets.VERCEL_TOKEN }} | tee deploy.out
+          url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.vercel\.app' deploy.out | head -1)
+          test -n "$url"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+  comment:
+    name: Comment preview URLs
+    if: github.event_name == 'pull_request'
+    needs: [api, web]
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/github-script@v8
+        env:
+          WEB_URL: ${{ needs.web.outputs.url }}
+          API_URL: ${{ needs.api.outputs.url }}
+        with:
+          script: |
+            const marker = "<!-- vercel-preview -->";
+            const body = [
+              marker,
+              "### Vercel Preview",
+              `- Web: ${process.env.WEB_URL}`,
+              `- API: ${process.env.API_URL}`,
+              `- Commit: ${context.sha.slice(0, 7)}`,
+            ].join("\n");
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const { data: comments } = await github.rest.issues.listComments({ owner, repo, issue_number });
+            const existing = comments.find((c) => c.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
