@@ -1,15 +1,17 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { API_MODE } from "@/lib/api/mode";
 
 /**
  * 未認証で保護ページに来たら /login へリダイレクト（AC-01-3, FR-01 spec §8）。
  * ここでは Cookie の有無だけを見る軽いチェックに留め、
  * セッションの有効性検証は API 側の session ミドルウェアが行う。
  *
- * NEXT_PUBLIC_API_MODE が "http" 以外（既定のモック）のときは素通しする。
- * モックだけで全画面・全状態をレビューできるようにするため（fe-ui 設計 §1）。
+ * モックモード（既定）のときは素通しする。モックだけで全画面・全状態を
+ * レビューできるようにするため（fe-ui 設計 §1）。モードの解決は `lib/api/mode.ts`
+ * が担い、不正値は例外にする（綴り違いで認証チェックが消えないように）。
  */
 export default function proxy(request: NextRequest) {
-  if (process.env.NEXT_PUBLIC_API_MODE !== "http") {
+  if (API_MODE !== "http") {
     return NextResponse.next();
   }
 

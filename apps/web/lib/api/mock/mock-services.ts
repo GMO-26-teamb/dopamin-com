@@ -15,7 +15,7 @@ import {
   splitDomainName,
   uniquenessLabel,
 } from "@dopamin/shared";
-import { ApiClientError } from "../errors";
+import { ApiClientError, type ErrorOrigin } from "../errors";
 import type { Services } from "../services";
 import type {
   Candidate,
@@ -49,9 +49,18 @@ function nowIso(): string {
 function fail(
   code: ApiClientError["code"],
   message: string,
-  extra: { registry?: DomainSummary["registry"]; registryCode?: string } = {},
+  extra: {
+    origin?: ErrorOrigin;
+    registry?: DomainSummary["registry"];
+    registryCode?: string;
+  } = {},
 ): never {
   throw new ApiClientError({ code, message, ...extra });
+}
+
+/** AI 呼び出しの失敗。文言を AI 向けに出し分けるため origin を付ける（S-23 / S-41）。 */
+function failAi(code: ApiClientError["code"], message: string): never {
+  fail(code, message, { origin: "ai" });
 }
 
 const registryUnavailable = (
@@ -70,6 +79,11 @@ function pseudoScore(seed: string): number {
   return hash % 101;
 }
 
+/** `similarity` は 0〜1（API と同じ単位）。ここでは百分率から換算する。 */
+function similarityFromPercent(percent: number): number {
+  return percent / 100;
+}
+
 function uniquenessFor(name: string): UniquenessScore {
   const { sld, tld } = splitDomainName(name);
   const value = pseudoScore(name);
@@ -77,9 +91,18 @@ function uniquenessFor(name: string): UniquenessScore {
     score: value,
     label: uniquenessLabel(value),
     nearest: [
-      { name: `${sld}s.${tld}`, similarity: 90 - (value % 12) },
-      { name: `${sld}-app.${tld}`, similarity: 78 - (value % 15) },
-      { name: `the${sld}.${tld}`, similarity: 63 - (value % 18) },
+      {
+        name: `${sld}s.${tld}`,
+        similarity: similarityFromPercent(90 - (value % 12)),
+      },
+      {
+        name: `${sld}-app.${tld}`,
+        similarity: similarityFromPercent(78 - (value % 15)),
+      },
+      {
+        name: `the${sld}.${tld}`,
+        similarity: similarityFromPercent(63 - (value % 18)),
+      },
     ],
   };
 }
@@ -600,10 +623,10 @@ export function createMockServices(
       async generate(input) {
         await wait();
         if (scenario === "ai-timeout") {
-          fail("REGISTRY_TIMEOUT", "AI が 10 秒以内に応答しませんでした。");
+          failAi("REGISTRY_TIMEOUT", "AI が 10 秒以内に応答しませんでした。");
         }
         if (isError) {
-          fail("AI_UNAVAILABLE", "AI が利用できません。");
+          failAi("AI_UNAVAILABLE", "AI が利用できません。");
         }
         const store = getMockStore();
         const excluded = new Set(input.exclude ?? []);
@@ -638,7 +661,7 @@ export function createMockServices(
       async propose(domain, input) {
         await wait();
         if (scenario === "ai-timeout") {
-          fail("REGISTRY_TIMEOUT", "AI が 15 秒以内に応答しませんでした。");
+          failAi("REGISTRY_TIMEOUT", "AI が 15 秒以内に応答しませんでした。");
         }
         if (isError) {
           // S-42: GitHub のリポジトリが見つからない / 非公開（AC-13-2）

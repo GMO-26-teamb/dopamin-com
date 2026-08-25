@@ -168,6 +168,31 @@ describe("createMockServices - candidates", () => {
 
     expect(error).toBeInstanceOf(ApiClientError);
     expect((error as ApiClientError).code).toBe("REGISTRY_TIMEOUT");
+    // レジストリではなく AI の文言を出すための目印（S-23）
+    expect((error as ApiClientError).origin).toBe("ai");
+  });
+
+  it("AI の失敗には origin=ai が付く（候補生成 / サブドメイン提案）", async () => {
+    const unavailable = await services("error")
+      .candidates.generate({ nickname: "たくたく" })
+      .catch((e: unknown) => e);
+    expect((unavailable as ApiClientError).code).toBe("AI_UNAVAILABLE");
+    expect((unavailable as ApiClientError).origin).toBe("ai");
+
+    const timeout = await services("ai-timeout")
+      .subdomains.propose("takutaku.com", {})
+      .catch((e: unknown) => e);
+    expect((timeout as ApiClientError).code).toBe("REGISTRY_TIMEOUT");
+    expect((timeout as ApiClientError).origin).toBe("ai");
+  });
+
+  it("レジストリの失敗には origin を付けない（従来どおりの文言）", async () => {
+    const error = await services("error")
+      .domains.register({ name: "example-app.com", period: 1 })
+      .catch((e: unknown) => e);
+
+    expect((error as ApiClientError).code).toBe("REGISTRY_TIMEOUT");
+    expect((error as ApiClientError).origin).toBeUndefined();
   });
 });
 
@@ -249,6 +274,33 @@ describe("createMockServices - その他", () => {
       .catch((e: unknown) => e);
 
     expect((error as ApiClientError).code).toBe("REGISTRY_TIMEOUT");
+  });
+
+  it("類似度は 0〜1 で返る（SimilarityRow / API の topSimilar と同じ単位）", async () => {
+    const results = await services("default").domains.check({
+      sld: "example-app",
+      tlds: ["com", "xyz"],
+    });
+    const nearest = results.flatMap((r) => r.uniqueness?.nearest ?? []);
+
+    expect(nearest.length).toBeGreaterThan(0);
+    for (const entry of nearest) {
+      expect(entry.similarity).toBeGreaterThan(0);
+      expect(entry.similarity).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("候補 fixtures の類似度も 0〜1", async () => {
+    const candidates = await services("default").candidates.generate({
+      nickname: "takutaku",
+    });
+    const nearest = candidates.flatMap((c) => c.uniqueness?.nearest ?? []);
+
+    expect(nearest.length).toBeGreaterThan(0);
+    for (const entry of nearest) {
+      expect(entry.similarity).toBeGreaterThan(0);
+      expect(entry.similarity).toBeLessThanOrEqual(1);
+    }
   });
 
   it("partial-failure シナリオの check は確認不可の行を含む（AC-03-2）", async () => {

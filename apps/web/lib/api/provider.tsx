@@ -3,7 +3,7 @@
 /**
  * `Services` の供給（fe-ui 設計 §4.4）。
  *
- * `NEXT_PUBLIC_API_MODE`（既定 `mock` / `http`）と URL の `?mock=<scenario>` から
+ * モード（`lib/api/mode.ts` が `NEXT_PUBLIC_API_MODE` から解決）と URL の `?mock=<scenario>` から
  * 実装を組み立てて context で配る。テストや Storybook 的な用途では `services` を直接渡せる。
  */
 
@@ -17,31 +17,73 @@ import {
 import { createHttpServices } from "./http/http-services";
 import { createMockServices } from "./mock/mock-services";
 import { type MockScenario, parseScenario } from "./mock/scenario";
+import { API_MODE } from "./mode";
 import type { Services } from "./services";
 
 const ServicesContext = createContext<Services | null>(null);
 const ScenarioContext = createContext<MockScenario>("default");
 
-/** `http` を明示したときだけ実 API。既定はモック。 */
-function isHttpMode(): boolean {
-  return process.env.NEXT_PUBLIC_API_MODE === "http";
-}
-
 function readScenario(): MockScenario {
   return parseScenario(new URLSearchParams(window.location.search).get("mock"));
 }
 
+const listeners = new Set<() => void>();
+let historyPatched = false;
+
+function notify(): void {
+  for (const listener of listeners) {
+    listener();
+  }
+}
+
 /**
- * URL の `?mock=` を購読する。SSR / ハイドレーション時は `default`、
- * ブラウザに渡ってから実際の値になる（`popstate` でも追随する）。
+ * App Router のクライアント遷移は `history.pushState` / `replaceState` を呼ぶだけで
+ * `popstate` を起こさないため、両方を包んで購読者に通知する。
+ *
+ * `useSearchParams()` でも同じことはできるが、使ったページが丸ごと Suspense / 動的レンダリング
+ * 扱いになる（= 全ページに Suspense 境界を強いる）ので採らない。
  */
+function patchHistory(): void {
+  if (historyPatched) {
+    return;
+  }
+  historyPatched = true;
+  for (const method of ["pushState", "replaceState"] as const) {
+    const original = window.history[method].bind(window.history);
+    window.history[method] = (...args: Parameters<History["pushState"]>) => {
+      original(...args);
+      notify();
+    };
+  }
+}
+
+/** URL の `?mock=` を購読する。SSR / ハイドレーション時は `default`。 */
 function subscribe(onChange: () => void): () => void {
+  patchHistory();
+  listeners.add(onChange);
   window.addEventListener("popstate", onChange);
-  return () => window.removeEventListener("popstate", onChange);
+  return () => {
+    listeners.delete(onChange);
+    window.removeEventListener("popstate", onChange);
+  };
 }
 
 export function useMockScenario(): MockScenario {
   return useContext(ScenarioContext);
+}
+
+/**
+ * queryKey の先頭に付けるスコープ（`hooks.ts`）。
+ *
+ * 同じ key でもモード / シナリオが違えば中身は別物なので、キャッシュを混ぜない。
+ * ハイドレーション直後の 1 回目は `default` で走るため、これが無いと `?mock=error` が
+ * 既定シナリオの結果を掴んだままになる（`staleTime` の間ずっと）。
+ */
+export type QueryScope = MockScenario | "http";
+
+export function useQueryScope(): QueryScope {
+  const scenario = useMockScenario();
+  return API_MODE === "http" ? "http" : scenario;
 }
 
 export function ServicesProvider(props: {
@@ -56,7 +98,9 @@ export function ServicesProvider(props: {
   const services = useMemo(
     () =>
       props.services ??
-      (isHttpMode() ? createHttpServices() : createMockServices(scenario)),
+      (API_MODE === "http"
+        ? createHttpServices()
+        : createMockServices(scenario)),
     [props.services, scenario],
   );
 

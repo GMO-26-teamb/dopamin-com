@@ -2,7 +2,11 @@ import { cn } from "@/lib/utils";
 
 /**
  * Figma: Similarity Row `48:55`
- * 類似候補の 1 行（名前・ミニバー・スコア）。Figma の定義どおり 0.8 以上は Warn。
+ * 類似候補の 1 行（名前・ミニバー・スコア）。
+ *
+ * `similarity` は 0〜1 のコサイン類似度（`UniquenessScore.nearest[].similarity` と同じ単位で、
+ * API の `topSimilar` に合わせる）。表示も Figma / `docs/ui-design/14-domains-new.png` の
+ * 「takaku 0.61」と同じく小数 2 桁で、百分率にはしない。0.8 以上は Warn。
  */
 const SIMILARITY_WARN_THRESHOLD = 0.8;
 
@@ -13,7 +17,7 @@ const TONE = {
 
 export interface SimilarityRowProps {
   name: string;
-  /** 0〜1 のコサイン類似度 */
+  /** 0〜1 のコサイン類似度（0.61 のように表示する） */
   similarity: number;
   /** 省略時は similarity から決める（0.8 以上 = warn） */
   tone?: "warn" | "muted";

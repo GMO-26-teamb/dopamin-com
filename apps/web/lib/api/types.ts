@@ -50,8 +50,14 @@ export interface DomainDetail extends DomainSummary {
 }
 
 export interface UniquenessScore {
+  /** 独自性スコア（0〜100）。`uniquenessLabel` / `rarityTier` の入力。 */
   score: number;
   label: "high" | "medium" | "low";
+  /**
+   * 最も近い既存名（上位 3 件）。`similarity` は **0〜1** のコサイン類似度で、
+   * API（docs/requirements.md §10.2 の `topSimilar`）と同じ単位。
+   * 表示は `SimilarityRow` が 0.61 のように小数 2 桁で出す（ui-design 14-domains-new）。
+   */
   nearest: { name: string; similarity: number }[];
 }
 

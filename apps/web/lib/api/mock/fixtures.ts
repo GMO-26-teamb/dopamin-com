@@ -322,6 +322,7 @@ export function createDnsZones(): Record<string, DnsRecord[]> {
   };
 }
 
+/** `value` は独自性スコア（0〜100）、`nearest` の類似度は 0〜1（API と同じ単位）。 */
 function score(value: number, nearest: [string, number][]): UniquenessScore {
   return {
     score: value,
@@ -342,9 +343,9 @@ export function createCandidatePool(): Candidate[] {
       registry: "kitaqsign",
       availability: "available",
       uniqueness: score(86, [
-        ["dopelab.com", 71],
-        ["dopalabs.com", 68],
-        ["dopa-lab.net", 55],
+        ["dopelab.com", 0.71],
+        ["dopalabs.com", 0.68],
+        ["dopa-lab.net", 0.55],
       ]),
       alternatives: [],
     },
@@ -355,9 +356,9 @@ export function createCandidatePool(): Candidate[] {
       registry: "kitaqnic",
       availability: "available",
       uniqueness: score(78, [
-        ["tsukuru.xyz", 74],
-        ["tsukurun.jp", 66],
-        ["tukurun.xyz", 62],
+        ["tsukuru.xyz", 0.74],
+        ["tsukurun.jp", 0.66],
+        ["tukurun.xyz", 0.62],
       ]),
       alternatives: [],
     },
@@ -368,9 +369,9 @@ export function createCandidatePool(): Candidate[] {
       registry: "kitaqnic",
       availability: "available",
       uniqueness: score(61, [
-        ["dopadeck.com", 82],
-        ["dopedeck.online", 70],
-        ["deckdopa.online", 51],
+        ["dopadeck.com", 0.82],
+        ["dopedeck.online", 0.7],
+        ["deckdopa.online", 0.51],
       ]),
       alternatives: [],
     },
@@ -381,9 +382,9 @@ export function createCandidatePool(): Candidate[] {
       registry: "kitaqnic",
       availability: "available",
       uniqueness: score(52, [
-        ["yumemi.tech", 88],
-        ["yumemiapp.tech", 84],
-        ["yume-app.tech", 63],
+        ["yumemi.tech", 0.88],
+        ["yumemiapp.tech", 0.84],
+        ["yume-app.tech", 0.63],
       ]),
       alternatives: [],
     },
@@ -394,9 +395,9 @@ export function createCandidatePool(): Candidate[] {
       registry: "kitaqnic",
       availability: "available",
       uniqueness: score(41, [
-        ["team-tools.site", 90],
-        ["teambtools.site", 86],
-        ["teamb.tools", 72],
+        ["team-tools.site", 0.9],
+        ["teambtools.site", 0.86],
+        ["teamb.tools", 0.72],
       ]),
       alternatives: [],
     },
@@ -407,9 +408,9 @@ export function createCandidatePool(): Candidate[] {
       registry: "kitaqsign",
       availability: "unavailable",
       uniqueness: score(24, [
-        ["myapp2026.com", 96],
-        ["myapp2025.net", 92],
-        ["my-app2026.net", 89],
+        ["myapp2026.com", 0.96],
+        ["myapp2025.net", 0.92],
+        ["my-app2026.net", 0.89],
       ]),
       alternatives: ["myapp2026.xyz", "my-app2026.net", "myapp26.online"],
     },
@@ -420,9 +421,9 @@ export function createCandidatePool(): Candidate[] {
       registry: "kitaqnic",
       availability: "available",
       uniqueness: score(74, [
-        ["hakobune.com", 80],
-        ["hakobune.tech", 76],
-        ["hakobune-lab.site", 58],
+        ["hakobune.com", 0.8],
+        ["hakobune.tech", 0.76],
+        ["hakobune-lab.site", 0.58],
       ]),
       alternatives: [],
     },
@@ -433,9 +434,9 @@ export function createCandidatePool(): Candidate[] {
       registry: "kitaqnic",
       availability: "available",
       uniqueness: score(69, [
-        ["pikapika.space", 79],
-        ["pika-dev.space", 67],
-        ["pikapikadev.com", 61],
+        ["pikapika.space", 0.79],
+        ["pika-dev.space", 0.67],
+        ["pikapikadev.com", 0.61],
       ]),
       alternatives: [],
     },
@@ -446,9 +447,9 @@ export function createCandidatePool(): Candidate[] {
       registry: "kitaqsign",
       availability: "available",
       uniqueness: score(58, [
-        ["kitaq-studio.com", 91],
-        ["kitaqstudio.org", 87],
-        ["kitakyu-studio.org", 64],
+        ["kitaq-studio.com", 0.91],
+        ["kitaqstudio.org", 0.87],
+        ["kitakyu-studio.org", 0.64],
       ]),
       alternatives: [],
     },

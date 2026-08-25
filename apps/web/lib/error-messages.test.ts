@@ -174,4 +174,63 @@ describe("toErrorCopy", () => {
     expect(copyFor("NOT_IMPLEMENTED").action).toBe("none");
     expect(copyFor("NETWORK").action).toBe("retry");
   });
+
+  // ---- AI 由来の失敗（ui-screens S-23 / S-41） ----
+
+  it("origin=ai のタイムアウトは AI 向けの文言（S-23）", () => {
+    const copy = toErrorCopy(
+      new ApiClientError({
+        code: "REGISTRY_TIMEOUT",
+        message: "AI が 10 秒以内に応答しませんでした。",
+        origin: "ai",
+      }),
+    );
+    expect(copy.title).toBe("AI が応答しませんでした");
+    expect(copy.body).toContain("AI が 10 秒以内に応答しませんでした");
+    // 手入力の導線は必ず残す
+    expect(copy.body).toContain("手入力で探せます");
+    // FR-18 のレジストリ向けの 1 文は出さない
+    expect(copy.body).not.toContain("ローカルの情報は変更されていません");
+    expect(copy.action).toBe("retry");
+  });
+
+  it("origin=ai の接続不可は AI 向けの文言（S-41）", () => {
+    const copy = toErrorCopy(
+      new ApiClientError({
+        code: "REGISTRY_UNAVAILABLE",
+        message: "",
+        origin: "ai",
+      }),
+    );
+    expect(copy.title).toBe("AI に接続できません");
+    expect(copy.body).toContain("手入力で探せます");
+    expect(copy.action).toBe("retry");
+  });
+
+  it("origin を付けなければ従来どおりレジストリの文言（FR-18 の 1 文を含む）", () => {
+    const copy = toErrorCopy(
+      new ApiClientError({
+        code: "REGISTRY_TIMEOUT",
+        message: "",
+        registry: "kitaqsign",
+      }),
+    );
+    expect(copy.title).toBe("Kitaqsign が応答しませんでした");
+    expect(copy.body).toContain("ローカルの情報は変更されていません");
+  });
+
+  it("origin=registry を明示してもレジストリの文言のまま", () => {
+    expect(
+      copyFor("REGISTRY_UNAVAILABLE", {
+        origin: "registry",
+        registry: "kitaqnic",
+      }).title,
+    ).toBe("Kitaqnic に接続できません");
+  });
+
+  it("AI 向けの上書きは 2 コードだけ（AI_UNAVAILABLE は元の文言）", () => {
+    const copy = copyFor("AI_UNAVAILABLE", { origin: "ai" });
+    expect(copy.title).toBe("AI が利用できません");
+    expect(copy.body).toContain("手入力で探せます");
+  });
 });

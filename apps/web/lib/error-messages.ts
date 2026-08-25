@@ -14,7 +14,11 @@
 
 import type { RegistryId } from "@dopamin/shared";
 import { z } from "zod";
-import type { ApiClientError, ClientErrorCode } from "./api/errors";
+import type {
+  ApiClientError,
+  ClientErrorCode,
+  ErrorOrigin,
+} from "./api/errors";
 
 export interface ErrorCopy {
   title: string;
@@ -138,6 +142,28 @@ const COPY: Record<ClientErrorCode, CopyTemplate> = {
   },
 };
 
+/**
+ * AI 呼び出しの失敗（`origin: "ai"`）で上書きするテンプレート（ui-screens S-23 / S-41）。
+ * タイムアウト・接続不可は AI でも `REGISTRY_TIMEOUT` / `REGISTRY_UNAVAILABLE` で表現されるが、
+ * 「レジストリが応答しませんでした」と出ると誤解を招くうえ、FR-18 の
+ * 「ローカルの情報は変更されていません」も AI には当てはまらない。
+ * どちらも手入力（直接検索）の導線を必ず残す。
+ */
+const AI_COPY: Partial<Record<ClientErrorCode, CopyTemplate>> = {
+  REGISTRY_TIMEOUT: {
+    title: "AI が応答しませんでした",
+    body: "手入力で探せます。",
+    required: true,
+    action: "retry",
+  },
+  REGISTRY_UNAVAILABLE: {
+    title: "AI に接続できません",
+    body: "手入力で探せます。",
+    required: true,
+    action: "retry",
+  },
+};
+
 const statusesSchema = z.object({ statuses: z.array(z.string()).min(1) });
 const retryAfterSchema = z.object({ retryAfter: z.number().positive() });
 
@@ -192,12 +218,18 @@ function composeBody(error: ApiClientError, template: CopyTemplate): string {
 }
 
 /** union 外のコードが実行時に来ても落ちないようにする（API が新コードを返した場合など）。 */
-function templateFor(code: ClientErrorCode): CopyTemplate {
-  return (COPY as Partial<Record<string, CopyTemplate>>)[code] ?? COPY.INTERNAL;
+function templateFor(
+  code: ClientErrorCode,
+  origin: ErrorOrigin | undefined,
+): CopyTemplate {
+  const ai = origin === "ai" ? AI_COPY[code] : undefined;
+  return (
+    ai ?? (COPY as Partial<Record<string, CopyTemplate>>)[code] ?? COPY.INTERNAL
+  );
 }
 
 export function toErrorCopy(error: ApiClientError): ErrorCopy {
-  const template = templateFor(error.code);
+  const template = templateFor(error.code, error.origin);
   const title = fillRegistry(template.title, error.registry);
 
   switch (error.code) {

@@ -275,7 +275,9 @@ export function createHttpServices(): Services {
     candidates: {
       /** POST /ai/domain-candidates（FR-04、未実装） */
       generate() {
-        return Promise.reject(notImplemented("POST /ai/domain-candidates"));
+        return Promise.reject(
+          notImplemented("POST /ai/domain-candidates", "ai"),
+        );
       },
     },
 
@@ -286,10 +288,10 @@ export function createHttpServices(): Services {
           notImplemented("GET /domains/:name/subdomain-plan"),
         );
       },
-      /** POST /domains/:name/subdomain-plan（FR-13、未実装） */
+      /** POST /domains/:name/subdomain-plan（FR-13、AI 提案。未実装） */
       propose() {
         return Promise.reject(
-          notImplemented("POST /domains/:name/subdomain-plan"),
+          notImplemented("POST /domains/:name/subdomain-plan", "ai"),
         );
       },
       /** PUT /domains/:name/subdomain-plan（FR-13、未実装） */

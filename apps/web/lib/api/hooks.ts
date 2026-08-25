@@ -16,8 +16,9 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import { useMemo } from "react";
 import type { ApiClientError } from "./errors";
-import { useServices } from "./provider";
+import { type QueryScope, useQueryScope, useServices } from "./provider";
 import type { CandidateService } from "./services";
 import type {
   AiLog,
@@ -35,19 +36,35 @@ import type {
 
 type CandidateInput = Parameters<CandidateService["generate"]>[0];
 
-/** queryKey の一覧（fe-ui 設計 §4.5）。invalidate はここ経由で行う。 */
-export const queryKeys = {
-  me: () => ["me"] as const,
-  passkeys: () => ["passkeys"] as const,
-  domains: () => ["domains"] as const,
-  domain: (name: string) => ["domain", name] as const,
-  candidates: (input: CandidateInput) => ["candidates", input] as const,
-  subdomainPlan: (domain: string) => ["subdomain-plan", domain] as const,
-  dnsDiff: (domain: string) => ["dns-diff", domain] as const,
-  transfers: () => ["transfers"] as const,
-  operationLogs: () => ["logs", "operations"] as const,
-  aiLogs: () => ["logs", "ai"] as const,
-} as const;
+/**
+ * queryKey の一覧（fe-ui 設計 §4.5）。invalidate / setQueryData もここ経由で行う。
+ *
+ * 先頭には必ずスコープ（モックのシナリオ、HTTP なら `"http"`）が付く。
+ * `?mock=error` に切り替わったときに既定シナリオのキャッシュを掴んだままにならないよう、
+ * スコープが変わったら別の key = 別のキャッシュとして扱う。
+ */
+export function queryKeys(scope: QueryScope) {
+  return {
+    me: () => [scope, "me"] as const,
+    passkeys: () => [scope, "passkeys"] as const,
+    domains: () => [scope, "domains"] as const,
+    domain: (name: string) => [scope, "domain", name] as const,
+    candidates: (input: CandidateInput) =>
+      [scope, "candidates", input] as const,
+    subdomainPlan: (domain: string) =>
+      [scope, "subdomain-plan", domain] as const,
+    dnsDiff: (domain: string) => [scope, "dns-diff", domain] as const,
+    transfers: () => [scope, "transfers"] as const,
+    operationLogs: () => [scope, "logs", "operations"] as const,
+    aiLogs: () => [scope, "logs", "ai"] as const,
+  };
+}
+
+/** 現在のスコープを閉じ込めた queryKey 群。各 hook はこれを使う。 */
+export function useQueryKeys(): ReturnType<typeof queryKeys> {
+  const scope = useQueryScope();
+  return useMemo(() => queryKeys(scope), [scope]);
+}
 
 type Query<T> = UseQueryResult<T, ApiClientError>;
 type Mutation<TData, TVariables = void> = UseMutationResult<
@@ -60,8 +77,9 @@ type Mutation<TData, TVariables = void> = UseMutationResult<
 
 export function useMe(): Query<Me> {
   const services = useServices();
+  const keys = useQueryKeys();
   return useQuery({
-    queryKey: queryKeys.me(),
+    queryKey: keys.me(),
     queryFn: () => services.settings.me(),
   });
 }
@@ -72,10 +90,11 @@ export function useUpdateAiSettings(): Mutation<
 > {
   const services = useServices();
   const queryClient = useQueryClient();
+  const keys = useQueryKeys();
   return useMutation({
     mutationFn: (input) => services.settings.updateAi(input),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.me() });
+      void queryClient.invalidateQueries({ queryKey: keys.me() });
     },
   });
 }
@@ -94,8 +113,9 @@ export function useDemoReset(): Mutation<void> {
 
 export function usePasskeys(): Query<PasskeySummary[]> {
   const services = useServices();
+  const keys = useQueryKeys();
   return useQuery({
-    queryKey: queryKeys.passkeys(),
+    queryKey: keys.passkeys(),
     queryFn: () => services.auth.listPasskeys(),
   });
 }
@@ -103,10 +123,11 @@ export function usePasskeys(): Query<PasskeySummary[]> {
 export function useAddPasskey(): Mutation<PasskeySummary> {
   const services = useServices();
   const queryClient = useQueryClient();
+  const keys = useQueryKeys();
   return useMutation({
     mutationFn: () => services.auth.addPasskey(),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.passkeys() });
+      void queryClient.invalidateQueries({ queryKey: keys.passkeys() });
     },
   });
 }
@@ -114,10 +135,11 @@ export function useAddPasskey(): Mutation<PasskeySummary> {
 export function useDeletePasskey(): Mutation<void, string> {
   const services = useServices();
   const queryClient = useQueryClient();
+  const keys = useQueryKeys();
   return useMutation({
     mutationFn: (id) => services.auth.deletePasskey(id),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.passkeys() });
+      void queryClient.invalidateQueries({ queryKey: keys.passkeys() });
     },
   });
 }
@@ -126,8 +148,9 @@ export function useDeletePasskey(): Mutation<void, string> {
 
 export function useDomains(): Query<DomainSummary[]> {
   const services = useServices();
+  const keys = useQueryKeys();
   return useQuery({
-    queryKey: queryKeys.domains(),
+    queryKey: keys.domains(),
     queryFn: () => services.domains.list(),
   });
 }
@@ -135,18 +158,20 @@ export function useDomains(): Query<DomainSummary[]> {
 export function useSyncDomains(): Mutation<DomainSummary[]> {
   const services = useServices();
   const queryClient = useQueryClient();
+  const keys = useQueryKeys();
   return useMutation({
     mutationFn: () => services.domains.sync(),
     onSuccess: (domains) => {
-      queryClient.setQueryData(queryKeys.domains(), domains);
+      queryClient.setQueryData(keys.domains(), domains);
     },
   });
 }
 
 export function useDomain(name: string): Query<DomainDetail> {
   const services = useServices();
+  const keys = useQueryKeys();
   return useQuery({
-    queryKey: queryKeys.domain(name),
+    queryKey: keys.domain(name),
     queryFn: () => services.domains.get(name),
     enabled: name !== "",
   });
@@ -168,11 +193,12 @@ export function useRegisterDomain(): Mutation<
 > {
   const services = useServices();
   const queryClient = useQueryClient();
+  const keys = useQueryKeys();
   return useMutation({
     mutationFn: (input) => services.domains.register(input),
     onSuccess: (domain) => {
-      queryClient.setQueryData(queryKeys.domain(domain.name), domain);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.domains() });
+      queryClient.setQueryData(keys.domain(domain.name), domain);
+      void queryClient.invalidateQueries({ queryKey: keys.domains() });
     },
   });
 }
@@ -183,11 +209,12 @@ function useDomainMutation<TData, TVariables>(
   mutationFn: (variables: TVariables) => Promise<TData>,
 ): Mutation<TData, TVariables> {
   const queryClient = useQueryClient();
+  const keys = useQueryKeys();
   return useMutation({
     mutationFn,
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.domain(name) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.domains() });
+      void queryClient.invalidateQueries({ queryKey: keys.domain(name) });
+      void queryClient.invalidateQueries({ queryKey: keys.domains() });
     },
   });
 }
@@ -235,11 +262,12 @@ export function useAuthCode(name: string): Mutation<{ authCode: string }> {
 export function useGenerateCandidates(): Mutation<Candidate[], CandidateInput> {
   const services = useServices();
   const queryClient = useQueryClient();
+  const keys = useQueryKeys();
   return useMutation({
     mutationFn: (input) => services.candidates.generate(input),
     // AI 呼び出しは成否どちらでも AI ログに積まれる（ui-screens §1）
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.aiLogs() });
+      void queryClient.invalidateQueries({ queryKey: keys.aiLogs() });
     },
   });
 }
@@ -248,8 +276,9 @@ export function useGenerateCandidates(): Mutation<Candidate[], CandidateInput> {
 
 export function useSubdomainPlan(domain: string): Query<SubdomainPlan | null> {
   const services = useServices();
+  const keys = useQueryKeys();
   return useQuery({
-    queryKey: queryKeys.subdomainPlan(domain),
+    queryKey: keys.subdomainPlan(domain),
     queryFn: () => services.subdomains.get(domain),
     enabled: domain !== "",
   });
@@ -260,18 +289,19 @@ export function useProposeSubdomains(
 ): Mutation<SubdomainPlan, { repoUrl?: string; description?: string }> {
   const services = useServices();
   const queryClient = useQueryClient();
+  const keys = useQueryKeys();
   return useMutation({
     mutationFn: (input: { repoUrl?: string; description?: string }) =>
       services.subdomains.propose(domain, input),
     onSuccess: (plan) => {
-      queryClient.setQueryData(queryKeys.subdomainPlan(domain), plan);
+      queryClient.setQueryData(keys.subdomainPlan(domain), plan);
       void queryClient.invalidateQueries({
-        queryKey: queryKeys.dnsDiff(domain),
+        queryKey: keys.dnsDiff(domain),
       });
     },
     // AI 呼び出しは成否どちらでも AI ログに積まれる（ui-screens §1）
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.aiLogs() });
+      void queryClient.invalidateQueries({ queryKey: keys.aiLogs() });
     },
   });
 }
@@ -281,12 +311,13 @@ export function useSaveSubdomainPlan(
 ): Mutation<SubdomainPlan, SubdomainPlan> {
   const services = useServices();
   const queryClient = useQueryClient();
+  const keys = useQueryKeys();
   return useMutation({
     mutationFn: (plan: SubdomainPlan) => services.subdomains.save(domain, plan),
     onSuccess: (plan) => {
-      queryClient.setQueryData(queryKeys.subdomainPlan(domain), plan);
+      queryClient.setQueryData(keys.subdomainPlan(domain), plan);
       void queryClient.invalidateQueries({
-        queryKey: queryKeys.dnsDiff(domain),
+        queryKey: keys.dnsDiff(domain),
       });
     },
   });
@@ -294,8 +325,9 @@ export function useSaveSubdomainPlan(
 
 export function useDnsDiff(domain: string): Query<DnsDiff> {
   const services = useServices();
+  const keys = useQueryKeys();
   return useQuery({
-    queryKey: queryKeys.dnsDiff(domain),
+    queryKey: keys.dnsDiff(domain),
     queryFn: () => services.subdomains.diff(domain),
     enabled: domain !== "",
   });
@@ -310,18 +342,19 @@ export function useApplyDns(domain: string): Mutation<{
 }> {
   const services = useServices();
   const queryClient = useQueryClient();
+  const keys = useQueryKeys();
   return useMutation({
     mutationFn: () => services.subdomains.apply(domain),
     onSuccess: (result) => {
-      queryClient.setQueryData(queryKeys.subdomainPlan(domain), result.plan);
+      queryClient.setQueryData(keys.subdomainPlan(domain), result.plan);
       void queryClient.invalidateQueries({
-        queryKey: queryKeys.dnsDiff(domain),
+        queryKey: keys.dnsDiff(domain),
       });
       // NS 切替がドメイン側のステータス（inactive 解除）に効く
       void queryClient.invalidateQueries({
-        queryKey: queryKeys.domain(domain),
+        queryKey: keys.domain(domain),
       });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.domains() });
+      void queryClient.invalidateQueries({ queryKey: keys.domains() });
     },
   });
 }
@@ -330,8 +363,9 @@ export function useApplyDns(domain: string): Mutation<{
 
 export function useTransfers(): Query<Transfer[]> {
   const services = useServices();
+  const keys = useQueryKeys();
   return useQuery({
-    queryKey: queryKeys.transfers(),
+    queryKey: keys.transfers(),
     queryFn: () => services.transfers.list(),
   });
 }
@@ -339,11 +373,12 @@ export function useTransfers(): Query<Transfer[]> {
 export function useRefreshTransfers(): Mutation<Transfer[]> {
   const services = useServices();
   const queryClient = useQueryClient();
+  const keys = useQueryKeys();
   return useMutation({
     mutationFn: () => services.transfers.refresh(),
     onSuccess: (transfers) => {
-      queryClient.setQueryData(queryKeys.transfers(), transfers);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.domains() });
+      queryClient.setQueryData(keys.transfers(), transfers);
+      void queryClient.invalidateQueries({ queryKey: keys.domains() });
     },
   });
 }
@@ -354,10 +389,11 @@ export function useRequestTransfer(): Mutation<
 > {
   const services = useServices();
   const queryClient = useQueryClient();
+  const keys = useQueryKeys();
   return useMutation({
     mutationFn: (input) => services.transfers.request(input),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.transfers() });
+      void queryClient.invalidateQueries({ queryKey: keys.transfers() });
     },
   });
 }
@@ -371,13 +407,14 @@ export function useTransferAction(): Mutation<
 > {
   const services = useServices();
   const queryClient = useQueryClient();
+  const keys = useQueryKeys();
   return useMutation({
     mutationFn: ({ id, action }) => services.transfers[action](id),
     onSuccess: (transfer) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.transfers() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.domains() });
+      void queryClient.invalidateQueries({ queryKey: keys.transfers() });
+      void queryClient.invalidateQueries({ queryKey: keys.domains() });
       void queryClient.invalidateQueries({
-        queryKey: queryKeys.domain(transfer.domainName),
+        queryKey: keys.domain(transfer.domainName),
       });
     },
   });
@@ -387,16 +424,18 @@ export function useTransferAction(): Mutation<
 
 export function useOperationLogs(): Query<OperationLog[]> {
   const services = useServices();
+  const keys = useQueryKeys();
   return useQuery({
-    queryKey: queryKeys.operationLogs(),
+    queryKey: keys.operationLogs(),
     queryFn: () => services.logs.operations(),
   });
 }
 
 export function useAiLogs(): Query<AiLog[]> {
   const services = useServices();
+  const keys = useQueryKeys();
   return useQuery({
-    queryKey: queryKeys.aiLogs(),
+    queryKey: keys.aiLogs(),
     queryFn: () => services.logs.ai(),
   });
 }

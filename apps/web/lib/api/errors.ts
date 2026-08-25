@@ -15,10 +15,18 @@ import {
 
 export type ClientErrorCode = ApiErrorCode | "NOT_IMPLEMENTED" | "NETWORK";
 
+/**
+ * 失敗した相手。`REGISTRY_TIMEOUT` / `REGISTRY_UNAVAILABLE` は AI 呼び出しでも使うため、
+ * 文言（`lib/error-messages.ts`）を出し分けるのに使う（ui-screens S-23 / S-41）。
+ * 既定は未指定 = どちらとも言わない（レジストリ寄りの文言になる）。
+ */
+export type ErrorOrigin = "registry" | "ai";
+
 export interface ApiClientErrorInit {
   code: ClientErrorCode;
   message: string;
   retryable?: boolean;
+  origin?: ErrorOrigin;
   registry?: RegistryId;
   registryCode?: string;
   requestId?: string;
@@ -39,6 +47,7 @@ const RETRYABLE_BY_DEFAULT: ReadonlySet<ClientErrorCode> =
 export class ApiClientError extends Error {
   readonly code: ClientErrorCode;
   readonly retryable: boolean;
+  readonly origin: ErrorOrigin | undefined;
   readonly registry: RegistryId | undefined;
   readonly registryCode: string | undefined;
   readonly requestId: string | undefined;
@@ -49,6 +58,7 @@ export class ApiClientError extends Error {
     this.name = "ApiClientError";
     this.code = init.code;
     this.retryable = init.retryable ?? RETRYABLE_BY_DEFAULT.has(init.code);
+    this.origin = init.origin;
     this.registry = init.registry;
     this.registryCode = init.registryCode;
     this.requestId = init.requestId;
@@ -57,11 +67,15 @@ export class ApiClientError extends Error {
 }
 
 /** 未実装の API ルートを呼んだときの定型エラー（HTTP 実装が使う）。 */
-export function notImplemented(route: string): ApiClientError {
+export function notImplemented(
+  route: string,
+  origin?: ErrorOrigin,
+): ApiClientError {
   return new ApiClientError({
     code: "NOT_IMPLEMENTED",
     message: `${route} はまだ実装されていません。`,
     retryable: false,
+    ...(origin === undefined ? {} : { origin }),
   });
 }
 
