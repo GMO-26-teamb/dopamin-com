@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.1.3（2026-08-25） |
+| 版 | v0.1.4（2026-08-25） |
 | プロダクト | ドパ民.com / dopamin.com — Z世代向けドメイン管理プラットフォーム（疑似レジストラ） |
 | チーム | チームドパ民（Team B）: 佐々木 琢登・星 はるか・上原 拓也 |
 | 位置づけ | GMO Internet Internship in kitaQ Webアプリケーションコース（2026/08/24–28）成果物 |
@@ -100,6 +100,7 @@
 - Whois 情報公開代行、ドメインパーキング、オークション、バックオーダー
 - メール / プッシュ通知、多言語対応（日本語のみ）、管理者画面、リセラー機能
 - 本物の EPP（XML over TLS）接続
+- 本アプリの別ユーザー間でのドメイン所有者変更（同一レジストラ ID 内の操作なので EPP 移管にならない。必要になれば DB 上の付け替えとして別 FR を起こす）
 
 ### 2.3 制約
 
@@ -145,7 +146,7 @@
 4. `.com` を Kitaqsign に登録（3クリック）
 5. GitHub の公開リポ URL を入力 → `api.` / `docs.` / `app.` などの構成提案 → 保存
 6. 別のドメインで 更新 → 廃止 → 復旧（RGP）を実演。EPP ステータス遷移が画面に反映されることを示す
-7. Kitaqnic 側のドメインで移管 IN（AuthCode）を実演
+7. 相手レジストラ（他チーム、または運営提供の第 2 レジストラ ID）が保有する Kitaqnic 側のドメインを AuthCode で移管 IN → 相手が承認 → 保有一覧に現れる。相手が確保できない場合は `mock` レジストリで実演し、時間があれば移管 OUT（受信した申請の承認）も見せる
 8. レジストリ通信エラーを発生させ、ユーザー向けメッセージ・操作ログ・再同期で復帰する様子を示す
 9. AI ログを開き、開発中も含めて AI をどう使ったかを話す
 
@@ -175,12 +176,14 @@
 - **概要**: ログインユーザーが保有するドメインを一覧表示する（プロトタイプ画面「保有ドメイン一覧」）。
 - **振る舞い**:
   - 表示項目: ドメイン名 / レジストリ（kitaqsign・kitaqnic）/ 状態バッジ（Active・RGP・Pending Delete・移管中 等）/ 有効期限 / 最終同期時刻。
-  - 一覧は DB のキャッシュを表示し、「最新化」ボタンで各ドメインを `info` で再同期する。
+  - 一覧は DB のキャッシュを表示し、「最新化」ボタンで各ドメインを `info` で再同期する（同時に Poll も消化する、FR-12）。
+  - 表示対象は `ownership = owned` の行のみ。移管 OUT 済み（`transferred_out`）は表示せず `/transfers` の履歴で参照する。移管 IN 申請中は `domains` 行を持たないため保有一覧には出ず、`/transfers` に表示する（FR-12）。
   - 行クリックで詳細（FR-07）へ遷移。0件時はドメイン検索（FR-03）への CTA を表示。
 - **AC**:
   - AC-02-1: 他ユーザーのドメインは表示されない（API 側で `user_id` によるフィルタ）。
   - AC-02-2: 有効期限が 30 日以内のドメインは警告バッジを表示する。
   - AC-02-3: 状態バッジは EPP ステータス（§11.3）から決定的に導出される。
+  - AC-02-4: 移管 OUT が完了したドメインは、次回の最新化以降、保有一覧に表示されない。
 
 ### FR-03 ドメイン検索・空き確認【P0】
 
@@ -240,12 +243,13 @@
 
 - **概要**: 1ドメインの詳細をレジストリから取得して表示する（EPP `info`）。
 - **振る舞い**:
-  - 表示: ドメイン名 / レジストリ / EPP ステータス一覧（バッジ + 説明）/ 登録日・有効期限 / ネームサーバー / 登録者コンタクト（ダミー）/ 猶予期間情報（RGP 残日数など）/ 移管可能日（登録・前回移管から 60 日ルール）。
+  - 表示: ドメイン名 / レジストリ / EPP ステータス一覧（バッジ + 説明）/ 登録日・有効期限 / ネームサーバー / 登録者コンタクト（ダミー）/ 猶予期間情報（RGP 残日数など）/ 移管可能日（ICANN 60 日ルールの参考表示。可否判定には使わない、FR-12）。
   - 画面表示時にレジストリから `info` を取得し、DB を更新（レジストリが正、§6.5）。
-  - 操作パネル: 更新 / 情報修正 / 廃止 / 復旧 / 移管。状態に応じて実行不可な操作は無効化し理由を表示する。
+  - 操作パネル: 更新 / 情報修正 / 廃止 / 復旧 / 移管。状態に応じて実行不可な操作は無効化し理由を表示する。`pendingTransfer` 中は方向に応じて「承認 / 拒否」（受信した OUT 申請）または「取消」（自分の IN 申請）のみを表示し、自動承認までの残り時間を出す（§11.3）。`ownership = transferred_out` の行は「移管済み」として表示し操作パネルを出さない。
 - **AC**:
   - AC-07-1: `serverUpdateProhibited` 等の Server ステータスがある場合、対応する操作ボタンが無効化される（Server > Client の優先順位）。
   - AC-07-2: `info` に失敗した場合は DB キャッシュを「最終同期時刻」付きで表示し、再試行ボタンを出す。
+  - AC-07-3: 相手レジストラからの移管申請を受信中のドメインでは、承認 / 拒否ボタンと自動承認までの残り時間が表示される。
 
 ### FR-08 更新（有効期限延長）【P0】
 
@@ -284,15 +288,29 @@
 
 ### FR-12 移管（IN / OUT）【P0】
 
-- **概要**: 他レジストラ（本アプリの別ユーザー・別レジストラ相当を含む）との間でドメインを移管する（EPP `transfer`）。
-- **振る舞い**:
-  - 移管 OUT: 保有ドメインの AuthCode を表示（コピー可）。表示は操作ログに記録。
-  - 移管 IN: ドメイン名 + AuthCode を入力 → `transfer request` → 状態「移管申請中（pendingTransfer）」で一覧に表示 → 完了後 `info` で取り込み。
-  - 登録・前回移管から 60 日以内は移管不可の旨を表示（ICANN ルール）。レジストリが即時承認 / 承認待ちのどちらかは Swagger に従う【要確認】。
-  - 移管ステータスの照会（`transfer query`）と、承認 / 拒否（受け側）は P2。
+- **概要**: 別の `X-Registrar-Id` を持つレジストラ（他チームのレジストラアプリ等。以下「相手レジストラ」）との間でドメインを移管する（EPP `transfer`）。本アプリは gaining（移管先）にも losing（移管元 = 現スポンサー）にもなる。本アプリの別ユーザー間の所有者変更は同一レジストラ内の操作で EPP 移管にならないため、本 FR の対象外（§2.2）。
+- **前提**（§21.1、`docs/registry/spec-notes.md` §1「移管フロー」）:
+  - レジストラ ID はチームごとに別【要確認: §21.2 #11】。
+  - 移管は承認待ち型。gaining の `transfer request` で `pendingTransfer` になり losing に Poll 通知が届く。losing は approve / reject、gaining は承認前に cancel できる。losing が放置すると申請から 20 分でサーバが自動承認する。
+  - レジストリは ICANN の 60 日ルールを強制しない（登録直後でも移管できる）。
+- **振る舞い（移管 IN = 本アプリが gaining）**:
+  - ドメイン名 + AuthCode を入力 → `transferRequest` → 受理されたら `transfers(direction = in, status = pending)` を作成し `/transfers` に「移管申請中」として表示する。`domains` 行はこの時点では作らない（保有一覧 FR-02 には出さない）。
+  - 完了検知: `/transfers` 表示時・`GET /transfers/:id`・Poll 消化時に `transferQuery`（または Poll 通知）で状態を照会する。承認（相手の approve / サーバ自動承認）を検知したら `info` で取り込み、`domains` 行を作成（`last_transfer_at` を設定）し、`transfers` を `approved` にして `domain_id` を紐付ける。拒否・取消は `rejected` / `cancelled` として履歴に残す。
+  - 取り込み後のコンタクト: ドメインが参照するコンタクトは相手レジストラ発行の ID のままなので、自ユーザーの登録者プロファイル（対象レジストリに未作成なら `contact create` を先に実行）へ `update` で差し替える。差し替えに失敗しても取り込みは成功扱いとし、詳細画面に「コンタクト未移行」警告を出す【要確認: §21.2 #14】。
+  - 承認前の取消（`transferCancel`）を `/transfers` から実行できる（P1）。
+- **振る舞い（移管 OUT = 本アプリが losing）**:
+  - AuthCode 表示: 詳細画面の「移管」から AuthCode を取得して表示する（コピー可）。取得手段が `rotate-auth-info`（再発行）しか無い場合は、ボタンを「AuthCode を発行」とし、発行のたびに前の値が無効になる旨を表示する【要確認: §21.2 #5】。AuthCode は DB に保存しない。表示イベントは操作ログに記録し、値はマスクする（AC-15-2）。
+  - 受信申請の検知: Poll（`poll` → DB 反映 → `ackMessage`）で相手レジストラからの transfer request 通知を取り込み、`transfers(direction = out, status = pending)` を作成する。Poll は `/transfers` 表示時・`POST /domains/sync`・`POST /registry/poll` で消化し、未 ack のメッセージを残さない（FIFO のため残すと以降の通知が読めない）。`info` で `pendingTransfer` を検知した場合も同様に `transfers(out)` を作る。
+  - 承認 / 拒否: `/transfers` と詳細画面に「移管申請を受信」を表示し、承認（`transferApprove`）/ 拒否（`transferReject`）ボタンと自動承認までの残り時間（申請 + 20 分）を出す。
+  - 完了反映: 承認（自分の approve / サーバ自動承認）を検知したら `domains` 行を `ownership = transferred_out` に遷移させ、保有一覧から除外する（§6.5、§9.1）。以後その行への書き込み系操作は `OPERATION_NOT_ALLOWED`。
+- **60 日ルール**: レジストリが強制しないためアプリも強制しない。移管可否（AuthCode 表示 / 申請）は §11.3 の EPP ステータスのみで判定する。FR-07 の「移管可能日」は ICANN 実運用の参考情報としてツールチップ表示に留める。
 - **AC**:
-  - AC-12-1: 正しい AuthCode で移管申請が受理され、一覧に移管中として表示される。
-  - AC-12-2: 誤った AuthCode はレジストリのエラーをユーザー向けメッセージに変換して表示する。
+  - AC-12-1: 正しい AuthCode で移管申請が受理され、`/transfers` に移管申請中として表示される。保有一覧には出ない。
+  - AC-12-2: 誤った AuthCode（result 2202）を含むレジストリの拒否（移管ロック中・`pendingTransfer` 中・未登録など）は、ユーザー向けメッセージに変換して表示する。
+  - AC-12-3: 相手レジストラが承認（またはサーバ自動承認）した後に `/transfers` を開くと、ドメインが取り込まれ保有一覧に表示される。
+  - AC-12-4: 相手レジストラから自ドメインへの transfer request が届くと、Poll 消化後に `/transfers` と詳細画面に「移管申請を受信」が表示され、承認・拒否のいずれも実行できる。
+  - AC-12-5: 移管 OUT 完了後、そのドメインは保有一覧から消え、更新・情報修正等は `OPERATION_NOT_ALLOWED` になる。同じドメイン名を後日再び移管 IN しても DB 制約で失敗しない。
+  - AC-12-6: 登録直後（60 日以内）のドメインでも AuthCode 表示・移管申請が UI でブロックされない。
 
 ### FR-13 サブドメイン設計支援【P1】
 
@@ -326,7 +344,7 @@
 ### FR-16 デモデータリセット【P1】
 
 - **概要**: 発表・検証用に、ログインユーザーの DB 上のデータを既定のデモ状態に戻す。
-- **振る舞い**: ユーザーのドメイン・設計・ログを削除し、デモ用ドメイン（各状態のサンプル: Active / RGP / 期限間近 / 移管中）を投入する。レジストリ側の状態はリセットできないため、デモ用ドメインは `dopamin-demo-<短いランダム>` 命名でレジストリに実登録するか、`mock` レジストリ（§11.1）に紐付ける【要確認: レジストリ側にテスト用ドメインの削除・再利用制約があるか】。
+- **振る舞い**: ユーザーのドメイン・設計・ログを削除し、デモ用ドメイン（各状態のサンプル: Active / RGP / 期限間近 / 移管中）を投入する。レジストリ側の状態はリセットできないため、デモ用ドメインは `dopamin-demo-<短いランダム>` 命名でレジストリに実登録するか、`mock` レジストリ（§11.1）に紐付ける【要確認: レジストリ側にテスト用ドメインの削除・再利用制約があるか】。「移管中」サンプル（IN 申請中・受信した OUT 申請）は 20 分でサーバ自動承認され実レジストリでは維持できないため、`mock` レジストリでのみ投入する。
 - **AC**:
   - AC-16-1: `DEMO_RESET_ENABLED=true` の環境でのみ実行可能。
   - AC-16-2: リセット後、デモシナリオ（§3.3）の 6〜8 が再現できる。
@@ -342,7 +360,7 @@
 - **概要**: レジストリ通信エラー（タイムアウト・5xx・拒否応答・仕様不一致）を、ユーザーが次の行動を取れる形で表示し、ローカル状態を壊さない。
 - **振る舞い**:
   - 統一エラー形式（§10.3）で API が返し、Web は種別ごとのメッセージ（例: 「Kitaqsign が応答しません。しばらくして再試行してください」）と再試行ボタンを表示。
-  - 参照系（`check` / `info`）は指数バックオフで最大 2 回自動再試行。更新系（`create` / `renew` / `update` / `delete` / `restore` / `transfer`）は自動再試行せず、タイムアウト時は `info` で結果を照合する。
+  - 参照系（`check` / `info`）は指数バックオフで最大 2 回自動再試行。更新系（`create` / `renew` / `update` / `delete` / `restore` / `transfer`）は自動再試行せず、タイムアウト時は `info` で結果を照合する。ただし `transferRequest` のタイムアウトは `info` ではなく `transferQuery` で照合する（相手レジストラのドメインは `info` で保有確認できないため）。
   - 仕様不一致（レスポンススキーマ検証失敗）は `REGISTRY_SPEC_MISMATCH` として記録し、画面には「レジストリの仕様変更の可能性」と表示。
 - **AC**:
   - AC-18-1: レジストリの URL を無効化した状態で全画面がクラッシュせず、エラー表示 + 再試行が機能する。
@@ -431,7 +449,7 @@ flowchart LR
 ### 6.4 レジストリ Bridge 層
 
 - お名前.com の NAVI / API / BRIDGE / REGISTRY 構成に倣い、レジストリ差分を Bridge 層に閉じ込める。
-- `RegistryAdapter` は EPP 相当の 8 操作（`check` `info` `create` `renew` `update` `delete` `restore` `transfer` + `transferQuery`）を、正規化された入出力型で提供する（§11.1）。
+- `RegistryAdapter` は EPP 相当の操作（`check` `info` `create` `renew` `update` `delete` `restore`、移管 5 操作 `transferRequest` `transferQuery` `transferApprove` `transferReject` `transferCancel`、`getAuthInfo`、`poll` / `ackMessage`）を、正規化された入出力型で提供する（§11.1）。
 - TLD → レジストリのルーティングは `packages/registry/src/routing.ts` の設定で決める（§11.2）。
 - `mock` アダプタをローカル開発・テスト・デモ用に用意し、環境変数で切り替える。
 
@@ -440,7 +458,9 @@ flowchart LR
 - ドメインの状態はレジストリが正。DB の `domains` は「ユーザーとドメインの紐付け」「表示用キャッシュ」「同期時刻」を持つ。
 - 読み取り: 一覧は DB、詳細は `info` で最新化して DB を更新。
 - 書き込み: レジストリ成功 → DB 更新の順（write-through）。レジストリ成功後の DB 更新失敗は操作ログに残し、次回 `info` で自己修復する。
-- 更新系コマンドのタイムアウト: 再送しない。`info` で結果を照合し、存在すれば成功扱いで DB を更新する。
+- 更新系コマンドのタイムアウト: 再送しない。`info` で結果を照合し、存在すれば成功扱いで DB を更新する。`transferRequest` のみ `transferQuery` で照合する（FR-18）。
+- 所有権（移管 OUT）: Poll の移管承認通知、または `info` の `sponsoringRegistrarId`（clID）が自レジストラ ID（`adapter.registrarId`）と異なることを検知したら、`domains.ownership` を `transferred_out` に遷移させる。行は削除せず履歴として残し、`subdomain_plans` も旧行に紐付いたまま新所有者へは引き継がない。同じドメインを後日再び移管 IN した場合は新しい行を作る（一意制約は保有中の行のみ、§9.1）【要確認: 非スポンサーからの `info` 応答、§21.2 #12】。
+- 所有権（移管 IN）: `transfers(in)` が承認されるまで `domains` 行は作らない。承認検知 → `info` 取り込み → `domains` 作成の順で、取り込みが失敗しても `transfers` は `approved` のまま残し、次回の `/transfers` 表示で再試行する。
 
 ---
 
@@ -583,16 +603,19 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。すべてのテーブル
 |---|---|---|
 | id | uuid PK | |
 | user_id | uuid FK users | |
-| name | text NOT NULL UNIQUE | FQDN 小文字 |
+| name | text NOT NULL | FQDN 小文字。保有中（`ownership = owned`）の行についてのみ一意（部分一意インデックス `UNIQUE(name) WHERE ownership = 'owned'`） |
 | sld | text NOT NULL | |
 | tld | text NOT NULL | ドットなし |
 | registry | text NOT NULL | `kitaqsign` / `kitaqnic` / `mock` |
 | registry_ref | text | レジストリ側 ID（ROID 相当）があれば |
+| ownership | text NOT NULL DEFAULT 'owned' | `owned` / `transferred_out`（§6.5） |
+| sponsoring_registrar_id | text | `info` の clID（現スポンサーレジストラ）。自レジストラ ID と一致すれば保有中【要確認: §21.2 #12】 |
+| transferred_out_at | timestamptz | 移管 OUT 完了を検知した日時 |
 | statuses | text[] NOT NULL | EPP ステータス（§11.3） |
 | nameservers | text[] NOT NULL DEFAULT '{}' | |
 | registered_at | timestamptz | レジストリの crDate |
 | expires_at | timestamptz | exDate |
-| last_transfer_at | timestamptz | 60 日ルール用 |
+| last_transfer_at | timestamptz | 移管 IN 完了日時（Transfer GP 表示・参考表示用。可否判定には使わない） |
 | rgp_status | text | `redemptionPeriod` / `pendingDelete` / NULL |
 | rgp_until | timestamptz | 猶予期限（レジストリが返す場合） |
 | raw_info | jsonb | 最後の `info` レスポンス |
@@ -604,13 +627,18 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。すべてのテーブル
 |---|---|---|
 | id | uuid PK | |
 | user_id | uuid FK users | |
+| domain_id | uuid FK domains | IN は取り込み完了後に紐付け。OUT は申請受信時点の保有行 |
 | domain_name | text NOT NULL | |
 | registry | text NOT NULL | |
-| direction | text NOT NULL | `in` / `out` |
-| status | text NOT NULL | `pending` / `approved` / `rejected` / `cancelled` |
+| direction | text NOT NULL | `in`（本アプリが gaining）/ `out`（本アプリが losing） |
+| status | text NOT NULL | `pending` / `approved` / `rejected` / `cancelled`。`approved` はサーバ自動承認を含む |
+| registry_status | text | レジストリが返す移管状態の生値（trStatus 相当）があれば【要確認: §21.2 #13】 |
+| counterpart_registrar_id | text | 相手レジストラ ID（Poll / `transferQuery` が返す場合） |
+| registry_message_id | text | 取り込み元の Poll メッセージ ID。`UNIQUE(registry, registry_message_id)` で二重処理を防ぐ |
 | requested_at | timestamptz | |
+| act_by_at | timestamptz | 自動承認期限（レジストリが返す acDate、無ければ `requested_at` + 20 分） |
 | completed_at | timestamptz | |
-| raw | jsonb | |
+| raw | jsonb | 最後の `transferQuery` / Poll 応答 |
 
 **subdomain_plans**
 
@@ -649,10 +677,11 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。すべてのテーブル
 | 列 | 型 | 備考 |
 |---|---|---|
 | id | uuid PK | |
-| user_id | uuid FK users | |
-| request_id | text | |
+| user_id | uuid FK users | NULL 可。Poll 由来などシステム起点の呼び出しは NULL |
+| request_id | text | `X-Cl-TRID` に送る値（clTRID）と一致させる |
+| sv_trid | text | レジストリ採番の svTRID（障害調査・他チームとの突合キー） |
 | registry | text NOT NULL | |
-| command | text NOT NULL | `check` / `info` / `create` / ... |
+| command | text NOT NULL | `check` / `info` / `create` / `renew` / `update` / `delete` / `restore` / `transfer_request` / `transfer_query` / `transfer_approve` / `transfer_reject` / `transfer_cancel` / `auth_info` / `poll` / `ack`（`packages/shared` の enum） |
 | domain_name | text | |
 | status | text NOT NULL | `success` / `error` / `timeout` / `spec_mismatch` |
 | error_code | text | §10.3 のコード |
@@ -679,9 +708,10 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。すべてのテーブル
 
 ### 9.2 主要な導出ロジック（`packages/shared`）
 
-- `deriveDisplayStatus(statuses, rgp_status)` → `active` / `rgp` / `pending_delete` / `transfer_pending` / `hold` / `inactive` / `locked`
-- `isOperationAllowed(op, statuses)` → Server ステータスを Client より優先して判定
-- `transferEligibleAt(registered_at, last_transfer_at)` → 60 日後の日付
+- `deriveDisplayStatus(statuses, rgp_status, ownership, transfer?)` → `active` / `rgp` / `pending_delete` / `transfer_in_pending` / `transfer_out_pending` / `transferred_out` / `hold` / `inactive` / `locked`（`transfer` は `transfers` の pending 行 `{ direction }`）
+- `isOperationAllowed(op, statuses, ownership, transfer?)` → Server ステータスを Client より優先して判定。`transferred_out` は全操作不可、`pendingTransfer` 中は方向に応じて approve / reject（out）または cancel（in）のみ可（§11.3）
+- `transferEligibleAt(registered_at, last_transfer_at)` → 60 日後の日付（参考表示専用。可否判定には使わない）
+- `transferAutoApproveAt(requested_at, act_by_at?)` → 自動承認期限（`act_by_at` があればそれ、無ければ 20 分後）
 - `daysUntil(expires_at)` → 期限警告
 
 ---
@@ -705,7 +735,7 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。すべてのテーブル
 | POST | `/auth/passkeys/register/options` `/verify` | 要 | 追加登録（excludeCredentials 指定） | FR-01 |
 | DELETE | `/auth/passkeys/:id` | 要 | 削除（最後の 1 件は 409） | FR-01 |
 | GET | `/domains` | 要 | 保有一覧（DB） | FR-02 |
-| POST | `/domains/sync` | 要 | 全保有ドメインを `info` で再同期 | FR-02 |
+| POST | `/domains/sync` | 要 | 全保有ドメインを `info` で再同期し、Poll を消化する | FR-02/12 |
 | POST | `/domains/check` | 要 | `{ sld, tlds[] }` または `{ names[] }` → 各結果（空き・レジストリ・スコア） | FR-03/05 |
 | POST | `/domains` | 要 | `{ name, period, nameservers? }` → check → create → info | FR-06 |
 | GET | `/domains/:name` | 要 | `info` で最新化して返す（失敗時はキャッシュ + `stale: true`） | FR-07 |
@@ -713,10 +743,14 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。すべてのテーブル
 | PATCH | `/domains/:name` | 要 | `{ nameservers?, contacts?, clientStatuses? }` | FR-09 |
 | DELETE | `/domains/:name` | 要 | 廃止 | FR-10 |
 | POST | `/domains/:name/restore` | 要 | 復旧 | FR-11 |
-| GET | `/domains/:name/auth-code` | 要 | 移管 OUT 用 AuthCode | FR-12 |
-| POST | `/transfers` | 要 | `{ name, authCode }` → 移管 IN 申請 | FR-12 |
-| GET | `/transfers` | 要 | 移管一覧 | FR-12 |
-| GET | `/transfers/:id` | 要 | 状態照会（`transferQuery`） | FR-12 |
+| POST | `/domains/:name/auth-code` | 要 | 移管 OUT 用 AuthCode を取得（`rotate-auth-info` のみの場合は再発行。副作用があり得るため POST + Origin 検証） | FR-12 |
+| POST | `/transfers` | 要 | `{ name, authCode }` → 移管 IN 申請（`transferRequest`） | FR-12 |
+| GET | `/transfers` | 要 | 移管一覧（IN / OUT / 履歴）。表示時に Poll を消化し、pending 分を `transferQuery` で照会して DB に反映 | FR-12 |
+| GET | `/transfers/:id` | 要 | 状態照会（`transferQuery`）。承認を検知したら `info` で取り込み | FR-12 |
+| POST | `/transfers/:id/approve` | 要 | 受信した OUT 申請を承認（`direction = out` のみ） | FR-12 |
+| POST | `/transfers/:id/reject` | 要 | 受信した OUT 申請を拒否（`direction = out` のみ） | FR-12 |
+| POST | `/transfers/:id/cancel` | 要 | 自分の IN 申請を承認前に取消（`direction = in` のみ、P1） | FR-12 |
+| POST | `/registry/poll` | 要 | 全レジストリの Poll を消化し `transfers` / `domains` に反映（デモ・検証用の明示トリガー） | FR-12 |
 | POST | `/ai/domain-candidates` | 要 | `{ nickname, purpose?, tlds?, exclude? }` → 候補 6 件 + check + score | FR-04 |
 | POST | `/ai/uniqueness` | 要 | `{ slds[] }` → スコア | FR-05 |
 | POST | `/domains/:name/subdomain-plan` | 要 | `{ repoUrl? , description? }` → 提案（保存前） | FR-13 |
@@ -765,6 +799,8 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。すべてのテーブル
 | `RATE_LIMITED` | 429 | AI・GitHub のレート制限 |
 | `INTERNAL` | 500 | |
 
+移管系の `registryCode` はいずれも `REGISTRY_REJECTED` に載せ、コードごとにメッセージを出し分ける: 2202（AuthCode 不一致）/ 2300・2301（`pendingTransfer` 中の重複申請）/ 2304（ステータスにより不可 = 移管ロック等）/ 2106（移管対象外）/ 2303（未登録）【要確認: 実際に返るコード、§21.2 #16】。
+
 ### 10.4 レスポンス例（`POST /domains/check`）
 
 ```json
@@ -793,25 +829,33 @@ export type RegistryId = 'kitaqsign' | 'kitaqnic' | 'mock';
 
 export interface RegistryAdapter {
   readonly id: RegistryId;
+  readonly registrarId: string;                 // 自レジストラ ID（X-Registrar-Id）。スポンサー判定に使う
   readonly specVersion: string;                 // Swagger のバージョン or 取得日
   check(names: string[]): Promise<CheckResult[]>;
-  info(name: string): Promise<DomainInfo>;
+  info(name: string): Promise<DomainInfo>;      // DomainInfo.sponsoringRegistrarId（clID）を含む
   create(input: CreateInput): Promise<DomainInfo>;
   renew(name: string, input: RenewInput): Promise<DomainInfo>;
   update(name: string, input: UpdateInput): Promise<DomainInfo>;
   delete(name: string): Promise<DeleteResult>;
   restore(name: string): Promise<DomainInfo>;
-  transferRequest(name: string, authCode: string): Promise<TransferResult>;
+  transferRequest(name: string, authCode: string): Promise<TransferResult>;  // gaining
   transferQuery(name: string): Promise<TransferResult>;
-  authCode(name: string): Promise<string>;      // 移管 OUT 用【要確認: info に含まれるか専用 API か】
+  transferApprove(name: string): Promise<TransferResult>;  // losing（自レジストラがスポンサー）
+  transferReject(name: string): Promise<TransferResult>;   // losing
+  transferCancel(name: string): Promise<TransferResult>;   // gaining（承認前）
+  getAuthInfo(name: string): Promise<string>;   // 移管 OUT 用【要確認: info に含まれるか rotate-auth-info のみか】
+  poll(): Promise<PollMessage | null>;          // 最古の未 ack 通知（無ければ null）
+  ackMessage(id: string): Promise<void>;        // kitaqsign / kitaqnic でエンドポイントが異なる（spec-notes §2）
 }
 ```
 
+- `TransferResult` は `{ name, status: 'pending' | 'approved' | 'rejected' | 'cancelled', registryStatus?, requestingRegistrarId?, actingRegistrarId?, requestedAt?, actByAt?, newExpiresAt?, raw }`。`PollMessage` は `{ id, count, queuedAt, type: 'transfer_request' | 'transfer_approved' | 'transfer_rejected' | 'transfer_cancelled' | 'unknown', domainName?, transfer?: TransferResult, raw }`。いずれも実際のレスポンス形状は Swagger 確認後に確定する【要確認: §21.2 #13】。
 - 入出力型（`CheckResult` / `DomainInfo` / ...）は `packages/shared` の正規化型。レジストリ固有のフィールド名・日付形式・エラーコードはアダプタ内で変換する。
 - 各アダプタは `fetch` ベースの薄い HTTP クライアント + zod によるレスポンス検証（`.passthrough()` で未知フィールドは許容、必須フィールド欠落は `REGISTRY_SPEC_MISMATCH`）。
 - タイムアウト: 参照系 5 秒、更新系 15 秒（`AbortSignal.timeout`）。
 - すべての呼び出しは `operation_logs` に記録する（呼び出し側の `RegistryClient` ラッパーが担当。アダプタはログを意識しない）。
 - `mock` アダプタ: インメモリ + DB（`domains.raw_info`）で状態遷移を再現。`MOCK_REGISTRY_FAIL_MODE=timeout|5xx|reject|spec_mismatch` でエラーシミュレーションができる。
+  - 移管の再現: 相手レジストラ（`MOCK_FOREIGN_REGISTRAR_ID`）が保有するドメインを seed でき、Poll キューと自動承認タイマー（`MOCK_TRANSFER_AUTO_APPROVE_MS`、既定 20 分）を持つ。テスト・デモ用に `simulateInboundTransferRequest(name)` / `simulateCounterpartApprove(name)` / `simulateCounterpartReject(name)` を公開し、integration テスト（§19）と FR-16 の「移管中」サンプル投入から呼ぶ。
 
 ### 11.2 TLD ルーティング
 
@@ -839,11 +883,14 @@ export interface RegistryAdapter {
 | `clientTransferProhibited` / `serverTransferProhibited` | 移管ロック | 移管 OUT 不可 |
 | `clientDeleteProhibited` / `serverDeleteProhibited` | 削除ロック | 廃止不可 |
 | `clientUpdateProhibited` / `serverUpdateProhibited` | 更新ロック | 情報修正不可（Client 側はロック解除可、Server 側は不可） |
-| `pendingTransfer` | 移管中 | 全操作不可 |
+| `pendingTransfer` | 移管中 | 更新 / 情報修正 / 廃止 / 復旧 / 新規移管申請は不可。losing（自レジストラがスポンサー）は承認 / 拒否、gaining は取消のみ可 |
 | `redemptionPeriod` | 復旧猶予（RGP） | 復旧のみ可 |
 | `pendingDelete` | 削除待ち | 全操作不可 |
 
 Server ステータスは Client ステータスより優先される。
+
+- `ownership = transferred_out`（§9.1）の行は EPP ステータスに関わらず「移管済み」として表示のみ、全操作不可。
+- 移管可否（AuthCode 表示 / 移管申請）は本表のみで判定し、ICANN の 60 日ルールは含めない（FR-12）。
 
 ### 11.4 Grace Period の扱い
 
@@ -989,9 +1036,9 @@ export function resolveEmbeddingModel() { /* EMBEDDING_PROVIDER / EMBEDDING_MODE
 | `/login` | ログイン | ボタン 1 つ（テキスト入力なし） | FR-01 |
 | `/dashboard` | 保有ドメイン一覧 | テーブル、状態バッジ、最新化、0 件 CTA | FR-02 |
 | `/domains/new` | ドメイン検索・登録 | AI 候補セクション（ニックネーム・用途）、直接入力セクション、結果カード（空き + スコア）、登録ダイアログ | FR-03/04/05/06 |
-| `/domains/[name]` | ドメイン詳細 | 状態・期限・NS・コンタクト・猶予情報、操作パネル（更新/修正/廃止/復旧/移管） | FR-07〜12 |
+| `/domains/[name]` | ドメイン詳細 | 状態・期限・NS・コンタクト・猶予情報、操作パネル（更新/修正/廃止/復旧/移管）、受信した移管申請の承認 / 拒否と自動承認までの残り時間 | FR-07〜12 |
 | `/domains/[name]/subdomains` | サブドメイン設計 | リポ URL 入力、提案リスト（編集可）、設定手順テキスト | FR-13 |
-| `/transfers` | 移管 | 移管 IN フォーム、移管一覧 | FR-12 |
+| `/transfers` | 移管 | 移管 IN フォーム、IN 申請中（取消）、受信した OUT 申請（承認 / 拒否・残り時間）、履歴 | FR-12 |
 | `/logs` | ログ | 操作ログ / AI ログ タブ | FR-14/15 |
 | `/settings` | 設定 | パスキー管理、AI 設定、デモリセット | FR-01/16/17 |
 | 共通 | サイドバー + AI ログパネル | プロトタイプ踏襲（左: ナビ、右: AI ログのスライドイン） | FR-14 |
@@ -1083,6 +1130,7 @@ export function resolveEmbeddingModel() { /* EMBEDDING_PROVIDER / EMBEDDING_MODE
 | `KITAQSIGN_REGISTRAR_ID` / `KITAQSIGN_API_KEY` | `X-Registrar-Id` / `X-Api-Key` ヘッダ（認証 2 段目）。kitaqnic も同様 |
 | `REGISTRY_MODE` | `real` / `mock` |
 | `MOCK_REGISTRY_FAIL_MODE` | `none` / `timeout` / `5xx` / `reject` / `spec_mismatch` |
+| `MOCK_FOREIGN_REGISTRAR_ID` / `MOCK_TRANSFER_AUTO_APPROVE_MS` | `mock` レジストリの相手レジストラ ID と自動承認までのミリ秒（既定 20 分。テストでは短縮） |
 | `AI_PROVIDER` / `AI_MODEL` | 既定の生成モデル |
 | `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` | 埋め込みモデル |
 | `GOOGLE_GENERATIVE_AI_API_KEY` / `ANTHROPIC_API_KEY` | プロバイダ API キー |
@@ -1157,9 +1205,9 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | unit | `packages/shared` の導出ロジック、スコア計算、zod スキーマ | Vitest | 必須 |
 | unit | アダプタのマッピング（fixture → 正規化型）、エラー変換 | Vitest | 必須 |
 | contract | 各レジストリの Swagger から作った fixture でアダプタを検証。仕様変更時の回帰検出 | Vitest + fixture（`docs/registry`） | 必須 |
-| integration | Hono ルート（`app.request()`）を `mock` レジストリ + テスト DB で検証。認可・エラー形式 | Vitest | 必須（主要ルート） |
+| integration | Hono ルート（`app.request()`）を `mock` レジストリ + テスト DB で検証。認可・エラー形式。移管は IN 承認 / IN 拒否 / IN 取消 / OUT 承認 / OUT 拒否 / OUT 自動承認 / 出戻り（OUT 後に同名を再 IN）の 7 ケースを必須とする | Vitest | 必須（主要ルート） |
 | e2e | デモシナリオ（§3.3）の 1〜5。WebAuthn は Playwright の Virtual Authenticator（CDP）を使用 | Playwright | P2 |
-| manual | エラーシミュレーション（§11.6）、実レジストリでの全操作 | チェックリスト（`docs/specs/manual-checklist.md`） | 必須（発表前日） |
+| manual | エラーシミュレーション（§11.6）、実レジストリでの全操作、他チームとの相互移管（IN / OUT 各 1 回、§21.2 #17） | チェックリスト（`docs/specs/manual-checklist.md`） | 必須（発表前日） |
 
 ---
 
@@ -1168,8 +1216,8 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | 日 | ゴール | 主なタスク |
 |---|---|---|
 | 8/25（火） | 骨格が動く | モノレポ雛形、Biome / tsconfig、CI、Vercel 2 プロジェクト + GitHub Actions デプロイ、Supabase + Drizzle スキーマ、パスキー認証（FR-01）、両 Swagger の読み込みと `docs/registry` の仕様メモ、`RegistryAdapter` IF + mock、Kitaqsign の `check` / `create` / `info`、一覧・詳細画面の枠 |
-| 8/26（水） | 必須機能が揃う | `renew` / `update` / `delete` / `restore` / `transfer`（FR-08〜12）、Kitaqnic アダプタ、エラー処理（FR-18）、操作ログ（FR-15）、AI 候補生成（FR-04）、独自性スコア（FR-05）+ 参照コーパス投入 |
-| 8/27（木） | 差別化が揃う | サブドメイン設計（FR-13）、AI ログ（FR-14）、デモリセット（FR-16）、UI 仕上げ（motion・空状態・エラー状態）、契約テスト、仕様変更通知への対応（届いていれば）、本番デプロイと通しテスト |
+| 8/26（水） | 必須機能が揃う | `renew` / `update` / `delete` / `restore` / `transfer`（FR-08〜12。移管は IN / OUT 両方向 + Poll + 承認 / 拒否）、Kitaqnic アダプタ、エラー処理（FR-18）、操作ログ（FR-15）、AI 候補生成（FR-04）、独自性スコア（FR-05）+ 参照コーパス投入 |
+| 8/27（木） | 差別化が揃う | サブドメイン設計（FR-13）、AI ログ（FR-14）、デモリセット（FR-16）、UI 仕上げ（motion・空状態・エラー状態）、契約テスト、仕様変更通知への対応（届いていれば）、他チームとの相互移管テスト（§21.2 #17）、本番デプロイと通しテスト |
 | 8/28（金） | 発表 | 10:00 朝会 → バッファ（バグ修正・較正）、資料作成、デモリハーサル 2 回、16:00 成果発表 |
 
 **Definition of Done（発表時点）**: 必須 7 機能が本番 URL で両レジストリに対して動作 / パスキーでログインできる / デモシナリオ 1〜9 が通る / CI グリーン / 本書と spec が実装と一致。
@@ -1181,6 +1229,8 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 ### 21.1 前提（本書で置いた仮定。誤っていれば本書を修正）
 
 - レジストリは Kitaqsign / Kitaqnic の両方に対応し、TLD でルーティングする。
+- レジストラ ID（`X-Registrar-Id`）はチームごとに別で、他チームのレジストラアプリとの間で移管 IN / OUT を行う（§21.2 #11 が取れるまでの仮定）。本アプリは 1 レジストリにつき 1 組のレジストラ資格情報しか持たない。
+- レジストリは ICANN の 60 日ルールを強制せず、アプリも強制しない（`docs/briefing` の「60 日間は移管不可」は実運用の一般論）。移管は承認待ち型で、放置すると 20 分でサーバ自動承認される（`docs/registry/spec-notes.md`）。
 - 価格・決済は扱わない。
 - サブドメイン設計は DNS に反映しない（設計書 + 手順テキストまで）。
 - パッケージマネージャは pnpm、Node.js 22。
@@ -1195,12 +1245,19 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | 2 | 対応 TLD と TLD → レジストリのルーティング | Swagger / 運営 | 8/25 |
 | 3 | `renew` の必須パラメータ（現在の有効期限が必要か） | Swagger | 8/26 |
 | 4 | `restore` が 1 段階か 2 段階（request / report）か | Swagger | 8/26 |
-| 5 | `transfer` の承認フロー（即時 / 承認待ち）、AuthCode の取得方法 | Swagger | 8/26 |
+| 5 | ~~`transfer` の承認フロー~~ → **解決**（承認待ち + 20 分自動承認、spec-notes §1）。AuthCode の取得方法（`info` に含まれるか / `rotate-auth-info` のみか / `create` で authInfo 指定が必須か）は未解決 | Swagger / 実測 | 8/26 |
 | 6 | Client ステータス（ロック）の更新可否 | Swagger | 8/26 |
 | 7 | テスト用ドメインの削除・再利用制約（デモリセットの実現方法） | 運営 | 8/26 |
 | 8 | コンタクトのダミー値として許可される形式 | 運営 | 8/25 |
 | 9 | 独自性スコアの閾値較正結果と、編集距離ガード併用の要否 | チーム（較正後） | 8/27 |
 | 10 | 役割分担 | チーム | 8/25 |
+| 11 | レジストラ ID はチームごとに別か。テスト用の第 2 レジストラ資格情報を発行してもらえるか（無い場合は他チームとの日程調整が必須） | 運営 | 8/26 午前 |
+| 12 | 非スポンサーからの `info` / `transferQuery` の応答（2201 で拒否か、限定情報か。`clID` を含むか）。移管 OUT 完了の検知方法がこれに依存する | Swagger / 実測 | 8/26 |
+| 13 | Poll 通知の種別と JSON 形状（transfer request / approve / reject / 自動承認）。gaining 側にも通知が積まれるか。`transferQuery` 応答の trStatus / acDate / exDate の有無 | Swagger / 実測 | 8/26 |
+| 14 | 移管時のコンタクトの扱い（相手レジストラ発行のコンタクト ID を参照したまま `update` できるか、自コンタクトへの差し替えが必須か、非スポンサーの `contact info` は可か） | Swagger / 実測 | 8/26 |
+| 15 | 自レジストラがスポンサーのドメインに同じレジストラ ID から `transfer request` を送ったときの応答（result code） | 実測 | 8/26 |
+| 16 | 移管系で実際に返る result code（2202 / 2106 / 2300 / 2301 / 2304 …）と、`transfer request` に `period` を渡せるか・完了時に exDate が延びるか | Swagger / 実測 | 8/26 |
+| 17 | 他チームとの相互移管テストの相手チーム・レジストラ ID・日時・使用ドメイン名・AuthCode の受け渡し方法。20 分の自動承認をデモ用に短縮できるか | 運営 / 他チーム | 8/27 |
 
 ### 21.3 リスク
 
@@ -1208,6 +1265,8 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 |---|---|---|
 | Swagger と本書の想定が大きく異なる | 必須機能の遅延 | 8/25 午前に両 Swagger を精読し、Bridge 層の IF を先に固定。UI はモックで先行 |
 | 期間中の仕様変更通知 | アダプタ修正 | §11.5 の手順。契約テストで影響範囲を即時把握 |
+| 他チームとの移管が組めない（相手が捕まらない / 相手側に承認機能が無い） | 移管デモが 20 分待ち、または不成立 | `mock` の相手レジストラでデモのフォールバックを用意（§11.1）。実移管は 8/27 に時間枠を確保（§21.2 #17） |
+| レジストラ ID が全チーム共通だった | EPP 移管そのものが成立しない | §21.2 #11 を 8/26 午前に確定。共通の場合は FR-12 を `mock` 限定に落とし、要件を改訂 |
 | パスキー自前実装のハマり（RP ID / origin 不一致） | ログイン不能 | 8/25 に本番 URL で通す。`mock` 認証は作らない（本番と同じ経路で検証） |
 | Vercel 2 プロジェクト間の Cookie / rewrites | 認証が通らない | rewrites を最初にデプロイして確認。ダメなら API を Next.js Route Handler にマウントする案へ切替（ADR 化） |
 | AI 無料枠のレート制限 | 候補生成失敗 | キャッシュ、フォールバックプロバイダ、失敗時は手入力導線 |
@@ -1224,7 +1283,10 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | レジストラ | ICANN 認定の直販事業者。本アプリが疑似的に担う |
 | EPP | Extensible Provisioning Protocol（RFC 5730）。本件では HTTP/REST + JSON に置換 |
 | RGP | Redemption Grace Period（RFC 3915）。削除後 30 日の復旧猶予 |
-| AuthCode | 移管時の本人確認コード |
+| AuthCode | 移管時の本人確認コード（EPP の authInfo） |
+| gaining / losing | 移管先レジストラ / 移管元レジストラ（現スポンサー）。EPP の transfer は gaining が申請し losing が承認・拒否する |
+| clID | EPP の info 応答に含まれる現スポンサーレジストラ ID。自レジストラ ID と比較して保有判定に使う |
+| Poll | レジストリからの非同期通知（移管申請・承認など）を取り出すコマンド。取り出した通知は ack で消し込む |
 | SLD / TLD | Second-Level / Top-Level Domain（`example` / `.com`） |
 | Discoverable Credential | 認証器側にユーザー情報を持つパスキー。ユーザー名入力なしでログイン可 |
 | RP ID | WebAuthn の Relying Party 識別子（ドメイン） |
@@ -1255,3 +1317,4 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | v0.1.1 | 2026-08-25 | モノレポ雛形の実装に合わせて §8（tsup / vercel.json、biome-config 廃止）と §16.2（CI 手順）を更新。判断は ADR-0001 |
 | v0.1.2 | 2026-08-25 | §15 / §16.2: デプロイワークフローを `deploy-web.yml` / `deploy-api.yml` の 2 ファイルから `deploy.yml`（api → web の 2 ジョブ）に変更。プレビューで API の URL を Web ビルドに渡すため。§16.1 / §16.4 / §17: 本番ドメインを `dopamin.ut42tech.com` / `dopamin-api.ut42tech.com` に |
 | v0.1.3 | 2026-08-25 | §15 / §16.2 / §16.4: PR ごとの Vercel プレビューデプロイを廃止し、`deploy.yml` を `main` push → 本番のみに変更。preview 環境の行を削除 |
+| v0.1.4 | 2026-08-25 | 他チーム（別レジストラ ID）との移管 IN / OUT に対応。FR-12 を全面改訂（Poll・承認 / 拒否を P0、取消を P1、60 日ルールの自前強制を撤回、アプリ内ユーザー間移管を非スコープ化、AC-12-3〜6 追加）。追随: §2.2 / §3.3 / FR-02 / FR-07 / FR-16 / FR-18 / §6.4 / §6.5 / §9.1（`domains.ownership` ほか、`transfers` 列追加、`operation_logs.sv_trid`）/ §9.2 / §10.1（承認・拒否・取消・Poll ルート、auth-code を POST）/ §10.3 / §11.1（`RegistryAdapter` に移管 5 操作・Poll、`mock` の相手レジストラ）/ §11.3 / §15.1 / §17 / §19 / §20 / §21 / §22 |

@@ -25,8 +25,12 @@ export default function DashboardPage() {
   }, [router]);
 
   const onLogout = async () => {
-    await logout();
-    router.replace("/login");
+    try {
+      await logout();
+    } finally {
+      // セッションが既に失効していて logout が 401 でも、ログイン画面へは必ず戻す
+      router.replace("/login");
+    }
   };
 
   if (!user) {
