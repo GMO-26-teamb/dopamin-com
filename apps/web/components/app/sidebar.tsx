@@ -27,19 +27,42 @@ interface NavDef {
   key: SidebarNavKey;
   href: string;
   label: string;
+  /** Active 判定に使う pathname の前方一致（`/domains/foo` も「ドメイン取得」） */
+  match: string;
 }
 
 /** ナビの並びは Figma の nav-0〜nav-4 と同じ */
 export const SIDEBAR_NAV: readonly NavDef[] = [
-  { key: "dashboard", href: "/dashboard", label: "ダッシュボード" },
-  { key: "domains", href: "/domains/new", label: "ドメイン取得" },
-  { key: "transfers", href: "/transfers", label: "移管" },
-  { key: "settings", href: "/settings", label: "設定" },
-  { key: "logs", href: "/logs", label: "ログ" },
+  {
+    key: "dashboard",
+    href: "/dashboard",
+    label: "ダッシュボード",
+    match: "/dashboard",
+  },
+  {
+    key: "domains",
+    href: "/domains/new",
+    label: "ドメイン取得",
+    match: "/domains",
+  },
+  { key: "transfers", href: "/transfers", label: "移管", match: "/transfers" },
+  { key: "settings", href: "/settings", label: "設定", match: "/settings" },
+  { key: "logs", href: "/logs", label: "ログ", match: "/logs" },
 ];
 
+/**
+ * pathname からナビの Active を決める。どれにも当たらないパス（`/` など）は
+ * `undefined` を返し、どの項目も光らせない。
+ */
+export function activeNavKey(pathname: string): SidebarNavKey | undefined {
+  return SIDEBAR_NAV.find(
+    ({ match }) => pathname === match || pathname.startsWith(`${match}/`),
+  )?.key;
+}
+
 export interface SidebarProps {
-  active: SidebarNavKey;
+  /** 省略・undefined ならどの項目も Active にしない */
+  active?: SidebarNavKey;
   userName: string;
   onLogout: () => void;
   /** AI ログパネルを開く。省略時はボタンを出さない */

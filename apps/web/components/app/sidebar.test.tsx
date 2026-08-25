@@ -2,9 +2,9 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ThemeProvider } from "@/lib/theme/theme-provider";
-import { Sidebar, type SidebarNavKey } from "./sidebar";
+import { activeNavKey, Sidebar, type SidebarNavKey } from "./sidebar";
 
-function renderSidebar(active: SidebarNavKey, onLogout = vi.fn()) {
+function renderSidebar(active?: SidebarNavKey, onLogout = vi.fn()) {
   render(
     <ThemeProvider>
       <Sidebar active={active} onLogout={onLogout} userName="たくたく" />
@@ -60,6 +60,22 @@ describe("Sidebar", () => {
     ).toHaveAttribute("href", "/domains/new");
   });
 
+  it("active 未指定ならどの項目も光らせない", () => {
+    renderSidebar();
+
+    for (const name of [
+      "ダッシュボード",
+      "ドメイン取得",
+      "移管",
+      "設定",
+      "ログ",
+    ]) {
+      expect(screen.getByRole("link", { name })).not.toHaveAttribute(
+        "aria-current",
+      );
+    }
+  });
+
   it("ユーザー名を出し、ログアウトで onLogout を呼ぶ", async () => {
     const user = userEvent.setup();
     const { onLogout } = renderSidebar("settings");
@@ -69,4 +85,24 @@ describe("Sidebar", () => {
 
     expect(onLogout).toHaveBeenCalledTimes(1);
   });
+});
+
+describe("activeNavKey", () => {
+  it.each([
+    ["/dashboard", "dashboard"],
+    ["/domains/new", "domains"],
+    ["/domains/foo/subdomains", "domains"],
+    ["/transfers", "transfers"],
+    ["/settings/passkeys", "settings"],
+    ["/logs", "logs"],
+  ])("%s -> %s", (pathname, expected) => {
+    expect(activeNavKey(pathname)).toBe(expected);
+  });
+
+  it.each(["/", "/login", "/domainsx", "/settingsy/z"])(
+    "どのナビにも当たらない %s は undefined",
+    (pathname) => {
+      expect(activeNavKey(pathname)).toBeUndefined();
+    },
+  );
 });

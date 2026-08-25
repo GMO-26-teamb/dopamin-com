@@ -12,6 +12,10 @@ import { IconButton } from "./icon-button";
  * Figma: AI Log Panel `77:124`
  * radix Dialog を右ドロワーにしたもの。360px 幅・画面の高さいっぱい・左に 2px の枠。
  * スライドインは `useReducedMotion` が true のとき即時（要件 §15.3）。
+ *
+ * `modal={false}` にすると背後のオーバーレイを出さず、フォーカストラップも
+ * `aria-hidden` も掛けない（radix が非モーダルとして扱う）。開いている間もメインを
+ * 操作したい AI ログパネル用（docs/specs/ui-screens.md §1）。
  */
 
 const SIDE = {
@@ -29,6 +33,8 @@ export interface SheetProps {
   children: ReactNode;
   className?: string;
   closeLabel?: string;
+  /** false で非モーダル（背後を操作できる）。既定は true */
+  modal?: boolean;
 }
 
 export function Sheet({
@@ -39,20 +45,24 @@ export function Sheet({
   children,
   className,
   closeLabel = "閉じる",
+  modal = true,
 }: SheetProps) {
   const reduced = useReducedMotion();
 
   return (
-    <DialogPrimitive.Root onOpenChange={onOpenChange} open={open}>
+    <DialogPrimitive.Root modal={modal} onOpenChange={onOpenChange} open={open}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay asChild>
-          <motion.div
-            animate={{ opacity: 1 }}
-            className="fixed inset-0 z-40 bg-overlay"
-            initial={{ opacity: 0 }}
-            transition={{ duration: reduced ? 0 : OVERLAY_DURATION_S }}
-          />
-        </DialogPrimitive.Overlay>
+        {modal ? (
+          <DialogPrimitive.Overlay asChild>
+            <motion.div
+              animate={{ opacity: 1 }}
+              className="fixed inset-0 z-40 bg-overlay"
+              data-slot="sheet-overlay"
+              initial={{ opacity: 0 }}
+              transition={{ duration: reduced ? 0 : OVERLAY_DURATION_S }}
+            />
+          </DialogPrimitive.Overlay>
+        ) : null}
         <DialogPrimitive.Content aria-describedby={undefined} asChild>
           <motion.div
             animate={{ x: 0 }}

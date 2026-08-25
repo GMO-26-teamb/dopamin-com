@@ -234,8 +234,13 @@ export function useAuthCode(name: string): Mutation<{ authCode: string }> {
 
 export function useGenerateCandidates(): Mutation<Candidate[], CandidateInput> {
   const services = useServices();
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input) => services.candidates.generate(input),
+    // AI 呼び出しは成否どちらでも AI ログに積まれる（ui-screens §1）
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.aiLogs() });
+    },
   });
 }
 
@@ -263,6 +268,10 @@ export function useProposeSubdomains(
       void queryClient.invalidateQueries({
         queryKey: queryKeys.dnsDiff(domain),
       });
+    },
+    // AI 呼び出しは成否どちらでも AI ログに積まれる（ui-screens §1）
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.aiLogs() });
     },
   });
 }
