@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ApiError } from "./api-error";
 
 const authEnvSchema = z.object({
   DATABASE_URL: z.string().min(1),
@@ -27,6 +28,15 @@ const optionalString = z
   .optional()
   .transform((v) => (v === "" ? undefined : v));
 
+/**
+ * `"true"` の場合だけ true。それ以外（未設定・空文字・`"false"` 含む）は false。
+ * `z.coerce.boolean()` は非空文字列を無条件で true にしてしまう（`"false"` も true になる）ため使わない。
+ */
+const booleanFlag = z
+  .string()
+  .optional()
+  .transform((v) => v === "true");
+
 const apiEnvSchema = z.object({
   REGISTRY_MODE: z.enum(["real", "mock"]).default("mock"),
   MOCK_REGISTRY_FAIL_MODE: z
@@ -42,6 +52,39 @@ const apiEnvSchema = z.object({
   KITAQNIC_GATE_PASSWORD: optionalString,
   KITAQNIC_REGISTRAR_ID: optionalString,
   KITAQNIC_API_KEY: optionalString,
+
+  /** マイグレーション用（5432 直結）。ランタイムでは未使用だが §17 に合わせて検証だけ行う（drizzle-kit は process.env を直接読む）。 */
+  DIRECT_DATABASE_URL: optionalString,
+
+  /** mock レジストリの相手レジストラ ID / 自動承認までのミリ秒（既定 20 分。§11 の移管シミュレーション、テストでは短縮）。 */
+  MOCK_FOREIGN_REGISTRAR_ID: optionalString,
+  MOCK_TRANSFER_AUTO_APPROVE_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(20 * 60 * 1000),
+
+  /** 生成 AI（§13.1）。既定は Google AI Studio の無料枠、ANTHROPIC_API_KEY がある環境では anthropic を選択可。 */
+  AI_PROVIDER: z.enum(["google", "anthropic"]).default("google"),
+  /** 具体的なモデル ID は運用側で決定・設定する（未設定時は AI 呼び出し側が requireEnv 等で扱う）。 */
+  AI_MODEL: optionalString,
+  /** 埋め込みモデルのプロバイダ（§13.3）。値域は AI_PROVIDER と同じ。 */
+  EMBEDDING_PROVIDER: z.enum(["google", "anthropic"]).default("google"),
+  EMBEDDING_MODEL: optionalString,
+  GOOGLE_GENERATIVE_AI_API_KEY: optionalString,
+  ANTHROPIC_API_KEY: optionalString,
+
+  /** 独自性スコアの較正値（§14.2）。検証セットで較正済みの初期値。 */
+  UNIQUENESS_THETA_LOW: z.coerce.number().min(0).max(1).default(0.05),
+  UNIQUENESS_THETA_HIGH: z.coerce.number().min(0).max(1).default(0.45),
+
+  /** 公開リポ取得のレート制限緩和（読み取りのみのスコープ）。 */
+  GITHUB_TOKEN: optionalString,
+
+  /** true で FR-16（デモデータリセット）を有効化する。 */
+  DEMO_RESET_ENABLED: booleanFlag,
+
+  LOG_LEVEL: z.enum(["info", "debug"]).default("info"),
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;
@@ -54,4 +97,24 @@ export function getApiEnv(): ApiEnv {
     cached = apiEnvSchema.parse(process.env);
   }
   return cached;
+}
+
+/**
+ * テスト専用: キャッシュされた env を破棄する。次回アクセス時に process.env から再構築させる。
+ * 本番コードからは呼ばない。
+ */
+export function resetApiEnvCacheForTesting(): void {
+  cached = null;
+}
+
+/**
+ * オプショナルな文字列系の環境変数を取得し、未設定（空文字含む）なら 500 INTERNAL を投げる。
+ * `GITHUB_TOKEN` のように「機能を使うときだけ必須」な値に使う（NFR-05）。
+ */
+export function requireEnv<K extends keyof ApiEnv>(key: K): string {
+  const value = getApiEnv()[key];
+  if (typeof value !== "string" || value === "") {
+    throw new ApiError(500, "INTERNAL", `環境変数 ${key} が未設定です。`);
+  }
+  return value;
 }
