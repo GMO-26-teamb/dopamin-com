@@ -114,7 +114,9 @@ describe("S-52 申請エラー（AC-12-2）", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText("2202: AuthCode が正しくありません。"),
+        screen.getByText(
+          /2202: AuthCode が正しくありません。ローカルの情報は変更されていません。/,
+        ),
       ).toBeInTheDocument();
     });
   });
@@ -132,7 +134,9 @@ describe("S-52 申請エラー（AC-12-2）", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText("2300: すでに移管申請中です。"),
+        screen.getByText(
+          /2300: すでに移管申請中です。ローカルの情報は変更されていません。/,
+        ),
       ).toBeInTheDocument();
     });
   });

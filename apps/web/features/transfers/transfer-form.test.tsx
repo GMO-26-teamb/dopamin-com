@@ -71,7 +71,10 @@ describe("TransferForm", () => {
 
     expect(screen.getByText("Kitaqsign が拒否しました")).toBeInTheDocument();
     expect(
-      screen.getByText("2202: AuthCode が正しくありません。"),
+      // FR-18: レジストリ拒否の本文はサーバー理由のあとに「ローカルの情報は変更されていません」が続く
+      screen.getByText(
+        /2202: AuthCode が正しくありません。ローカルの情報は変更されていません。/,
+      ),
     ).toBeInTheDocument();
     // 更新系の拒否は再試行ボタンを出さない（ui-screens S-52「Show Retry なし」）
     expect(screen.queryByRole("button", { name: "再試行" })).toBeNull();
