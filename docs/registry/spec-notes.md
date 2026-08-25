@@ -152,13 +152,24 @@ exDate 超過でも廃止されず、レジストリが自動で 1 年延長（�
 1. ~~kitaqnic の対応 18 gTLD の内訳~~ → **解決**（§2 の表・`hello` で取得済み）
 2. ~~TLD ルーティングの衝突~~ → **解決**。重複なし。TLD からレジストリが一意に決まる
 3. ~~`.jp` の扱い~~ → **解決**。両レジストリとも非対応。デモシナリオの `.jp` を差し替える必要あり
-4. **`authCode` の取得方法** — `RegistryAdapter.authCode()` が `domain:info` のレスポンスに含まれるのか、
+4. **`authCode` の取得方法** — `RegistryAdapter.getAuthInfo()` の元データが `domain:info` のレスポンスに含まれるのか、
    `rotate-auth-info`（再生成）しか手段が無いのか。後者なら「移管 OUT のたびに authInfo が変わる」ことになる。
 5. **kitaqsign の `restore` の有無** — 無い場合、FR の restore は kitaqnic のみ対応になる。
 6. **kitaqsign の poll ack のメソッド** — `POST /messages/{id}/ack` か `DELETE /messages/{id}` か。
 7. **Basic ゲートの認証情報が両レジストリで共通か** — 共通なら env を 1 組に寄せられる。
 8. **`domain:check` のリクエスト形式** — `POST /domains/check` に `DomainNamesRequest`（複数名）を送る形。
    1 リクエストあたりの上限件数が不明。
+9. **レジストラ ID はチームごとに別か** — 別でなければ他チームとの移管は同一レジストラ内の操作になり成立しない。
+   テスト用の第 2 レジストラ資格情報が出るかも併せて確認（requirements §21.2 #11）。
+10. **非スポンサーからの `domain:info` / `transfer/query` の応答** — 2201 で拒否されるのか、限定情報が返るのか。
+    `clID`（現スポンサー）はレスポンスに含まれるか。移管 OUT 完了の検知がこれに依存する（§21.2 #12）。
+11. **Poll 通知の種別と形状** — transfer request / approve / reject / 自動承認のそれぞれで何が積まれるか、
+    gaining 側にも積まれるか。`transfer/query` 応答の trStatus / acDate / exDate の有無（§21.2 #13）。
+12. **移管時のコンタクトの扱い** — 相手レジストラ発行のコンタクト ID を参照したまま `domain:update` できるか、
+    自コンタクトへの差し替えが必須か。非スポンサーの `contact:info` は可か（§21.2 #14）。
+13. **同一レジストラ ID からの `transfer/request`** — 自分がスポンサーのドメインに送ったときの result code（§21.2 #15）。
+14. **移管系の result code と `period`** — 実際に返るコード（2202 / 2106 / 2300 / 2301 / 2304 …）。
+    `transfer/request` に `period` を渡せるか、完了時に exDate が延びるか（§21.2 #16）。
 
 ## 4. 検証時の注意
 
