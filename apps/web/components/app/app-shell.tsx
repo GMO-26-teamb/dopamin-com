@@ -3,6 +3,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode, useCallback, useState } from "react";
+import { endAuthSession } from "@/features/auth/session";
 import { useMe } from "@/lib/api/hooks";
 import { useServices } from "@/lib/api/provider";
 import { AiLogPanel } from "./ai-log-panel";
@@ -33,6 +34,9 @@ export function AppShell({ children }: AppShellProps) {
       .logout()
       .catch(() => undefined)
       .finally(() => {
+        // モードによらずログイン済みの目印も落とす（features/auth/session.ts）。
+        // 残っていると /login が「ログイン済み」と判断して /dashboard へ戻してしまう。
+        endAuthSession();
         queryClient.clear();
         router.replace("/login");
       });

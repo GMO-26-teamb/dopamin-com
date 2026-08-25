@@ -16,8 +16,12 @@ export default function proxy(request: NextRequest) {
   }
 
   if (!request.cookies.has("dopamin_session")) {
+    // 戻り先を `?next=` で運ぶ（ui-screens §1、AC-01-3）。ログイン成功後にここへ戻す。
+    const next = `${request.nextUrl.pathname}${request.nextUrl.search}`;
     const url = request.nextUrl.clone();
     url.pathname = "/login";
+    url.search = "";
+    url.searchParams.set("next", next);
     return NextResponse.redirect(url);
   }
   return NextResponse.next();

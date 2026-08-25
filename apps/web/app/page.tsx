@@ -1,28 +1,34 @@
-import { serverApi } from "@/lib/server-api";
+import Link from "next/link";
+import { TopBar } from "@/components/app/top-bar";
+import { BrandBar } from "@/components/ui/brand";
+import { Button } from "@/components/ui/button";
+import { SignedInRedirect } from "@/features/auth/signed-in-redirect";
+import { LandingHero } from "@/features/landing/landing-hero";
+import { TrialScore } from "@/features/landing/trial-score";
 
-// API の状態を毎回取得するため静的化しない
-export const dynamic = "force-dynamic";
-
-async function fetchHealth(): Promise<string> {
-  try {
-    const res = await serverApi.api.v1.health.$get();
-    if (!res.ok) return `error (${res.status})`;
-    const body = await res.json();
-    return body.status;
-  } catch {
-    return "unreachable";
-  }
-}
-
-export default async function Home() {
-  const status = await fetchHealth();
+/**
+ * S-00（`/`、Figma `80:2`）。ランディング。
+ * Top Bar + ヒーロー（→ S-01 / S-02）+ お試しスコア（ui-screens §7-1 の仮置き）。
+ * ログイン済みで来た人は `/dashboard` へ送る（ui-screens §3）。
+ */
+export default function LandingPage() {
   return (
-    <main className="flex flex-1 flex-col items-center justify-center gap-4 p-8">
-      <h1 className="font-semibold text-3xl">ドパ民.com</h1>
-      <p className="text-zinc-600 dark:text-zinc-400">
-        考えるのは楽しく、設定は考えなくていい。
-      </p>
-      <p className="font-mono text-sm">API health: {status}</p>
-    </main>
+    <div className="flex flex-1 flex-col">
+      <SignedInRedirect />
+      <TopBar
+        action={
+          <Button asChild variant="outline">
+            <Link href="/login">ログイン</Link>
+          </Button>
+        }
+      />
+      <div className="flex flex-1 justify-center">
+        <div className="grid w-full max-w-page grid-cols-2">
+          <LandingHero />
+          <TrialScore />
+        </div>
+      </div>
+      <BrandBar variant="rule" />
+    </div>
   );
 }
