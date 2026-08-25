@@ -825,7 +825,7 @@ export interface RegistryAdapter {
 | kitaqsign | `.com` `.net` `.org` `.info`（4） |
 | kitaqnic | `.xyz` `.online` `.site` `.tech` `.space` `.store` `.website` `.press` `.host` `.fun` `.icu` `.cyou` `.sbs` `.bond` `.cfd` `.art` `.build` `.ceo`（18） |
 
-- **`.jp` は両レジストリとも非対応**（kitaqnic は gTLD のみ）。プロトタイプのデモデータ `gmo-hackathon.jp` / API 例の `takutaku.jp` は使えないため、デモシナリオと UI の TLD 選択肢を上記 22 種から選び直す。
+- **`.jp` は両レジストリとも非対応**（kitaqnic は gTLD のみ）。プロトタイプのデモデータ `gmo-hackathon.jp` / API 例の `takutaku.xyz` は使えないため、デモシナリオと UI の TLD 選択肢を上記 22 種から選び直す。
 - kitaqnic の登録期間は 1〜10 年、猶予期間 45 日、IDN 許可（`hello` の `info` より）。
 
 ルーティングは `packages/registry/src/routing.ts` の 1 箇所で管理し、UI の TLD 選択肢はここから生成する。
