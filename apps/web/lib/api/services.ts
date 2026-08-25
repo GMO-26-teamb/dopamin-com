@@ -16,6 +16,7 @@ import type {
   AiSettings,
   Candidate,
   DnsDiff,
+  DomainContactsInput,
   DomainDetail,
   DomainSummary,
   Me,
@@ -24,6 +25,14 @@ import type {
   SubdomainPlan,
   Transfer,
 } from "./types";
+
+/** `DomainService.update` の入力（要件 §10.1 の `PATCH /domains/:name`）。 */
+export interface DomainUpdateInput {
+  /** 変更後の全量（0 件 = 全解除、または 2〜13 件）。 */
+  nameservers?: string[];
+  /** 登録者コンタクトの差し替え（S-39 の再実行）。 */
+  contacts?: DomainContactsInput;
+}
 
 export interface AuthService {
   isSupported(): boolean;
@@ -47,10 +56,8 @@ export interface DomainService {
   /** POST /domains */
   register(input: { name: string; period: number }): Promise<DomainDetail>;
   renew(name: string, input: { period: number }): Promise<DomainDetail>;
-  update(
-    name: string,
-    input: { nameservers?: string[] },
-  ): Promise<DomainDetail>;
+  /** PATCH /domains/:name（FR-09。contacts は S-39 の再実行で使う） */
+  update(name: string, input: DomainUpdateInput): Promise<DomainDetail>;
   remove(name: string): Promise<{ outcome: "rgp" | "deleted" }>;
   restore(name: string): Promise<DomainDetail>;
   authCode(name: string): Promise<{ authCode: string }>;

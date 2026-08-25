@@ -49,6 +49,18 @@ export interface DomainDetail extends DomainSummary {
   subdomainPlan: { hosts: number; applied: number } | null;
 }
 
+/**
+ * `PATCH /domains/:name` に渡すコンタクト（FR-09 / 要件 §10.1 の `contacts`）。
+ *
+ * 登録者（Registrant）のみを扱う。技術（Technical）は FR-09 上は任意だが
+ * {@link DomainDetail} に保持先が無いため、この ViewModel では扱わない。
+ * 値はレジストリが許可するダミー PII のみ（`RegistrantProfile`）。
+ * S-39（移管 IN 後のコンタクト未移行）の再実行はこの入力で行う。
+ */
+export interface DomainContactsInput {
+  registrant: { name: string; email: string };
+}
+
 export interface UniquenessScore {
   /** 独自性スコア（0〜100）。`uniquenessLabel` / `rarityTier` の入力。 */
   score: number;

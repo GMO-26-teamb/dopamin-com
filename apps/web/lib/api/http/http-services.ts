@@ -224,10 +224,15 @@ export function createHttpServices(): Services {
 
       /** PATCH /domains/:name（FR-09） */
       async update(name, input) {
+        if (input.contacts !== undefined) {
+          // 要件 §10.1 の PATCH は `contacts` を受け取る想定だが、
+          // `domainUpdateRequestSchema`（packages/shared）にはまだ無い（要確認 #14）。
+          throw notImplemented("PATCH /domains/:name（contacts）");
+        }
         const { domain } = await unwrap(
           apiClient.api.v1.domains[":name"].$patch({
             param: { name },
-            json: input,
+            json: { nameservers: input.nameservers },
           }),
           domainEnvelopeSchema,
         );
