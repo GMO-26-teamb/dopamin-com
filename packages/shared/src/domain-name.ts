@@ -3,7 +3,8 @@ import { z } from "zod";
 /** RFC 1035 準拠のラベル: 英数字とハイフン、先頭末尾ハイフン不可、1〜63 文字。IDN 非対応（FR-03）。 */
 const LABEL_PATTERN = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 
-function isValidLabel(label: string): boolean {
+/** 1 ラベル（`www` など）が RFC 1035 準拠か判定する。 */
+export function isValidLabel(label: string): boolean {
   return LABEL_PATTERN.test(label);
 }
 
