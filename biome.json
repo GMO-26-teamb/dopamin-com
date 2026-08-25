@@ -14,7 +14,8 @@
       "!**/dist",
       "!**/.turbo",
       "!**/.vercel",
-      "!**/next-env.d.ts"
+      "!**/next-env.d.ts",
+      "!packages/db/drizzle"
     ]
   },
   "formatter": {
