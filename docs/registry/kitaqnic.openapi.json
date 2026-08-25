@@ -1,0 +1,2029 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "registry-kitaqnic EPP-over-REST API (18 gTLD)",
+    "description": "\nこのAPIは **EPP (RFC 5730-5733)** のドメイン登録操作を REST/JSON に写した擬似レジストリです（ハッカソン用）。\nレジストラ（＝このAPIの利用者）が、レジストリに対してドメイン・コンタクト・ホストを管理します。\n\n## 概要（まずここだけ読めば全体像がつかめます）\n- **登場するもの**: レジストラ(API利用者) / コンタクト(登録者・各種連絡先) / ホスト(ネームサーバ) / ドメイン。\n- **リソースの関係**: ドメインは**既存の**コンタクト（必須: 登録者）とホスト（任意: NS）を *参照* して登録します。無ければ先に作成／あれば再利用。**ホストは省略可**（毎回作る必要はありません）。\n\n![EPP-over-REST 全体像](/openapi/epp-overview.svg)\n\n### 押さえるポイント（ここだけは必ず）\n1. **認証は 2 段**: 外側の共通 Basic ゲート（ID/パスワード）＋ 各リクエストのヘッダ `X-Registrar-Id` / `X-Api-Key`。\n2. **参照先を先に用意**: ドメインが指定するコンタクト（必須）/ホスト（任意）は事前に存在すること（無ければ作成・**再利用可**・ホストは**省略可**）。存在しない ID を指定すると `404`。\n3. **レスポンスは共通 JSON エンベロープ**。成否は **2 段で判定**する — HTTP ステータス（通信層）と `result.code`（業務結果; `1000`=成功 / `2303`=存在しない / `2302`=既存 / `2202`=authInfo不一致 / `2306`=ポリシー違反）。\n4. **`clTRID` を毎回ユニークに付ける**（任意ヘッダ `X-Cl-TRID`）。**障害時にレジストリへ調査依頼する際のキー**（`svTRID` と併せて控える）。\n5. **移管 (transfer)** は `authInfo`（ドメインのパスフレーズ）で本人確認。処理は **非同期**で、通知は **poll** で受け取り **ack** して消し込む。\n6. **ドメイン照会は RDAP**（`rdap.` サブドメインの `/rdap/v1/domain/{name}` 等）。WHOIS は提供しません。\n7. **対応 TLD はレジストリごとに異なる**（`session:hello` の `supportedTlds`、または上部タイトルで確認）。\n8. **`login` / `logout` は任意**（本 REST 実装はリクエスト毎に認証するステートレス方式）。\n\n> 詳細は以下の各セクション（認証・処理の順番・エラー・移管・制約 等）を参照してください。\n\n---\n\n## なぜ XML ではなく JSON なのか (EPP-over-REST)\n本来の EPP (RFC 5730-5734) は **TCP 永続接続 + XML** で定義されますが、本擬似レジストリは教材用途のため\nトランスポートを **HTTP/REST + JSON** に置き換えています。**コマンド体系と result code の意味論は本物どおり維持**しています。\n\n- **理由**: 本物の EPP は TCP 接続管理・XML 名前空間・TLS クライアント認証といった要素の学習コストが大きく、本来学んでほしい「ドメイン管理ロジック」や「複数レジストリの差分吸収」に集中しづらくなります。トランスポートを扱い慣れた HTTP/REST + JSON にすることで、ブラウザの Swagger UI や `curl` からそのまま試せるようにしています。\n- XML スキーマの代わりに、全レスポンスは次の共通 JSON エンベロープ（EPP の `<response>` 相当）で返します:\n\n```json\n{\n  \"result\": { \"code\": 1000, \"msg\": \"Command completed successfully\" },\n  \"resData\": { \"...\": \"コマンドごとの結果\" },\n  \"extension\": { \"...\": \"レジストリ固有 (kitaqnic の launch 等)\" },\n  \"trID\": { \"clTRID\": \"ABC-12345\", \"svTRID\": \"KQSGN-20260505-0001\" }\n}\n```\n\n- **二段構えのエラー**: HTTP ステータス = トランスポート層の成否、`result.code` = EPP の業務結果（例: 成功=1000, 存在しない=2303, 既存=2302, authInfo 不一致=2202, ポリシー違反=2306）。\n- **トランザクション ID（問い合わせに必須）**: リクエストごとに一意な `clTRID`（クライアント側トランザクション ID）を任意ヘッダ `X-Cl-TRID` で送ってください。レスポンスの `trID` には送った `clTRID` とサーバ採番の `svTRID` が入ります。\n  **API 実行で問題が起きてレジストリに調査を依頼する際は、この `clTRID`（と `svTRID`）が調査のキー**になります。必ず毎回ユニークな値を付与し、レスポンスの `svTRID` とあわせて控えておいてください。\n\n---\n\n## 認証 (2 段)\nすべての EPP エンドポイントは次の 2 段の認証を通ります。\n\n1. **共通 Basic 認証ゲート** — HTTP Basic (`ADMIN_GATE_USER` / `ADMIN_GATE_PASSWORD`)。まず全体をこのゲートで保護しています。\n2. **レジストラ API キー** — 各リクエストに以下の 2 ヘッダを付与します。\n   - `X-Registrar-Id`: レジストラ識別子（例: `KITAQ-TEST-001`）\n   - `X-Api-Key`: 払い出された API キー（平文）\n\n例外: `GET /api/v1/epp/sessions/hello` は疎通確認用で API キー不要です（Basic ゲートは必要）。\n\n### リクエスト例 (curl)\n外側 Basic ゲート (`-u`) とレジストラ API キー (`X-Registrar-Id` / `X-Api-Key`) に、任意で `X-Cl-TRID`（クライアント側トランザクション ID）を付けます。ヘッダ名は大文字小文字を区別しません（`X-Cl-TRID` = `X-CL-TRID`）。`<...>` は自分の値に置き換えてください。\n\n```bash\n# 疎通確認 (API キー不要・Basic ゲートのみ)\ncurl -u \"<gate-user>:<gate-pass>\" \\\n  https://epp.kitaqsign.com/api/v1/epp/sessions/hello\n\n# domain:info (GET) — X-Cl-TRID を付与\ncurl -u \"<gate-user>:<gate-pass>\" \\\n  -H \"X-Registrar-Id: <レジストラ ID>\" \\\n  -H \"X-Api-Key: <API キー>\" \\\n  -H \"X-Cl-TRID: INFO-20260729-0001\" \\\n  https://epp.kitaqsign.com/api/v1/epp/domains/example.com\n\n# domain:create (POST) — clTRID は毎回ユニークに\ncurl -u \"<gate-user>:<gate-pass>\" \\\n  -H \"X-Registrar-Id: <レジストラ ID>\" \\\n  -H \"X-Api-Key: <API キー>\" \\\n  -H \"X-Cl-TRID: CREATE-20260729-0001\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{ \"...\": \"コマンド固有のリクエストボディ\" }' \\\n  https://epp.kitaqsign.com/api/v1/epp/domains\n```\n\nレスポンスの `trID.clTRID` に送った値がそのままエコーされます（未送信なら null）。kitaqnic はホストを `epp.kitaqnic.com` に読み替えてください。\n\n### Swagger UI の「Try it out」で実行する\n画面上でそのまま試すこともできます。\n1. 右上の **Authorize** をクリックし、`gate`（共通 Basic ゲートのユーザ名/パスワード）、`registrarId`（`X-Registrar-Id`）、`apiKey`（`X-Api-Key`）を入力。\n2. 各 API の **Try it out** → 必要なパラメータ（`X-Cl-TRID` など）を入力 → **Execute**。\n3. Servers は「current host」（この画面と同一オリジン）を選択してください。別オリジンの `public` を選ぶと CORS で実行できません。\n\n> ⚠️ **補足**: 「Try it out」は**この擬似レジストリに対して実際のリクエストを送信**します（`create` / `update` / `delete` / `transfer` などはデータに反映されます）。一般的なシステム開発では、Swagger の Try it out からサーバを実際に操作できるようにはしない（有効化しない）のが通例です。**本擬似レジストリはハッカソン開発で学生が手軽に試せるよう、あえて Try it out を有効化しています。** データに反映される点に注意し、動作確認は影響のない `sessions/hello` や `domain:check` から始めることを推奨します。\n\n---\n\n## ドメイン登録の処理の順番（重要）\nドメインを登録するには、先に参照先のリソース（コンタクト）を用意しておく必要があります。\n\n1. **疎通確認** — `GET /api/v1/epp/sessions/hello`\n   認証ヘッダが正しいか、サーバが応答するかを確認します。\n2. **コンタクト作成** — `POST /api/v1/epp/contacts`\n   ドメインの「登録者(registrant)」や「管理/技術/請求(admin/tech/billing)」に使う連絡先です。\n   個人情報保護のため、**氏名は許可された架空のダミー氏名のみ**、**メールは配送不可の予約ドメイン (example.com 等) のみ**受け付けます（実在の個人情報は不可）。\n   作成した **コンタクト ID** を控えておきます。\n3. **ホスト作成（任意）** — `POST /api/v1/epp/hosts`\n   ネームサーバをホストオブジェクトとして管理する場合に作成します（`ns1.example.com` 等）。\n4. **ドメイン登録** — `POST /api/v1/epp/domains`\n   `registrant` と `contacts` には **手順 2 で作成済みのコンタクト ID** を、`nameservers` にはホスト名を指定します。\n   → 登録者・コンタクトが存在しないと `404 (ObjectNotFound)`、ドメイン名が既存だと `409 (ObjectExists)` になります。\n5. **運用操作** — 登録後は用途に応じて:\n   - 参照: `GET /domains/{name}` / 空き確認: `POST /domains/check`\n   - 情報修正 (domain:update): `PUT /domains/{name}` / 更新=期限延長 (domain:renew): `POST /domains/{name}/renew`\n   - authInfo 再生成: `POST /domains/{name}/rotate-auth-info`\n   - 移管: `POST /domains/{name}/transfer/request` → `approve` / `reject` / `cancel`\n   - 廃止: `DELETE /domains/{name}`\n\n### リソースの依存関係\n```\ncontact (登録者・各ロール) ─┐\n                            ├─▶ domain\nhost (ネームサーバ) ────────┘\n```\n- ドメインの `registrant` / `contacts` は **既存コンタクト ID** を指す必要があります（存在チェックあり）。\n- `nameservers` はホスト名の文字列です（ホストオブジェクト事前作成は推奨ですが必須チェックはしていません）。\n\n---\n\n## 識別子・authInfo・名称の桁数と制約\nレジストラ側で決める値の制約です（違反すると `400` バリデーションエラー）。\n\n| 項目 | 桁数 | 使用可能文字 / 制約 |\n|---|---|---|\n| コンタクト ID | 3〜16 文字 | 英数字とハイフン `-`。先頭はハイフン不可。レジストラ内で一意（重複は `2302`）。 |\n| ドメイン名 | 全体 最大 253 文字 / 各ラベル 最大 63 文字 | 英数字とハイフン。ラベル先頭・末尾はハイフン不可。対応 TLD 必須。一意（重複は `2302`）。 |\n| ホスト名 | 最大 255 文字 | FQDN 形式（`ns1.example.com` 等）。一意（重複は `2302`）。 |\n| authInfo（authcode） | 1〜64 文字 | 移管パスフレーズ。RFC に固定の文字数上限は無い（`pwAuthInfoType`）が、RFC 9154 は 128bit 以上のエントロピーを推奨。実運用ではレジストリが上限を課すため、本レジストリは **64 文字**を上限とする（超過は `400`）。推測されにくい値を推奨。 |\n| 氏名（contact name） | — | 実在の個人名は不可。許可された架空のダミー氏名のみ（`John Doe` / `Jane Doe` / `Taro Test` / `Hanako Test` / `Test User` / `Demo User` / `Sample Person` / `Example Contact`）。一意性はメール・ID で確保。 |\n| メール（contact email） | — | 配送不可の予約ドメインのみ（`@example.com` / `@example.net` / `@example.org`）。ローカル部は自由でドメインごとに一意可。例 `taro.test@example.com`。 |\n| clTRID（`X-Cl-TRID`） | 64 文字以内推奨 | 形式制限なし。一意性は強制しない（トレース用）。API ログ列は 64 文字。 |\n\n---\n\n## ドメイン移管 (transfer) の流れ\n移管は、あるドメインの管理権を別のレジストラへ移す操作です。登場人物は 2 者です。\n\n- **losing レジストラ（現レジストラ / 移管元）**: いま そのドメインを保有しているレジストラ。\n- **gaining レジストラ（移管先 / 申請側）**: これから引き取ろうとしているレジストラ。\n\n手順:\n1. **申請** — gaining（移管先）が `POST /domains/{name}/transfer/request` に **authInfo**（ドメインの移管パスフレーズ）を付けて申請します。\n   → ドメインは `pendingTransfer`（移管申請中）になり、losing 側へ Poll メッセージで通知されます。\n   authInfo が一致しない申請は拒否されます（=移管の本人確認代わり）。\n2. **承認 / 拒否** — losing（現レジストラ）が判断します。\n   - 承認 `POST /domains/{name}/transfer/approve` → 管理レジストラが gaining に移り、`pendingTransfer` が解除されます。\n   - 拒否 `POST /domains/{name}/transfer/reject` → 移管は成立せず元のままです。\n3. **取消** — gaining（申請側）は、承認される前なら `POST /domains/{name}/transfer/cancel` で自分の申請を取り消せます。\n\n※ losing が放置した場合、**申請から 20 分後にサーバが自動承認**します（ハッカソン用に短縮。本来は 5 日）。\n※「登録後 60 日以内の移管はレジストラが拒否できる」という ICANN 移管ポリシーがありますが、これはレジストラ側で対応するルールです。ハッカソンでは移管の検証が滞るため、レジストラ側での対応は不要です（登録直後でも移管できます）。\n\n## ドメインのステータス一覧\n`domain:info` の `status` に現れる主なステータスです（RFC 5731 準拠）。\n\n| ステータス | 意味 |\n|---|---|\n| `ok` | 正常。保留・制限がなく有効。 |\n| `inactive` | ネームサーバ未設定（名前解決できない状態）。 |\n| `pendingTransfer` | 移管申請中（losing の承認待ち）。 |\n| `pendingDelete` | 廃止済みで猶予期間中（復元可能な場合あり）。 |\n| `clientHold` | レジストラによる保留。名前解決（ゾーンへの掲載）を停止する。 |\n| `clientTransferProhibited` | 移管禁止（レジストラが `domain:update` で設定）。 |\n| `clientUpdateProhibited` / `clientDeleteProhibited` / `clientRenewProhibited` | 情報修正 / 廃止 / 更新(期限延長)を禁止（同上、`domain:update` で設定）。 |\n\n補足: `ok` と他のステータスは排他です（何らかの保留・制限・pending があると `ok` は付きません）。`client*` はレジストラが設定、`server*`（あれば）はレジストリが設定する制限です。\n\n## 有効期限切れと自動更新（Auto-Renew）\n有効期限（`exDate`）を過ぎても、ドメインは**すぐには廃止されません**。ICANN の慣行どおり、レジストリが自動で **1 年更新（Auto-Renew）** し、`exDate` を 1 年延長します（本擬似レジストリでは毎分のバッチが期限切れを拾って更新）。\n\n- 自動更新の直後から **45 日間**、RGP（RFC 3915）の猶予ステータス **`autoRenewPeriod`** が付きます（`domain:info` の `rgpStatus` / RDAP の `status` / 管理画面のドメイン詳細で確認可能。RDAP では \"auto renew period\" と表示）。45 日を過ぎると自動的に付かなくなります。\n- 自動更新はレジストリ主導のため、個別の Poll 通知は積まれません（実運用でも一般的）。レジストラは `exDate` / `rgpStatus`（`autoRenewPeriod`）の照会で把握します。\n- 対象は廃止/移管フェーズ（`pendingDelete` / `pendingTransfer` 等）にないドメインのみ（`clientHold` は ICANN どおり自動更新されます）。\n- ※実運用にある「自動更新の課金」「猶予期間中に廃止した場合の返金（AGP/redemption 連動）」は本擬似レジストリでは扱いません。\n\n## Poll メッセージ（非同期通知）\n移管要求などのイベントはキューに積まれます。`GET /api/v1/epp/messages`（1 件取得）→ 確認後に ack（`POST /messages/{id}/ack` 等）で消し込みます。\n\n- poll:req は **常に「最古の未 ack メッセージ」を 1 件** 返す FIFO です（未 ack 件数も返します）。\n- **ack しないと次に進めません**: ack するまで毎回同じ最古メッセージが返り続け、それより新しい通知を受け取れません。また未 ack のままだとキューに溜まり続けます（自動失効はありません）。\n- ack は業務処理をブロックするものではなく（移管の承認/拒否は専用 API で行う）、通知を 1 件ずつ確認して次へ回すための操作です。\n\n## Tips: thin / thick レジストリと ICANN 登録データポリシー (2025)\n実在のレジストリには、レジストリが保持するデータ量で従来 2 種類ありました。\n\n- **thin レジストリ**（従来の `.com` / `.net` = Verisign）: レジストリは **NS・スポンサーレジストラ・status・日付・authInfo 等の最小限**のみ保持し、**登録者/連絡先はレジストラが保持**。レジストリの RDAP は「レジストラ・NS・状態」だけを返し、登録者情報はレジストラ側を参照させます。\n- **thick レジストリ**（多くの gTLD、CentralNic 系など）: レジストリが**登録者/管理/技術/請求の各コンタクトまで保持**。\n\n**2025-08-21 発効の ICANN Registration Data Policy (RDP)** により、この区分の前提が変わりました（GDPR 対応。全 gTLD が対象、ccTLD は対象外）:\n- 登録データは**最小データセット化**され、レジストリ・レジストラは必要最小限のみ収集・保存・送信する。\n- **管理/技術/請求 (admin/tech/billing) コンタクトは、レジストリが特に要求しない限りレジストリへ送信・保存されない**（レジストラも保持を取りやめる方向）。\n- 公開ディレクトリ (RDAP) では個人データを既定で **redaction**（2024 RDAP Response Profile / RFC 9537）。\n\n→ つまりコンタクト情報の持ち方は、もはや「TLD 一律の thin/thick」だけでなく、**レジストリ / TLD ごとの要求 + データ最小化ポリシー**で決まります。\n\n**本擬似レジストリ**は、学習容易性のため kitaqsign / kitaqnic とも **thick 実装**（`domain:create` で registrant/contacts を指定し、レジストリがコンタクトを保持・RDAP でも返す）。実運用の RDP に基づく最小化・redaction は本教材では簡略化しています（コンタクト作成・参照・移管の一連を両レジストリで学べるようにするため。なお PII は許可ダミー値のみ受付）。\n\n## Tips: login / logout は本 REST 実装では任意\n本物の EPP (RFC 5730) は TCP 常時接続でセッションを張るため、他コマンドの前に `session:login`、終了時に `session:logout` が**必須**です。本擬似レジストリは HTTP で**リクエストごとに認証**する（外側 Basic ゲート + `X-Registrar-Id` / `X-Api-Key`）ため、**login/logout を呼ばなくても各コマンドを直接実行できます**。用意しているのはコマンド体系の学習・対比のためです。\n\n## 補足\n- エラーコードは EPP (RFC 5730) の result code に準拠します（1000=成功系, 2303=存在しない, 2302=既に存在 など）。\n- 本 Swagger は EPP API (`/api/v1/**`) のみを対象とします。\n- WHOIS は提供しません。ドメイン照会は RDAP (`rdap.` サブドメイン) を利用してください。\n",
+    "version": "v1"
+  },
+  "servers": [
+    { "url": "/", "description": "current host (Swagger UI と同一オリジン)" },
+    {
+      "url": "https://epp.kitaqnic.com",
+      "description": "public (別オリジン; CORS のため Try it out 不可)"
+    }
+  ],
+  "security": [{ "gate": [], "registrarId": [], "apiKey": [] }],
+  "tags": [
+    {
+      "name": "Domain",
+      "description": "ドメイン。登録には事前に registrant/contacts のコンタクト作成が必要。check/info/create/update/delete/renew/transfer。"
+    },
+    {
+      "name": "Messages",
+      "description": "Poll メッセージ(非同期通知)。移管要求などのイベントを取得・確認消込する。"
+    },
+    {
+      "name": "Contact",
+      "description": "コンタクト(連絡先)。ドメインの registrant・各ロールで参照する。ドメイン登録より前に作成する。"
+    },
+    {
+      "name": "Session",
+      "description": "セッション。hello は疎通確認(API キー不要)。EPP はステートレスで、実際の認証は各リクエストのヘッダで行う。"
+    },
+    {
+      "name": "Host",
+      "description": "ホスト(ネームサーバ)。ドメインの nameservers から参照する。グルーが必要な場合は事前に作成する。"
+    }
+  ],
+  "paths": {
+    "/api/v1/epp/hosts/{name}": {
+      "get": {
+        "tags": ["Host"],
+        "summary": "host:info — ホスト情報取得",
+        "description": "ホストの登録内容(IP等)を取得する。",
+        "operationId": "info",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "X-Cl-TRID",
+            "in": "header",
+            "description": "クライアント側トランザクション ID (任意)。リクエストごとに一意な値を推奨。レスポンスの trID.clTRID にそのままエコーされ、障害調査時にレジストリ側ログとの突合キーになる。",
+            "required": false,
+            "schema": { "type": "string", "example": "CLI-20260729-0001" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseHostResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": ["Host"],
+        "summary": "host:update — ホスト更新",
+        "description": "ホストの IP アドレス等を更新する。",
+        "operationId": "update",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "X-Cl-TRID",
+            "in": "header",
+            "description": "クライアント側トランザクション ID (任意)。リクエストごとに一意な値を推奨。レスポンスの trID.clTRID にそのままエコーされ、障害調査時にレジストリ側ログとの突合キーになる。",
+            "required": false,
+            "schema": { "type": "string", "example": "CLI-20260729-0001" }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/HostUpdateRequest" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseHostResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Host"],
+        "summary": "host:delete — ホスト削除",
+        "description": "ホストを削除する。どのドメインからも参照されていないこと。",
+        "operationId": "delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "X-Cl-TRID",
+            "in": "header",
+            "description": "クライアント側トランザクション ID (任意)。リクエストごとに一意な値を推奨。レスポンスの trID.clTRID にそのままエコーされ、障害調査時にレジストリ側ログとの突合キーになる。",
+            "required": false,
+            "schema": { "type": "string", "example": "CLI-20260729-0001" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": { "$ref": "#/components/schemas/EppResponseUnit" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/epp/domains/{name}": {
+      "get": {
+        "tags": ["Domain"],
+        "summary": "domain:info — ドメイン情報取得",
+        "description": "ドメインの登録内容(登録者・コンタクト・NS・有効期限等)を取得する。",
+        "operationId": "info_1",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Domain name (FQDN)",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "X-Cl-TRID",
+            "in": "header",
+            "description": "クライアント側トランザクション ID (任意)。リクエストごとに一意な値を推奨。レスポンスの trID.clTRID にそのままエコーされ、障害調査時にレジストリ側ログとの突合キーになる。",
+            "required": false,
+            "schema": { "type": "string", "example": "CLI-20260729-0001" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "info success",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseDomainInfoResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Domain not found",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseDomainInfoResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [{ "gate": [] }, { "apiKey": [] }, { "registrarId": [] }]
+      },
+      "put": {
+        "tags": ["Domain"],
+        "summary": "domain:update — ドメイン情報修正",
+        "description": "ネームサーバ・コンタクト・ステータス等を追加/削除/変更する。設定できるステータスは clientHold / clientTransferProhibited / clientUpdateProhibited / clientDeleteProhibited / clientRenewProhibited (詳細は add.statuses のスキーマ参照)。【メモ】`registrant` を別のコンタクトに変更する操作は ICANN でいう Change of Registrant (登録者変更) に該当し、実際には変更後 60 日間の他レジストラ移管ロックが課されます (登録後 60 日ルールと同様、レジストラ側で対応するルール)。ハッカソンでは移管の検証が滞るため、レジストラ側での対応は不要です (登録者変更直後でも移管できます)。",
+        "operationId": "update_1",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Domain name (FQDN)",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "X-Cl-TRID",
+            "in": "header",
+            "description": "クライアント側トランザクション ID (任意)。リクエストごとに一意な値を推奨。レスポンスの trID.clTRID にそのままエコーされ、障害調査時にレジストリ側ログとの突合キーになる。",
+            "required": false,
+            "schema": { "type": "string", "example": "CLI-20260729-0001" }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/DomainUpdateRequest" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "update success",
+            "content": {
+              "*/*": {
+                "schema": { "$ref": "#/components/schemas/EppResponseUnit" }
+              }
+            }
+          },
+          "404": {
+            "description": "Domain not found",
+            "content": {
+              "*/*": {
+                "schema": { "$ref": "#/components/schemas/EppResponseUnit" }
+              }
+            }
+          }
+        },
+        "security": [{ "gate": [] }, { "apiKey": [] }, { "registrarId": [] }]
+      },
+      "delete": {
+        "tags": ["Domain"],
+        "summary": "domain:delete — ドメイン廃止",
+        "description": "ドメインを廃止する(廃止後 45 日の猶予期間あり)。",
+        "operationId": "delete_1",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Domain name (FQDN)",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "X-Cl-TRID",
+            "in": "header",
+            "description": "クライアント側トランザクション ID (任意)。リクエストごとに一意な値を推奨。レスポンスの trID.clTRID にそのままエコーされ、障害調査時にレジストリ側ログとの突合キーになる。",
+            "required": false,
+            "schema": { "type": "string", "example": "CLI-20260729-0001" }
+          }
+        ],
+        "responses": {
+          "404": {
+            "description": "Domain not found",
+            "content": {
+              "*/*": {
+                "schema": { "$ref": "#/components/schemas/EppResponseUnit" }
+              }
+            }
+          },
+          "200": {
+            "description": "delete success",
+            "content": {
+              "*/*": {
+                "schema": { "$ref": "#/components/schemas/EppResponseUnit" }
+              }
+            }
+          }
+        },
+        "security": [{ "gate": [] }, { "apiKey": [] }, { "registrarId": [] }]
+      }
+    },
+    "/api/v1/epp/contacts/{id}": {
+      "get": {
+        "tags": ["Contact"],
+        "summary": "contact:info — コンタクト情報取得",
+        "description": "コンタクトの登録内容を取得する。",
+        "operationId": "info_2",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "X-Cl-TRID",
+            "in": "header",
+            "description": "クライアント側トランザクション ID (任意)。リクエストごとに一意な値を推奨。レスポンスの trID.clTRID にそのままエコーされ、障害調査時にレジストリ側ログとの突合キーになる。",
+            "required": false,
+            "schema": { "type": "string", "example": "CLI-20260729-0001" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseContactResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": ["Contact"],
+        "summary": "contact:update — コンタクト更新",
+        "description": "コンタクトの登録内容を更新する。",
+        "operationId": "update_2",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "X-Cl-TRID",
+            "in": "header",
+            "description": "クライアント側トランザクション ID (任意)。リクエストごとに一意な値を推奨。レスポンスの trID.clTRID にそのままエコーされ、障害調査時にレジストリ側ログとの突合キーになる。",
+            "required": false,
+            "schema": { "type": "string", "example": "CLI-20260729-0001" }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ContactUpdateRequest" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseContactResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Contact"],
+        "summary": "contact:delete — コンタクト削除",
+        "description": "コンタクトを削除する。どのドメインからも参照されていないこと。",
+        "operationId": "delete_2",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "X-Cl-TRID",
+            "in": "header",
+            "description": "クライアント側トランザクション ID (任意)。リクエストごとに一意な値を推奨。レスポンスの trID.clTRID にそのままエコーされ、障害調査時にレジストリ側ログとの突合キーになる。",
+            "required": false,
+            "schema": { "type": "string", "example": "CLI-20260729-0001" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": { "$ref": "#/components/schemas/EppResponseUnit" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/epp/sessions/logout": {
+      "post": {
+        "tags": ["Session"],
+        "summary": "logout — ログアウト",
+        "description": "ステートレス API のため常に成功する(セッション状態は保持しない)。本 REST 実装では任意で、呼ばなくても構いません (本物の EPP/TCP 版では logout が必須)。",
+        "operationId": "logout",
+        "parameters": [
+          {
+            "name": "X-Cl-TRID",
+            "in": "header",
+            "description": "クライアント側トランザクション ID (任意)。リクエストごとに一意な値を推奨。レスポンスの trID.clTRID にそのままエコーされ、障害調査時にレジストリ側ログとの突合キーになる。",
+            "required": false,
+            "schema": { "type": "string", "example": "CLI-20260729-0001" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": { "$ref": "#/components/schemas/EppResponseUnit" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/epp/sessions/login": {
+      "post": {
+        "tags": ["Session"],
+        "summary": "login — API キーログイン",
+        "description": "API Key 認証を実行し、ウェルカムメッセージを返す。実際の認証はフィルタで実施済み。本 REST 実装では認証はリクエストごとに行うため login は任意で、呼ばなくても各コマンドを実行できます (本物の EPP/TCP 版では login が必須)。",
+        "operationId": "login",
+        "parameters": [
+          {
+            "name": "X-Cl-TRID",
+            "in": "header",
+            "description": "クライアント側トランザクション ID (任意)。リクエストごとに一意な値を推奨。レスポンスの trID.clTRID にそのままエコーされ、障害調査時にレジストリ側ログとの突合キーになる。",
+            "required": false,
+            "schema": { "type": "string", "example": "CLI-20260729-0001" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "login 成功",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseMapStringString"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "認証失敗",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseMapStringString"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/epp/hosts": {
+      "post": {
+        "tags": ["Host"],
+        "summary": "host:create — ホスト作成",
+        "description": "ネームサーバのホストオブジェクトを作成する。ドメインの nameservers から参照する場合に使う。",
+        "operationId": "create",
+        "parameters": [
+          {
+            "name": "X-Cl-TRID",
+            "in": "header",
+            "description": "クライアント側トランザクション ID (任意)。リクエストごとに一意な値を推奨。レスポンスの trID.clTRID にそのままエコーされ、障害調査時にレジストリ側ログとの突合キーになる。",
+            "required": false,
+            "schema": { "type": "string", "example": "CLI-20260729-0001" }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/HostCreateRequest" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseHostResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/epp/hosts/check": {
+      "post": {
+        "tags": ["Host"],
+        "summary": "host:check — ホスト名の空き確認",
+        "description": "指定したホスト名が使用可能か確認する。",
+        "operationId": "check",
+        "parameters": [
+          {
+            "name": "X-Cl-TRID",
+            "in": "header",
+            "description": "クライアント側トランザクション ID (任意)。リクエストごとに一意な値を推奨。レスポンスの trID.clTRID にそのままエコーされ、障害調査時にレジストリ側ログとの突合キーになる。",
+            "required": false,
+            "schema": { "type": "string", "example": "CLI-20260729-0001" }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/HostCheckRequest" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseHostCheckResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/epp/domains": {
+      "post": {
+        "tags": ["Domain"],
+        "summary": "domain:create — ドメイン登録",
+        "description": "ドメインを登録する。★事前に registrant と contacts のコンタクトを POST /contacts で作成しておくこと(存在しないと 404)。TLD・IDN・期間・プレミアム承諾・Launch フェーズを検証する。",
+        "operationId": "create_1",
+        "parameters": [
+          {
+            "name": "X-Cl-TRID",
+            "in": "header",
+            "description": "クライアント側トランザクション ID (任意)。リクエストごとに一意な値を推奨。レスポンスの trID.clTRID にそのままエコーされ、障害調査時にレジストリ側ログとの突合キーになる。",
+            "required": false,
+            "schema": { "type": "string", "example": "CLI-20260729-0001" }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/DomainCreateRequest" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "create success",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseDomainCreateResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Domain already exists",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseDomainCreateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Policy violation (TLD, premium, launch phase)",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseDomainCreateResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [{ "gate": [] }, { "apiKey": [] }, { "registrarId": [] }]
+      }
+    },
+    "/api/v1/epp/domains/{name}/transfer/request": {
+      "post": {
+        "tags": ["Domain"],
+        "summary": "domain:transfer request — 移管申請",
+        "description": "他レジストラへの移管を申請する。gaining 側が authInfo を提示して開始する。【メモ】「登録後 60 日以内の移管はレジストラが拒否できる」という ICANN 移管ポリシーがありますが、これはレジストラ側で対応するルールです。ハッカソンでは移管の検証が滞るため、レジストラ側での対応は不要です(登録直後でも移管できます)。",
+        "operationId": "transferRequest",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Domain name (FQDN)",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "X-Cl-TRID",
+            "in": "header",
+            "description": "クライアント側トランザクション ID (任意)。リクエストごとに一意な値を推奨。レスポンスの trID.clTRID にそのままエコーされ、障害調査時にレジストリ側ログとの突合キーになる。",
+            "required": false,
+            "schema": { "type": "string", "example": "CLI-20260729-0001" }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/DomainTransferRequest" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Transfer pending",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseDomainTransferResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid authInfo",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseDomainTransferResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Domain not found",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseDomainTransferResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [{ "gate": [] }, { "apiKey": [] }, { "registrarId": [] }]
+      }
+    },
+    "/api/v1/epp/domains/{name}/transfer/reject": {
+      "post": {
+        "tags": ["Domain"],
+        "summary": "domain:transfer reject — 移管拒否",
+        "description": "移管を拒否する(losing=現レジストラ側)。",
+        "operationId": "transferReject",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Domain name (FQDN)",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "X-Cl-TRID",
+            "in": "header",
+            "description": "クライアント側トランザクション ID (任意)。リクエストごとに一意な値を推奨。レスポンスの trID.clTRID にそのままエコーされ、障害調査時にレジストリ側ログとの突合キーになる。",
+            "required": false,
+            "schema": { "type": "string", "example": "CLI-20260729-0001" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transfer rejected",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseDomainTransferResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [{ "gate": [] }, { "apiKey": [] }, { "registrarId": [] }]
+      }
+    },
+    "/api/v1/epp/domains/{name}/transfer/cancel": {
+      "post": {
+        "tags": ["Domain"],
+        "summary": "domain:transfer cancel — 移管取消",
+        "description": "移管申請を取り消す(gaining=申請側)。",
+        "operationId": "transferCancel",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Domain name (FQDN)",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "X-Cl-TRID",
+            "in": "header",
+            "description": "クライアント側トランザクション ID (任意)。リクエストごとに一意な値を推奨。レスポンスの trID.clTRID にそのままエコーされ、障害調査時にレジストリ側ログとの突合キーになる。",
+            "required": false,
+            "schema": { "type": "string", "example": "CLI-20260729-0001" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transfer cancelled",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseDomainTransferResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [{ "gate": [] }, { "apiKey": [] }, { "registrarId": [] }]
+      }
+    },
+    "/api/v1/epp/domains/{name}/transfer/approve": {
+      "post": {
+        "tags": ["Domain"],
+        "summary": "domain:transfer approve — 移管承認",
+        "description": "移管を承認する(losing=現レジストラ側)。承認でドメインが gaining 側へ移る。",
+        "operationId": "transferApprove",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Domain name (FQDN)",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "X-Cl-TRID",
+            "in": "header",
+            "description": "クライアント側トランザクション ID (任意)。リクエストごとに一意な値を推奨。レスポンスの trID.clTRID にそのままエコーされ、障害調査時にレジストリ側ログとの突合キーになる。",
+            "required": false,
+            "schema": { "type": "string", "example": "CLI-20260729-0001" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transfer approved",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseDomainTransferResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [{ "gate": [] }, { "apiKey": [] }, { "registrarId": [] }]
+      }
+    },
+    "/api/v1/epp/domains/{name}/rotate-auth-info": {
+      "post": {
+        "tags": ["Domain"],
+        "summary": "domain:rotate authInfo (kitaqnic 拡張)",
+        "description": "sponsoring registrar 向けの authInfo 再生成。新 raw を 1 度だけ返し、旧 authInfo は即無効化される。",
+        "operationId": "rotateAuthInfo",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Domain name (FQDN)",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "X-Cl-TRID",
+            "in": "header",
+            "description": "クライアント側トランザクション ID (任意)。リクエストごとに一意な値を推奨。レスポンスの trID.clTRID にそのままエコーされ、障害調査時にレジストリ側ログとの突合キーになる。",
+            "required": false,
+            "schema": { "type": "string", "example": "CLI-20260729-0001" }
+          }
+        ],
+        "responses": {
+          "403": {
+            "description": "sponsoring registrar 以外の呼び出し",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseMapStringString"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "再生成成功",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseMapStringString"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ドメイン不在",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseMapStringString"
+                }
+              }
+            }
+          }
+        },
+        "security": [{ "gate": [] }, { "apiKey": [] }, { "registrarId": [] }]
+      }
+    },
+    "/api/v1/epp/domains/{name}/restore": {
+      "post": {
+        "tags": ["Domain"],
+        "summary": "domain:restore — ドメイン復旧 (RGP)",
+        "description": "廃止 (domain:delete) で pendingDelete になったドメインを稼働 (ok) に復旧する。現 (sponsoring) レジストラのみ。pendingDelete でない場合は 2304 を返す。",
+        "operationId": "restore",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Domain name (FQDN)",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "X-Cl-TRID",
+            "in": "header",
+            "description": "クライアント側トランザクション ID (任意)。リクエストごとに一意な値を推奨。レスポンスの trID.clTRID にそのままエコーされ、障害調査時にレジストリ側ログとの突合キーになる。",
+            "required": false,
+            "schema": { "type": "string", "example": "CLI-20260729-0001" }
+          }
+        ],
+        "responses": {
+          "403": {
+            "description": "sponsoring registrar 以外の呼び出し",
+            "content": {
+              "*/*": {
+                "schema": { "$ref": "#/components/schemas/EppResponseUnit" }
+              }
+            }
+          },
+          "404": {
+            "description": "Domain not found",
+            "content": {
+              "*/*": {
+                "schema": { "$ref": "#/components/schemas/EppResponseUnit" }
+              }
+            }
+          },
+          "200": {
+            "description": "restore success",
+            "content": {
+              "*/*": {
+                "schema": { "$ref": "#/components/schemas/EppResponseUnit" }
+              }
+            }
+          }
+        },
+        "security": [{ "gate": [] }, { "apiKey": [] }, { "registrarId": [] }]
+      }
+    },
+    "/api/v1/epp/domains/{name}/renew": {
+      "post": {
+        "tags": ["Domain"],
+        "summary": "domain:renew — ドメイン更新",
+        "description": "登録期間を更新(延長)する。curExpDate に現在の有効期限を指定する。",
+        "operationId": "renew",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Domain name (FQDN)",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "X-Cl-TRID",
+            "in": "header",
+            "description": "クライアント側トランザクション ID (任意)。リクエストごとに一意な値を推奨。レスポンスの trID.clTRID にそのままエコーされ、障害調査時にレジストリ側ログとの突合キーになる。",
+            "required": false,
+            "schema": { "type": "string", "example": "CLI-20260729-0001" }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/DomainRenewRequest" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "404": {
+            "description": "Domain not found",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseDomainRenewResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "renew success",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseDomainRenewResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [{ "gate": [] }, { "apiKey": [] }, { "registrarId": [] }]
+      }
+    },
+    "/api/v1/epp/domains/check": {
+      "post": {
+        "tags": ["Domain"],
+        "summary": "domain:check — ドメインの空き確認",
+        "description": "ドメインの登録可否を確認する。プレミアム価格・Launch フェーズ情報も返す。",
+        "operationId": "check_1",
+        "parameters": [
+          {
+            "name": "X-Cl-TRID",
+            "in": "header",
+            "description": "クライアント側トランザクション ID (任意)。リクエストごとに一意な値を推奨。レスポンスの trID.clTRID にそのままエコーされ、障害調査時にレジストリ側ログとの突合キーになる。",
+            "required": false,
+            "schema": { "type": "string", "example": "CLI-20260729-0001" }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/DomainNamesRequest" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "check complete",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseDomainCheckResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unsupported TLD",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseDomainCheckResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [{ "gate": [] }, { "apiKey": [] }, { "registrarId": [] }]
+      }
+    },
+    "/api/v1/epp/contacts": {
+      "post": {
+        "tags": ["Contact"],
+        "summary": "contact:create — コンタクト作成",
+        "description": "ドメイン登録で参照する連絡先を作成する。★ドメイン登録より前に実行すること。個人情報保護のため氏名・メール等はダミー値のみ許可。",
+        "operationId": "create_2",
+        "parameters": [
+          {
+            "name": "X-Cl-TRID",
+            "in": "header",
+            "description": "クライアント側トランザクション ID (任意)。リクエストごとに一意な値を推奨。レスポンスの trID.clTRID にそのままエコーされ、障害調査時にレジストリ側ログとの突合キーになる。",
+            "required": false,
+            "schema": { "type": "string", "example": "CLI-20260729-0001" }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ContactCreateRequest" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseContactResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/epp/contacts/check": {
+      "post": {
+        "tags": ["Contact"],
+        "summary": "contact:check — コンタクトIDの空き確認",
+        "description": "指定したコンタクトIDが使用可能か確認する。",
+        "operationId": "check_2",
+        "parameters": [
+          {
+            "name": "X-Cl-TRID",
+            "in": "header",
+            "description": "クライアント側トランザクション ID (任意)。リクエストごとに一意な値を推奨。レスポンスの trID.clTRID にそのままエコーされ、障害調査時にレジストリ側ログとの突合キーになる。",
+            "required": false,
+            "schema": { "type": "string", "example": "CLI-20260729-0001" }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ContactCheckRequest" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseContactCheckResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/epp/sessions/hello": {
+      "get": {
+        "tags": ["Session"],
+        "summary": "hello — 疎通確認",
+        "description": "サーバのグリーティング(レジストリ情報)を返す。API キー不要(Basic ゲートのみ)。まず最初に疎通確認に使う。",
+        "operationId": "hello",
+        "parameters": [
+          {
+            "name": "X-Cl-TRID",
+            "in": "header",
+            "description": "クライアント側トランザクション ID (任意)。リクエストごとに一意な値を推奨。レスポンスの trID.clTRID にそのままエコーされ、障害調査時にレジストリ側ログとの突合キーになる。",
+            "required": false,
+            "schema": { "type": "string", "example": "CLI-20260729-0001" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponseMapStringObject"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/epp/messages": {
+      "get": {
+        "tags": ["Messages"],
+        "summary": "poll:req — メッセージ取得",
+        "description": "未確認の Poll メッセージを 1 件(最古)取得する。",
+        "operationId": "poll",
+        "parameters": [
+          {
+            "name": "X-Cl-TRID",
+            "in": "header",
+            "description": "クライアント側トランザクション ID (任意)。リクエストごとに一意な値を推奨。レスポンスの trID.clTRID にそのままエコーされ、障害調査時にレジストリ側ログとの突合キーになる。",
+            "required": false,
+            "schema": { "type": "string", "example": "CLI-20260729-0001" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/EppResponsePollResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/epp/messages/{id}": {
+      "delete": {
+        "tags": ["Messages"],
+        "summary": "poll:ack — メッセージ確認消込",
+        "description": "Poll メッセージを確認済みにしてキューから除去する。",
+        "operationId": "ack",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer", "format": "int64" }
+          },
+          {
+            "name": "X-Cl-TRID",
+            "in": "header",
+            "description": "クライアント側トランザクション ID (任意)。リクエストごとに一意な値を推奨。レスポンスの trID.clTRID にそのままエコーされ、障害調査時にレジストリ側ログとの突合キーになる。",
+            "required": false,
+            "schema": { "type": "string", "example": "CLI-20260729-0001" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": { "$ref": "#/components/schemas/EppResponseUnit" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "HostChangeSet": {
+        "type": "object",
+        "properties": {
+          "addrs": {
+            "type": "array",
+            "description": "IP アドレス。",
+            "items": { "$ref": "#/components/schemas/IpAddress" }
+          },
+          "statuses": {
+            "type": "array",
+            "description": "ステータス。",
+            "example": ["clientUpdateProhibited"],
+            "items": {
+              "type": "string",
+              "description": "ステータス。",
+              "example": "[\"clientUpdateProhibited\"]"
+            }
+          }
+        },
+        "description": "ホスト更新の add/rem で指定する項目の集合。"
+      },
+      "HostChg": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "変更後のホスト名。",
+            "example": "ns2.example.com"
+          }
+        },
+        "description": "ホストの改名内容。"
+      },
+      "HostUpdateRequest": {
+        "type": "object",
+        "properties": {
+          "add": { "$ref": "#/components/schemas/HostChangeSet" },
+          "rem": { "$ref": "#/components/schemas/HostChangeSet" },
+          "chg": { "$ref": "#/components/schemas/HostChg" }
+        },
+        "description": "ホスト更新リクエスト。add=追加 / rem=削除 / chg=改名。"
+      },
+      "IpAddress": {
+        "required": ["addr", "ip"],
+        "type": "object",
+        "properties": {
+          "addr": {
+            "type": "string",
+            "description": "IP アドレス。",
+            "example": "192.0.2.1"
+          },
+          "ip": {
+            "pattern": "^(v4|v6)$",
+            "type": "string",
+            "description": "アドレス種別。v4 または v6。",
+            "example": "v4"
+          }
+        },
+        "description": "IP アドレス (グルーレコード)。"
+      },
+      "EppResponseHostResponse": {
+        "required": ["result", "trID"],
+        "type": "object",
+        "properties": {
+          "result": { "$ref": "#/components/schemas/Result" },
+          "resData": { "$ref": "#/components/schemas/HostResponse" },
+          "extension": {
+            "type": "object",
+            "additionalProperties": { "type": "object" }
+          },
+          "trID": { "$ref": "#/components/schemas/TrId" }
+        }
+      },
+      "HostResponse": {
+        "required": ["addrs", "crDate", "name", "status"],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "ホスト名。",
+            "example": "ns1.example.com"
+          },
+          "addrs": {
+            "type": "array",
+            "description": "IP アドレス一覧。",
+            "items": { "$ref": "#/components/schemas/IpAddress" }
+          },
+          "status": {
+            "type": "array",
+            "description": "ステータス一覧。",
+            "example": ["ok"],
+            "items": {
+              "type": "string",
+              "description": "ステータス一覧。",
+              "example": "[\"ok\"]"
+            }
+          },
+          "crDate": {
+            "type": "string",
+            "description": "登録日時 (ISO8601)。",
+            "example": "2026-05-05T10:00:00Z"
+          },
+          "upDate": {
+            "type": "string",
+            "description": "最終更新日時。未更新なら null。"
+          }
+        },
+        "description": "ホスト情報 (host:info) のレスポンス。"
+      },
+      "Result": {
+        "required": ["code", "message"],
+        "type": "object",
+        "properties": {
+          "code": { "type": "integer", "format": "int32" },
+          "message": { "type": "string" }
+        }
+      },
+      "TrId": {
+        "required": ["svTRID"],
+        "type": "object",
+        "properties": {
+          "clTRID": { "type": "string" },
+          "svTRID": { "type": "string" }
+        }
+      },
+      "DomainChangeSet": {
+        "type": "object",
+        "properties": {
+          "nameservers": {
+            "type": "array",
+            "description": "ネームサーバのホスト名。",
+            "example": ["ns1.example.com"],
+            "items": {
+              "type": "string",
+              "description": "ネームサーバのホスト名。",
+              "example": "[\"ns1.example.com\"]"
+            }
+          },
+          "contacts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "description": "ロール別コンタクト ID。",
+              "example": "{\"TECH\":\"C-0003\"}"
+            },
+            "description": "ロール別コンタクト ID。",
+            "example": { "TECH": "C-0003" }
+          },
+          "statuses": {
+            "type": "array",
+            "description": "設定/解除するステータス。domain:update で操作できるのは以下の**クライアント側ステータス**のみ: `clientHold`(掲載保留=名前解決を止める) / `clientTransferProhibited`(移管禁止) / `clientUpdateProhibited`(情報修正禁止) / `clientDeleteProhibited`(廃止禁止) / `clientRenewProhibited`(更新禁止)。`ok`/`inactive`/`pending*` は自動導出、`server*` 系はレジストリのみ設定可 (指定不可)。",
+            "example": ["clientTransferProhibited"],
+            "items": {
+              "type": "string",
+              "description": "設定/解除するステータス。domain:update で操作できるのは以下の**クライアント側ステータス**のみ: `clientHold`(掲載保留=名前解決を止める) / `clientTransferProhibited`(移管禁止) / `clientUpdateProhibited`(情報修正禁止) / `clientDeleteProhibited`(廃止禁止) / `clientRenewProhibited`(更新禁止)。`ok`/`inactive`/`pending*` は自動導出、`server*` 系はレジストリのみ設定可 (指定不可)。",
+              "example": "[\"clientTransferProhibited\"]",
+              "enum": [
+                "clientHold",
+                "clientTransferProhibited",
+                "clientUpdateProhibited",
+                "clientDeleteProhibited",
+                "clientRenewProhibited"
+              ]
+            },
+            "enum": [
+              "clientHold",
+              "clientTransferProhibited",
+              "clientUpdateProhibited",
+              "clientDeleteProhibited",
+              "clientRenewProhibited"
+            ]
+          }
+        },
+        "description": "ドメイン情報修正の add/rem で指定する項目の集合。"
+      },
+      "DomainChg": {
+        "type": "object",
+        "properties": {
+          "registrant": {
+            "type": "string",
+            "description": "変更後の登録者コンタクト ID。",
+            "example": "C-0002"
+          },
+          "authInfo": {
+            "maxLength": 64,
+            "minLength": 0,
+            "type": "string",
+            "description": "変更後の authInfo (移管パスフレーズ)。1〜64 文字。",
+            "example": "new-s3cr3t"
+          }
+        },
+        "description": "ドメインの置換 (chg) 内容。"
+      },
+      "DomainUpdateRequest": {
+        "type": "object",
+        "properties": {
+          "add": { "$ref": "#/components/schemas/DomainChangeSet" },
+          "rem": { "$ref": "#/components/schemas/DomainChangeSet" },
+          "chg": { "$ref": "#/components/schemas/DomainChg" },
+          "extensions": {
+            "type": "object",
+            "additionalProperties": { "$ref": "#/components/schemas/JsonNode" },
+            "description": "レジストリ固有拡張 (通常不要)。"
+          }
+        },
+        "description": "ドメイン情報修正リクエスト (domain:update)。add=追加 / rem=削除 / chg=変更 を指定する。"
+      },
+      "JsonNode": {
+        "type": "object",
+        "description": "レジストリ固有拡張 (通常不要)。"
+      },
+      "EppResponseUnit": {
+        "required": ["result", "trID"],
+        "type": "object",
+        "properties": {
+          "result": { "$ref": "#/components/schemas/Result" },
+          "resData": { "$ref": "#/components/schemas/Unit" },
+          "extension": {
+            "type": "object",
+            "additionalProperties": { "type": "object" }
+          },
+          "trID": { "$ref": "#/components/schemas/TrId" }
+        }
+      },
+      "Unit": { "type": "object" },
+      "Address": {
+        "required": ["cc", "city", "street"],
+        "type": "object",
+        "properties": {
+          "street": {
+            "pattern": "N/A|Redacted for Privacy",
+            "type": "string",
+            "description": "番地。N/A または Redacted for Privacy のみ。",
+            "example": "N/A"
+          },
+          "city": {
+            "pattern": "N/A|Redacted for Privacy",
+            "type": "string",
+            "description": "市区町村。N/A または Redacted for Privacy のみ。",
+            "example": "N/A"
+          },
+          "sp": {
+            "pattern": "",
+            "type": "string",
+            "description": "都道府県。個人情報保護のため空のみ許可。"
+          },
+          "pc": {
+            "pattern": "",
+            "type": "string",
+            "description": "郵便番号。個人情報保護のため空のみ許可。"
+          },
+          "cc": {
+            "pattern": "JP|US",
+            "type": "string",
+            "description": "国コード。JP または US のみ。",
+            "example": "JP"
+          }
+        },
+        "description": "住所。個人情報保護のため、番地/市区=N/A または Redacted for Privacy、国=JP/US のみ許可。"
+      },
+      "ContactUpdateRequest": {
+        "type": "object",
+        "properties": {
+          "postalInfo": { "$ref": "#/components/schemas/PostalInfo" },
+          "voice": {
+            "pattern": "|\\+1\\.5555550\\d{2}",
+            "type": "string",
+            "description": "電話番号。空、または RFC 例示番号 (+1.5555550xx) のみ。"
+          },
+          "fax": {
+            "pattern": "|\\+1\\.5555550\\d{2}",
+            "type": "string",
+            "description": "FAX 番号。空、または RFC 例示番号 (+1.5555550xx) のみ。"
+          },
+          "email": {
+            "pattern": "[A-Za-z0-9._%+-]+@example\\.(com|net|org)",
+            "type": "string",
+            "description": "メールアドレス。★配送不可の予約ドメインのみ (example.com / example.net / example.org)。",
+            "example": "hanako.test@example.com"
+          },
+          "authInfo": {
+            "type": "string",
+            "description": "authInfo。省略時は現在値を維持。"
+          }
+        },
+        "description": "コンタクト更新リクエスト。指定した項目のみ更新する (氏名・メール等はダミー値のみ)。"
+      },
+      "PostalInfo": {
+        "required": ["addr", "name"],
+        "type": "object",
+        "properties": {
+          "name": {
+            "maxLength": 255,
+            "minLength": 0,
+            "pattern": "John Doe|Jane Doe|Taro Test|Hanako Test|Test User|Demo User|Sample Person|Example Contact|Registration Private|Whois Agent|Domain Administrator",
+            "type": "string",
+            "description": "氏名。★実在の個人名は不可。許可された架空ダミー氏名 (John Doe / Jane Doe / Taro Test / Hanako Test / Test User / Demo User / Sample Person / Example Contact)、または WHOIS プロキシ用ラベル (Registration Private / Whois Agent / Domain Administrator) のみ。",
+            "example": "Taro Test"
+          },
+          "org": {
+            "pattern": "|Whois Privacy Protection Service|Contact Privacy Inc\\.|Domains By Proxy LLC|Identity Protection Service",
+            "type": "string",
+            "description": "組織名。空、または許可された WHOIS プロキシ事業者名のみ (Whois Privacy Protection Service / Contact Privacy Inc. / Domains By Proxy LLC / Identity Protection Service)。"
+          },
+          "addr": { "$ref": "#/components/schemas/Address" }
+        },
+        "description": "住所情報。氏名・組織・住所を含む。"
+      },
+      "ContactResponse": {
+        "required": ["crDate", "email", "id", "postalInfo", "status"],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "コンタクト ID。",
+            "example": "C-0001"
+          },
+          "postalInfo": { "$ref": "#/components/schemas/PostalInfo" },
+          "voice": {
+            "type": "string",
+            "description": "電話番号 (本レジストリでは常に空)。"
+          },
+          "fax": {
+            "type": "string",
+            "description": "FAX 番号 (本レジストリでは常に空)。"
+          },
+          "email": {
+            "type": "string",
+            "description": "メールアドレス (ダミー値)。",
+            "example": "contact1@example.com"
+          },
+          "status": {
+            "type": "array",
+            "description": "ステータス一覧。",
+            "example": ["ok"],
+            "items": {
+              "type": "string",
+              "description": "ステータス一覧。",
+              "example": "[\"ok\"]"
+            }
+          },
+          "crDate": {
+            "type": "string",
+            "description": "登録日時 (ISO8601)。",
+            "example": "2026-05-05T10:00:00Z"
+          },
+          "upDate": {
+            "type": "string",
+            "description": "最終更新日時。未更新なら null。"
+          }
+        },
+        "description": "コンタクト情報 (contact:info) のレスポンス。"
+      },
+      "EppResponseContactResponse": {
+        "required": ["result", "trID"],
+        "type": "object",
+        "properties": {
+          "result": { "$ref": "#/components/schemas/Result" },
+          "resData": { "$ref": "#/components/schemas/ContactResponse" },
+          "extension": {
+            "type": "object",
+            "additionalProperties": { "type": "object" }
+          },
+          "trID": { "$ref": "#/components/schemas/TrId" }
+        }
+      },
+      "EppResponseMapStringString": {
+        "required": ["result", "trID"],
+        "type": "object",
+        "properties": {
+          "result": { "$ref": "#/components/schemas/Result" },
+          "resData": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          },
+          "extension": {
+            "type": "object",
+            "additionalProperties": { "type": "object" }
+          },
+          "trID": { "$ref": "#/components/schemas/TrId" }
+        }
+      },
+      "LaunchApplicationRequest": {
+        "required": ["domain", "phase"],
+        "type": "object",
+        "properties": {
+          "domain": { "type": "string" },
+          "phase": { "type": "string" },
+          "signedMark": { "type": "string" }
+        }
+      },
+      "EppResponseLaunchApplicationResult": {
+        "required": ["result", "trID"],
+        "type": "object",
+        "properties": {
+          "result": { "$ref": "#/components/schemas/Result" },
+          "resData": { "$ref": "#/components/schemas/LaunchApplicationResult" },
+          "extension": {
+            "type": "object",
+            "additionalProperties": { "type": "object" }
+          },
+          "trID": { "$ref": "#/components/schemas/TrId" }
+        }
+      },
+      "LaunchApplicationResult": {
+        "required": ["applicationId", "domain", "phase", "status"],
+        "type": "object",
+        "properties": {
+          "applicationId": { "type": "integer", "format": "int64" },
+          "domain": { "type": "string" },
+          "phase": { "type": "string" },
+          "status": { "type": "string" }
+        }
+      },
+      "HostCreateRequest": {
+        "required": ["name"],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "ホスト名 (FQDN)。",
+            "example": "ns1.example.com"
+          },
+          "addrs": {
+            "type": "array",
+            "description": "IP アドレス (任意)。グルーレコードが必要な場合に指定。",
+            "items": { "$ref": "#/components/schemas/IpAddress" }
+          }
+        },
+        "description": "ホスト(ネームサーバ)作成リクエスト。ドメインの nameservers から参照できる。"
+      },
+      "HostCheckRequest": {
+        "required": ["names"],
+        "type": "object",
+        "properties": {
+          "names": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "EppResponseHostCheckResponse": {
+        "required": ["result", "trID"],
+        "type": "object",
+        "properties": {
+          "result": { "$ref": "#/components/schemas/Result" },
+          "resData": { "$ref": "#/components/schemas/HostCheckResponse" },
+          "extension": {
+            "type": "object",
+            "additionalProperties": { "type": "object" }
+          },
+          "trID": { "$ref": "#/components/schemas/TrId" }
+        }
+      },
+      "HostCheckResponse": {
+        "required": ["results"],
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/HostCheckResult" }
+          }
+        }
+      },
+      "HostCheckResult": {
+        "required": ["avail", "name"],
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "avail": { "type": "boolean" }
+        }
+      },
+      "DomainCreateRequest": {
+        "required": ["authInfo", "domain", "period", "registrant"],
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string",
+            "description": "登録するドメイン名 (FQDN)。TLD はこのレジストリの取扱 TLD であること。全体 最大 253 文字・各ラベル 最大 63 文字・英数字とハイフン・ラベル先頭末尾ハイフン不可。重複は 2302。",
+            "example": "example.com"
+          },
+          "period": { "$ref": "#/components/schemas/Period" },
+          "nameservers": {
+            "type": "array",
+            "description": "ネームサーバのホスト名リスト (任意)。",
+            "example": ["ns1.example.com", "ns2.example.com"],
+            "items": {
+              "type": "string",
+              "description": "ネームサーバのホスト名リスト (任意)。",
+              "example": "[\"ns1.example.com\",\"ns2.example.com\"]"
+            }
+          },
+          "registrant": {
+            "type": "string",
+            "description": "登録者(registrant)のコンタクト ID。★事前に POST /contacts で作成しておくこと。存在しないと 404。",
+            "example": "C-0001"
+          },
+          "contacts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "description": "ロール別コンタクト ID (admin/tech/billing)。★事前にコンタクト作成が必要。",
+              "example": "{\"ADMIN\":\"C-0001\",\"TECH\":\"C-0001\"}"
+            },
+            "description": "ロール別コンタクト ID (admin/tech/billing)。★事前にコンタクト作成が必要。",
+            "example": { "ADMIN": "C-0001", "TECH": "C-0001" }
+          },
+          "authInfo": {
+            "maxLength": 64,
+            "minLength": 0,
+            "type": "string",
+            "description": "authInfo (移管パスフレーズ)。ドメイン移管時に gaining 側が提示する。1〜64 文字 (レジストリ運用上の上限。RFC には固定上限は無いが RFC 9154 は 128bit 以上のエントロピーを推奨)。推測されにくい値を推奨。",
+            "example": "s3cr3t-pass"
+          },
+          "extensions": {
+            "type": "object",
+            "additionalProperties": { "$ref": "#/components/schemas/JsonNode" },
+            "description": "レジストリ固有拡張 (kitaqnic の launch/premium 等)。通常は不要。"
+          }
+        },
+        "description": "ドメイン登録リクエスト。registrant / contacts は事前に POST /contacts で作成したコンタクト ID を指定する。"
+      },
+      "Period": {
+        "required": ["unit", "value"],
+        "type": "object",
+        "properties": {
+          "unit": {
+            "pattern": "^[YyMm]$",
+            "type": "string",
+            "description": "単位。Y=年, M=月。",
+            "example": "Y"
+          },
+          "value": {
+            "minimum": 1,
+            "type": "integer",
+            "description": "数量 (1 以上)。",
+            "format": "int32",
+            "example": 1
+          }
+        },
+        "description": "登録/更新期間。"
+      },
+      "DomainCreateResponse": {
+        "required": ["crDate", "domain", "exDate"],
+        "type": "object",
+        "properties": {
+          "domain": { "type": "string" },
+          "crDate": { "type": "string" },
+          "exDate": { "type": "string" },
+          "extensions": {
+            "type": "object",
+            "additionalProperties": { "type": "object" }
+          }
+        }
+      },
+      "EppResponseDomainCreateResponse": {
+        "required": ["result", "trID"],
+        "type": "object",
+        "properties": {
+          "result": { "$ref": "#/components/schemas/Result" },
+          "resData": { "$ref": "#/components/schemas/DomainCreateResponse" },
+          "extension": {
+            "type": "object",
+            "additionalProperties": { "type": "object" }
+          },
+          "trID": { "$ref": "#/components/schemas/TrId" }
+        }
+      },
+      "DomainTransferRequest": {
+        "required": ["op"],
+        "type": "object",
+        "properties": {
+          "op": {
+            "pattern": "^(request|approve|reject|cancel|query)$",
+            "type": "string",
+            "description": "操作種別。request=申請(移管先), approve=承認(現レジストラ), reject=拒否(現レジストラ), cancel=取消(移管先), query=状況照会。",
+            "example": "request",
+            "enum": ["request", "approve", "reject", "cancel", "query"]
+          },
+          "authInfo": {
+            "maxLength": 64,
+            "minLength": 0,
+            "type": "string",
+            "description": "申請(request)時に提示する移管パスフレーズ。64 文字以内。",
+            "example": "s3cr3t-pass"
+          },
+          "period": { "$ref": "#/components/schemas/Period" }
+        },
+        "description": "ドメイン移管リクエスト。op で操作種別を指定する。"
+      },
+      "DomainTransferResponse": {
+        "required": [
+          "domain",
+          "gainingRegistrar",
+          "losingRegistrar",
+          "reDate",
+          "status"
+        ],
+        "type": "object",
+        "properties": {
+          "domain": { "type": "string" },
+          "status": { "type": "string" },
+          "gainingRegistrar": { "type": "string" },
+          "losingRegistrar": { "type": "string" },
+          "reDate": { "type": "string" },
+          "acDate": { "type": "string" }
+        }
+      },
+      "EppResponseDomainTransferResponse": {
+        "required": ["result", "trID"],
+        "type": "object",
+        "properties": {
+          "result": { "$ref": "#/components/schemas/Result" },
+          "resData": { "$ref": "#/components/schemas/DomainTransferResponse" },
+          "extension": {
+            "type": "object",
+            "additionalProperties": { "type": "object" }
+          },
+          "trID": { "$ref": "#/components/schemas/TrId" }
+        }
+      },
+      "DomainRenewRequest": {
+        "required": ["curExpDate", "period"],
+        "type": "object",
+        "properties": {
+          "curExpDate": {
+            "type": "string",
+            "description": "現在の有効期限 (取り違え防止のため必須)。",
+            "example": "2027-05-05"
+          },
+          "period": { "$ref": "#/components/schemas/Period" }
+        },
+        "description": "ドメイン更新 (domain:renew, 有効期限の延長) リクエスト。"
+      },
+      "DomainRenewResponse": {
+        "required": ["domain", "exDate"],
+        "type": "object",
+        "properties": {
+          "domain": { "type": "string" },
+          "exDate": { "type": "string" }
+        }
+      },
+      "EppResponseDomainRenewResponse": {
+        "required": ["result", "trID"],
+        "type": "object",
+        "properties": {
+          "result": { "$ref": "#/components/schemas/Result" },
+          "resData": { "$ref": "#/components/schemas/DomainRenewResponse" },
+          "extension": {
+            "type": "object",
+            "additionalProperties": { "type": "object" }
+          },
+          "trID": { "$ref": "#/components/schemas/TrId" }
+        }
+      },
+      "DomainNamesRequest": {
+        "required": ["names"],
+        "type": "object",
+        "properties": {
+          "names": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "DomainCheckResponse": {
+        "required": ["results"],
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/DomainCheckResult" }
+          },
+          "extensions": {
+            "type": "object",
+            "additionalProperties": { "type": "object" }
+          }
+        }
+      },
+      "DomainCheckResult": {
+        "required": ["avail", "name"],
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "avail": { "type": "boolean" },
+          "reason": { "type": "string" }
+        }
+      },
+      "EppResponseDomainCheckResponse": {
+        "required": ["result", "trID"],
+        "type": "object",
+        "properties": {
+          "result": { "$ref": "#/components/schemas/Result" },
+          "resData": { "$ref": "#/components/schemas/DomainCheckResponse" },
+          "extension": {
+            "type": "object",
+            "additionalProperties": { "type": "object" }
+          },
+          "trID": { "$ref": "#/components/schemas/TrId" }
+        }
+      },
+      "ContactCreateRequest": {
+        "required": ["authInfo", "email", "id", "postalInfo"],
+        "type": "object",
+        "properties": {
+          "id": {
+            "maxLength": 16,
+            "minLength": 3,
+            "type": "string",
+            "description": "コンタクト ID (レジストラ内で一意)。ドメイン登録時にこの ID を参照する。3〜16 文字・英数字とハイフン `-`・先頭ハイフン不可。重複は 2302。",
+            "example": "C-0001"
+          },
+          "postalInfo": { "$ref": "#/components/schemas/PostalInfo" },
+          "voice": {
+            "pattern": "|\\+1\\.5555550\\d{2}",
+            "type": "string",
+            "description": "電話番号。空、または RFC 例示番号 (+1.5555550xx) のみ。"
+          },
+          "fax": {
+            "pattern": "|\\+1\\.5555550\\d{2}",
+            "type": "string",
+            "description": "FAX 番号。空、または RFC 例示番号 (+1.5555550xx) のみ。"
+          },
+          "email": {
+            "pattern": "[A-Za-z0-9._%+-]+@example\\.(com|net|org)",
+            "type": "string",
+            "description": "メールアドレス。★配送不可の予約ドメインのみ (example.com / example.net / example.org)。ローカル部は自由なのでドメインごとに一意な値を付けられる。",
+            "example": "taro.test@example.com"
+          },
+          "authInfo": {
+            "maxLength": 64,
+            "minLength": 0,
+            "type": "string",
+            "description": "authInfo (このコンタクトの認証パスフレーズ)。1〜64 文字 (レジストリ運用上の上限)。推測されにくい値を推奨。",
+            "example": "s3cr3t"
+          }
+        },
+        "description": "コンタクト作成リクエスト。ドメインの registrant / 各ロールで参照する連絡先。個人情報保護のため、氏名・メール等は決められたダミー値のみ受け付ける (下記 example 参照)。"
+      },
+      "ContactCheckRequest": {
+        "required": ["ids"],
+        "type": "object",
+        "properties": {
+          "ids": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "ContactCheckResponse": {
+        "required": ["results"],
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ContactCheckResult" }
+          }
+        }
+      },
+      "ContactCheckResult": {
+        "required": ["avail", "id"],
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "avail": { "type": "boolean" }
+        }
+      },
+      "EppResponseContactCheckResponse": {
+        "required": ["result", "trID"],
+        "type": "object",
+        "properties": {
+          "result": { "$ref": "#/components/schemas/Result" },
+          "resData": { "$ref": "#/components/schemas/ContactCheckResponse" },
+          "extension": {
+            "type": "object",
+            "additionalProperties": { "type": "object" }
+          },
+          "trID": { "$ref": "#/components/schemas/TrId" }
+        }
+      },
+      "EppResponseMapStringObject": {
+        "required": ["result", "trID"],
+        "type": "object",
+        "properties": {
+          "result": { "$ref": "#/components/schemas/Result" },
+          "resData": {
+            "type": "object",
+            "additionalProperties": { "type": "object" }
+          },
+          "extension": {
+            "type": "object",
+            "additionalProperties": { "type": "object" }
+          },
+          "trID": { "$ref": "#/components/schemas/TrId" }
+        }
+      },
+      "EppResponsePollResponse": {
+        "required": ["result", "trID"],
+        "type": "object",
+        "properties": {
+          "result": { "$ref": "#/components/schemas/Result" },
+          "resData": { "$ref": "#/components/schemas/PollResponse" },
+          "extension": {
+            "type": "object",
+            "additionalProperties": { "type": "object" }
+          },
+          "trID": { "$ref": "#/components/schemas/TrId" }
+        }
+      },
+      "PollMessageDto": {
+        "required": ["id", "msgType", "payload", "qdate"],
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer", "format": "int64" },
+          "msgType": { "type": "string" },
+          "payload": {
+            "type": "object",
+            "additionalProperties": { "type": "object" }
+          },
+          "qdate": { "type": "string" }
+        }
+      },
+      "PollResponse": {
+        "required": ["count"],
+        "type": "object",
+        "properties": {
+          "count": { "type": "integer", "format": "int32" },
+          "message": { "$ref": "#/components/schemas/PollMessageDto" }
+        }
+      },
+      "DomainInfoResponse": {
+        "required": [
+          "contacts",
+          "crDate",
+          "domain",
+          "nameservers",
+          "registrant",
+          "rgpStatus",
+          "status"
+        ],
+        "type": "object",
+        "properties": {
+          "domain": { "type": "string" },
+          "status": { "type": "array", "items": { "type": "string" } },
+          "registrant": { "type": "string" },
+          "contacts": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          },
+          "nameservers": { "type": "array", "items": { "type": "string" } },
+          "period": { "$ref": "#/components/schemas/Period" },
+          "crDate": { "type": "string" },
+          "upDate": { "type": "string" },
+          "exDate": { "type": "string" },
+          "trDate": { "type": "string" },
+          "rgpStatus": { "type": "array", "items": { "type": "string" } },
+          "extensions": {
+            "type": "object",
+            "additionalProperties": { "type": "object" }
+          }
+        }
+      },
+      "EppResponseDomainInfoResponse": {
+        "required": ["result", "trID"],
+        "type": "object",
+        "properties": {
+          "result": { "$ref": "#/components/schemas/Result" },
+          "resData": { "$ref": "#/components/schemas/DomainInfoResponse" },
+          "extension": {
+            "type": "object",
+            "additionalProperties": { "type": "object" }
+          },
+          "trID": { "$ref": "#/components/schemas/TrId" }
+        }
+      }
+    },
+    "securitySchemes": {
+      "registrarId": {
+        "type": "apiKey",
+        "description": "レジストラ識別子",
+        "name": "X-Registrar-Id",
+        "in": "header"
+      },
+      "apiKey": {
+        "type": "apiKey",
+        "description": "API Key (平文)",
+        "name": "X-Api-Key",
+        "in": "header"
+      },
+      "gate": {
+        "type": "http",
+        "description": "共通 Basic 認証ゲート (ADMIN_GATE_USER / ADMIN_GATE_PASSWORD)",
+        "scheme": "basic"
+      }
+    }
+  }
+}

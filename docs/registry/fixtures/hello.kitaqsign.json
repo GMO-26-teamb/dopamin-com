@@ -1,0 +1,9 @@
+{
+  "result": { "code": 1000, "message": "Command completed successfully" },
+  "resData": {
+    "registryCode": "KQSGN",
+    "tlds": ["com", "net", "org", "info"],
+    "message": "Hello from kitaqsign"
+  },
+  "trID": { "clTRID": "dp-fixture-0001", "svTRID": "KQSGN-20260825-000001" }
+}

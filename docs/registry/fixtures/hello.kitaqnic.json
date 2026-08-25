@@ -1,0 +1,34 @@
+{
+  "result": { "code": 1000, "message": "Command completed successfully" },
+  "resData": {
+    "svID": "registry-kitaqnic",
+    "svDate": "2026-08-25T10:00:00Z",
+    "svcMenu": { "version": "1.0", "lang": ["en", "ja"] },
+    "info": {
+      "supportedTlds": [
+        "xyz",
+        "online",
+        "site",
+        "tech",
+        "space",
+        "store",
+        "website",
+        "press",
+        "host",
+        "fun",
+        "icu",
+        "cyou",
+        "sbs",
+        "bond",
+        "cfd",
+        "art",
+        "build",
+        "ceo"
+      ],
+      "registrationPeriodYears": { "min": 1, "max": 10 },
+      "redemptionPeriodDays": 45,
+      "idnAllowed": true
+    }
+  },
+  "trID": { "clTRID": "dp-fixture-0002", "svTRID": "KQNIC-20260825-000001" }
+}
