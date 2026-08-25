@@ -19,6 +19,7 @@ import {
   formatRelativeTime,
   remainingPercent,
 } from "./format";
+import { statusBadgeTone, statusBadgeVariant } from "./status-badge";
 
 /**
  * Figma: Domain Card `58:132`（S-10 `80:5548` / S-13 `80:5713`）
@@ -138,6 +139,12 @@ function present(
   const detailHref = `/domains/${encodeURIComponent(domain.name)}`;
   const rgpRemaining =
     domain.rgpUntil === null ? null : daysUntil(domain.rgpUntil, now);
+  // Tone / Variant は ui-screens §2.2 の表（`./status-badge`）が SSOT。
+  // Expiring だけは `displayStatus` に無い派生状態なので Warn を直接指定する。
+  const badgeStyle = {
+    tone: statusBadgeTone(domain.displayStatus),
+    variant: statusBadgeVariant(domain.displayStatus),
+  } as const;
 
   switch (status) {
     case "expiring": {
@@ -164,8 +171,7 @@ function present(
         border: "border-line",
         faded: false,
         badge: {
-          tone: "warn",
-          variant: "outline",
+          ...badgeStyle,
           label:
             rgpRemaining === null ? "復旧猶予" : `復旧猶予 残${rgpRemaining}日`,
         },
@@ -178,7 +184,7 @@ function present(
       return {
         border: "border-soft",
         faded: true,
-        badge: { tone: "muted", variant: "outline", label: "移管申請中" },
+        badge: { ...badgeStyle, label: "移管申請中" },
         progress: null,
         meta: "完了までロック中",
         primary: {
@@ -195,8 +201,7 @@ function present(
         border: "border-warn",
         faded: false,
         badge: {
-          tone: "warn",
-          variant: "outline",
+          ...badgeStyle,
           icon: <TriangleAlert />,
           label: DISPLAY_STATUS_LABEL.hold,
         },
@@ -210,8 +215,7 @@ function present(
         border: "border-line",
         faded: false,
         badge: {
-          tone: "neutral",
-          variant: "outline",
+          ...badgeStyle,
           label: DISPLAY_STATUS_LABEL.inactive,
         },
         progress: "brand",
@@ -224,8 +228,7 @@ function present(
         border: "border-soft",
         faded: true,
         badge: {
-          tone: "muted",
-          variant: "solid",
+          ...badgeStyle,
           label: DISPLAY_STATUS_LABEL.pending_delete,
         },
         progress: null,
@@ -247,8 +250,7 @@ function present(
         border: "border-line",
         faded: false,
         badge: {
-          tone: "neutral",
-          variant: "outline",
+          ...badgeStyle,
           icon: <Lock />,
           label: lockLabel(domain.statuses),
         },
@@ -262,8 +264,7 @@ function present(
         border: "border-line",
         faded: false,
         badge: {
-          tone: "ok",
-          variant: "outline",
+          ...badgeStyle,
           label: DISPLAY_STATUS_LABEL.active,
         },
         progress: "brand",
