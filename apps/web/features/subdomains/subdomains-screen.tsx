@@ -68,6 +68,8 @@ interface ScreenBanner {
   title: string;
   body: string;
   onRetry?: () => void;
+  /** 閉じたときの後始末。派生バナー（再解析 / 差分の失敗）は「閉じた」印を付ける */
+  onClose: () => void;
 }
 
 export interface SubdomainsScreenProps {
@@ -92,6 +94,8 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
   const [descriptionOpen, setDescriptionOpen] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [banner, setBanner] = useState<ScreenBanner | null>(null);
+  const [dismissedProposeError, setDismissedProposeError] = useState(false);
+  const [dismissedDiffError, setDismissedDiffError] = useState(false);
 
   // 取得した設計を編集用の下書きに写す（保存・反映のたびに取り直される）
   if (planData !== syncedPlan) {
@@ -106,7 +110,10 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
     );
   }
 
-  const dirty = draft !== null && draft !== syncedPlan;
+  // 提案されたばかりの設計（`savedAt === null`）も未保存扱い。
+  // 反映は保存済み設計に対して行うので、先に「設計を保存」が要る（FR-13）
+  const dirty =
+    draft !== null && (draft !== syncedPlan || draft.savedAt === null);
   const selected =
     draft?.hosts.find((host) => host.id === selectedId) ??
     draft?.hosts[0] ??
@@ -126,6 +133,7 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
 
   function runPropose(input: ProposeInput): void {
     setBanner(null);
+    setDismissedProposeError(false);
     propose.mutate(input, {
       onSuccess: () => setDescriptionOpen(false),
       onError: (error) => {
@@ -133,12 +141,13 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
           // AI 失敗は S-40 に戻して Banner Warn + 再試行（ui-screens §3）
           setBanner({
             body: AI_RETRY_BODY,
+            onClose: () => setBanner(null),
             onRetry: () => runPropose(input),
             title: toErrorCopy(error).title,
             tone: "warn",
           });
         } else {
-          // S-42: リポジトリを取得できなかったので概要入力を開く（AC-13-2）
+          // S-42 / S-43 の再解析: リポを取得できなかったので概要入力を開く（AC-13-2）
           setDescriptionOpen(true);
         }
       },
@@ -208,28 +217,59 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
           result.plan.nameserversSwitched
             ? {
                 body: `${result.plan.hosts.length} ホストを反映（${appliedSummary(result)}）・ネームサーバーはドパ民 DNS`,
+                onClose: () => setBanner(null),
                 title: "DNS に反映しました",
                 tone: "ok",
               }
-            : { body: NS_FAIL_BODY, title: NS_FAIL_TITLE, tone: "warn" },
+            : {
+                body: NS_FAIL_BODY,
+                onClose: () => setBanner(null),
+                title: NS_FAIL_TITLE,
+                tone: "warn",
+              },
         );
       },
     });
   }
 
-  // メイン先頭のバナーは常に 1 つだけ（ui-screens §1）。反映結果 > 差分取得の失敗
-  const shownBanner: ScreenBanner | null =
-    banner ??
-    (diffError === null
-      ? null
-      : {
-          body: toErrorCopy(diffError).body,
-          onRetry: () => {
-            void diff.refetch();
-          },
-          title: toErrorCopy(diffError).title,
-          tone: "warn",
-        });
+  // S-43 の再解析失敗。設計が無いときは S-42 の Empty State で見せるのでここには出さない
+  const retryProposeError =
+    draft !== null && propose.error !== null && propose.error.origin !== "ai"
+      ? propose.error
+      : null;
+
+  // メイン先頭のバナーは常に 1 つだけ（ui-screens §1）。反映結果 > 再解析の失敗 > 差分取得の失敗
+  function deriveBanner(): ScreenBanner | null {
+    if (banner !== null) {
+      return banner;
+    }
+    if (retryProposeError !== null && !dismissedProposeError) {
+      const copy = toErrorCopy(retryProposeError);
+      const notFound = retryProposeError.code === "NOT_FOUND";
+      return {
+        body: notFound ? S42_BODY : copy.body,
+        onClose: () => setDismissedProposeError(true),
+        title: notFound ? S42_TITLE : copy.title,
+        tone: "warn",
+      };
+    }
+    if (diffError !== null && !dismissedDiffError) {
+      const copy = toErrorCopy(diffError);
+      return {
+        body: copy.body,
+        onClose: () => setDismissedDiffError(true),
+        onRetry: () => {
+          setDismissedDiffError(false);
+          void diff.refetch();
+        },
+        title: copy.title,
+        tone: "warn",
+      };
+    }
+    return null;
+  }
+
+  const shownBanner = deriveBanner();
 
   let body: ReactNode;
   if (plan.isPending) {
@@ -294,6 +334,10 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
     // S-43 / S-45 / S-46
     body = (
       <>
+        {descriptionOpen ? (
+          // 設計があっても「概要を書いて提案」で再提案できる（再解析の失敗時は自動で開く）
+          <DescriptionForm analyzing={false} onPropose={runPropose} />
+        ) : null}
         <PolicyBar
           onChange={(policy) => updateDraft({ ...draft, policy })}
           policy={draft.policy}
@@ -349,7 +393,7 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
             )
           }
           body={shownBanner.body}
-          onClose={() => setBanner(null)}
+          onClose={shownBanner.onClose}
           title={shownBanner.title}
           tone={shownBanner.tone}
         />
@@ -359,7 +403,7 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
         action={
           <div className="flex shrink-0 items-center gap-2">
             <Button
-              disabled={draft === null || save.isPending || apply.isPending}
+              disabled={!dirty || save.isPending || apply.isPending}
               loading={save.isPending}
               onClick={onSave}
               variant="outline"

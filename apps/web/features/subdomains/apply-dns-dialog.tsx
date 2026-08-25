@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, TriangleAlert, Zap } from "lucide-react";
+import { Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Divider } from "@/components/ui/card";
@@ -19,6 +19,7 @@ import type { ApiClientError } from "@/lib/api/errors";
 import type { DnsDiff } from "@/lib/api/types";
 import { diffTotal, recordText } from "./apply-status";
 import { DnsDiffRow } from "./dns-diff-row";
+import { NameserverBadge } from "./nameserver-badge";
 
 /**
  * Figma: Dialog / Apply DNS `73:192`（S-44）
@@ -132,18 +133,7 @@ export function ApplyDnsDialog({
             ) : null}
 
             <Divider weight="thin" />
-            <div className="flex w-full items-center justify-between gap-2 text-body-sm">
-              <span className="shrink-0 text-muted">ネームサーバー</span>
-              {nameserversSwitched ? (
-                <Badge icon={<Check />} tone="ok">
-                  ドパ民 DNS に切替済み
-                </Badge>
-              ) : (
-                <Badge icon={<TriangleAlert />} tone="warn">
-                  未切替 — 反映時に切り替えます
-                </Badge>
-              )}
-            </div>
+            <NameserverBadge switched={nameserversSwitched} />
             <p className="w-full text-caption text-muted">{APPLY_NOTE}</p>
           </>
         )}

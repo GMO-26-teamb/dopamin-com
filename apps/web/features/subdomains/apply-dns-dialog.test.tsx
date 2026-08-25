@@ -1,3 +1,4 @@
+import { DOPAMIN_NAMESERVERS } from "@dopamin/shared";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -106,6 +107,14 @@ describe("ApplyDnsDialog（S-44）", () => {
     expect(
       screen.getByText("未切替 — 反映時に切り替えます"),
     ).toBeInTheDocument();
+  });
+
+  it("切替先のネームサーバー名を出す（@dopamin/shared の定数）", () => {
+    renderDialog();
+
+    const names = screen.getByText(DOPAMIN_NAMESERVERS.join(" / "));
+    expect(names).toHaveTextContent("ns1.dopamin.ut42tech.com");
+    expect(names).toHaveTextContent("ns2.dopamin.ut42tech.com");
   });
 
   it("NS 切替済みなら Ok バッジになる", () => {

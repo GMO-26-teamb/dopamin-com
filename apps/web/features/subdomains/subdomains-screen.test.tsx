@@ -80,6 +80,50 @@ describe("SubdomainsScreen", () => {
     );
   });
 
+  it("提案しただけでは未保存なので、保存してからでないと反映できない（FR-13）", async () => {
+    const user = renderScreen("harupika.xyz");
+
+    await screen.findByText("リポジトリを解析して構成を提案します");
+    await user.type(
+      screen.getByLabelText("リポジトリ URL"),
+      "https://github.com/example/harupika",
+    );
+    await user.click(screen.getByRole("button", { name: "リポジトリを解析" }));
+
+    await screen.findByText("反映済み 0・未反映 4");
+    expect(screen.getByRole("button", { name: "設計を保存" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "DNS に反映" })).toBeDisabled();
+    expect(
+      screen.getByText(
+        "未保存の変更があります。先に「設計を保存」してください。",
+      ),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "設計を保存" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "DNS に反映" })).toBeEnabled();
+    });
+    // 保存後は差分が無くなるまで再保存の必要が無い
+    expect(screen.getByRole("button", { name: "設計を保存" })).toBeDisabled();
+  });
+
+  it("S-43: 再解析に失敗したら Banner Warn と概要入力を出す（AC-13-2）", async () => {
+    const user = renderScreen("takutaku.com", "error");
+
+    await screen.findByText("反映済み 2・変更あり 1・未反映 1");
+    await user.click(screen.getByRole("button", { name: "リポジトリを解析" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "リポジトリを取得できません",
+      );
+    });
+    expect(screen.getByLabelText("プロジェクト概要")).toBeInTheDocument();
+    // 保存済みの設計は消さない
+    expect(screen.getByLabelText("全体方針")).toBeInTheDocument();
+  });
+
   it("S-42: リポジトリを取得できないと概要入力に切り替わる（AC-13-2）", async () => {
     const user = renderScreen("harupika.xyz", "error");
 

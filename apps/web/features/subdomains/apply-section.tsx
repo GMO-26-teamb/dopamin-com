@@ -1,7 +1,6 @@
 "use client";
 
-import { Check, TriangleAlert, Zap } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { Check, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CardKicker, KeyValueRow } from "@/components/ui/card";
 import type { DnsDiff } from "@/lib/api/types";
@@ -10,6 +9,7 @@ import {
   applyStatusSummary,
   diffTotal,
 } from "./apply-status";
+import { NameserverBadge } from "./nameserver-badge";
 
 /**
  * S-43 右パネル下段「DNS 反映」。NS の状態・反映状況・反映 CTA（S-45 では Disabled）。
@@ -62,18 +62,7 @@ export function ApplySection({
   return (
     <section className="flex w-full flex-col gap-2">
       <CardKicker>DNS 反映</CardKicker>
-      <div className="flex w-full items-center justify-between gap-2 text-body-sm">
-        <span className="shrink-0 text-muted">ネームサーバー</span>
-        {nameserversSwitched ? (
-          <Badge icon={<Check />} tone="ok">
-            ドパ民 DNS に切替済み
-          </Badge>
-        ) : (
-          <Badge icon={<TriangleAlert />} tone="warn">
-            未切替 — 反映時に切り替えます
-          </Badge>
-        )}
-      </div>
+      <NameserverBadge switched={nameserversSwitched} />
       <KeyValueRow label="反映状況" value={applyStatusSummary(counts)} />
       <Button
         className="w-full justify-center"
