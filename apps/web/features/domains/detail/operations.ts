@@ -1,21 +1,27 @@
 /**
  * 操作パネル（S-30 右）の可否と理由（AC-07-1）。
  *
- * 可否判定は `packages/shared` の `isOperationAllowed` / `isRestorable` が SSOT。
+ * 可否判定は `packages/shared` の `isOperationAllowed`（復旧は `isRestorable`）が SSOT。
  * ここは「ブロックしたステータス → 画面に出す理由（1 語）」の対応だけを持つ。
  * Figma の Disabled ラベルは「廃止 — 削除ロック中」のように理由を併記する。
  */
 
 import type { DomainOperation } from "@dopamin/shared";
-import { isOperationAllowed, isRestorable } from "@dopamin/shared";
+import { isOperationAllowed } from "@dopamin/shared";
 import type { DomainDetail } from "@/lib/api/types";
 
-export type DetailOperation = DomainOperation | "restore";
+/** 操作パネルが扱う 5 操作（`DomainOperation` の部分集合）。 */
+export type DetailOperation = Extract<
+  DomainOperation,
+  "renew" | "update" | "delete" | "transferOut" | "restore"
+>;
 
 /** ステータスごとの理由（Server > Client の順で選ぶ）。 */
 const REASON_BY_STATUS: Record<string, string> = {
+  transferred_out: "移管済みのため不可",
   pendingDelete: "削除処理中のため不可",
   pendingTransfer: "移管申請中のため不可",
+  redemptionPeriod: "復旧猶予（RGP）中のため不可",
   serverRenewProhibited: "更新ロック中",
   clientRenewProhibited: "更新ロック中",
   serverUpdateProhibited: "変更ロック中",
@@ -28,8 +34,10 @@ const REASON_BY_STATUS: Record<string, string> = {
 
 /** 理由の優先順位（先に見つかったものを出す）。Server > Client、pending 系が最優先。 */
 const REASON_PRIORITY = [
+  "transferred_out",
   "pendingDelete",
   "pendingTransfer",
+  "redemptionPeriod",
   "serverRenewProhibited",
   "serverUpdateProhibited",
   "serverDeleteProhibited",
@@ -70,31 +78,25 @@ export function operationState(
   if (domain.stale) {
     return { allowed: false, reason: "再同期が必要", blockedBy: [] };
   }
-  if (domain.ownership === "transferred_out") {
-    return { allowed: false, reason: "移管済みのため不可", blockedBy: [] };
+  // 所有権・移管方向・RGP を含めて `isOperationAllowed` に委譲する（SHARED-02）。
+  // 以前はここで displayStatus === "rgp" を見ていたが、rgpStatuses を渡せば shared 側で判定できる。
+  const check = isOperationAllowed(op, domain.statuses, {
+    ownership: domain.ownership,
+    transfer: domain.transfer,
+    rgpStatuses: domain.rgpStatuses,
+  });
+  if (check.allowed) {
+    return ALLOWED;
   }
-  if (op === "restore") {
-    return isRestorable(domain.rgpStatuses, domain.statuses)
-      ? ALLOWED
-      : { allowed: false, reason: "RGP ではないため不可", blockedBy: [] };
+  // 復旧は RGP でないだけなら原因ステータスが無い（isRestorable が SSOT）
+  if (op === "restore" && check.blockedBy.length === 0) {
+    return { allowed: false, reason: "RGP ではないため不可", blockedBy: [] };
   }
-  // §11.3: redemptionPeriod は「復旧のみ可」。`redemptionPeriod` は `rgpStatuses` 側に来るため
-  // `isOperationAllowed`（statuses だけを見る）では拾えない。判定は displayStatus（SSOT）で行う。
-  if (domain.displayStatus === "rgp") {
-    return {
-      allowed: false,
-      reason: "復旧猶予（RGP）中のため不可",
-      blockedBy: ["redemptionPeriod"],
-    };
-  }
-  const check = isOperationAllowed(op, domain.statuses);
-  return check.allowed
-    ? ALLOWED
-    : {
-        allowed: false,
-        reason: reasonFrom(check.blockedBy),
-        blockedBy: check.blockedBy,
-      };
+  return {
+    allowed: false,
+    reason: reasonFrom(check.blockedBy),
+    blockedBy: check.blockedBy,
+  };
 }
 
 /** ボタンのラベル。不可のときは Figma どおり「廃止 — 削除ロック中」の形にする。 */
