@@ -5,7 +5,7 @@ Z世代向けドメイン管理プラットフォーム（疑似レジストラ�
 ## セットアップ
 
 ```sh
-# Node.js 22+ / pnpm 11
+# Node.js 22（.nvmrc）/ pnpm 11。Vercel（dopamin-web / dopamin-api）の Node ランタイムも 22.x で運用
 pnpm install
 cp apps/web/.env.example apps/web/.env.local
 cp apps/api/.env.example apps/api/.env.local
