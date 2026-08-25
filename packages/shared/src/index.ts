@@ -7,4 +7,5 @@ export * from "./errors";
 export * from "./health";
 export * from "./operations";
 export * from "./registry";
+export * from "./tlds";
 export * from "./uniqueness";

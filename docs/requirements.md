@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.1.5（2026-08-26） |
+| 版 | v0.1.6（2026-08-26） |
 | プロダクト | ドパ民.com / dopamin.com — Z世代向けドメイン管理プラットフォーム（疑似レジストラ） |
 | チーム | チームドパ民（Team B）: 佐々木 琢登・星 はるか・上原 拓也 |
 | 位置づけ | GMO Internet Internship in kitaQ Webアプリケーションコース（2026/08/24–28）成果物 |
@@ -520,9 +520,9 @@ dopamin/
 │     ├─ tsup.config.ts         # デプロイ用に dist/index.js へバンドル（@dopamin/* を取り込む）
 │     └─ vercel.json            # outputDirectory: dist
 ├─ packages/                    # 内部パッケージは TS ソースを直接 export（ビルド不要）
-│  ├─ shared/                   # zod スキーマ、型、定数（TLD, EPP status）、導出ロジック
+│  ├─ shared/                   # zod スキーマ、型、定数（TLD ルーティング表, EPP status）、導出ロジック
 │  ├─ db/                       # Drizzle schema / migrations / client / seed
-│  ├─ registry/                 # RegistryAdapter IF、kitaqsign / kitaqnic / mock、routing
+│  ├─ registry/                 # RegistryAdapter IF、kitaqsign / kitaqnic / mock、routing（TLD 定数は shared 参照）
 │  └─ tsconfig/                 # base.json（各パッケージの tsconfig が extends）
 ├─ docs/
 │  ├─ requirements.md           # 本書
@@ -898,7 +898,7 @@ export interface RegistryAdapter {
 - **`.jp` は両レジストリとも非対応**（kitaqnic は gTLD のみ）。プロトタイプのデモデータ `gmo-hackathon.jp` / API 例の `takutaku.xyz` は使えないため、デモシナリオと UI の TLD 選択肢を上記 22 種から選び直す。
 - kitaqnic の登録期間は 1〜10 年、猶予期間 45 日、IDN 許可（`hello` の `info` より）。
 
-ルーティングは `packages/registry/src/routing.ts` の 1 箇所で管理し、UI の TLD 選択肢はここから生成する。
+対応 TLD の定数は `packages/shared/src/tlds.ts`（`REGISTRY_TLDS` / `SUPPORTED_TLDS`）の 1 箇所で管理し、`packages/registry` のルーティングも `apps/web` の TLD 選択肢もここを参照する。
 
 ### 11.3 EPP ステータスと表示・操作制約
 
@@ -1346,3 +1346,4 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | v0.1.3 | 2026-08-25 | §15 / §16.2 / §16.4: PR ごとの Vercel プレビューデプロイを廃止し、`deploy.yml` を `main` push → 本番のみに変更。preview 環境の行を削除 |
 | v0.1.4 | 2026-08-25 | 他チーム（別レジストラ ID）との移管 IN / OUT に対応し、両レジストリの OpenAPI 定義精査で【要確認】3〜6を解決。FR-12 を全面改訂（Poll・承認 / 拒否を P0、取消を P1、60 日ルールの自前強制を撤回、AC-12-3〜6 追加）し、renew の `curExpDate` 必須、restore 1 段階、AuthCode は `rotate-auth-info`、Client ステータス 5 種更新可を関連仕様へ反映。詳細は `docs/specs/registry-api.md` |
 | v0.1.5 | 2026-08-26 | FR-04 の入力を「ニックネームまたはアプリ名」に変更（API は `nickname` のまま）。FR-13 をアプリ内の疑似 DNS ゾーンへの「反映」まで拡張（差分確認 → `dns_records` へ upsert、ドパ民 DNS への NS 切替、反映状態バッジ、AC-13-4〜7）。§2.2 / §3 / §9.1（`dns_records`、`subdomain_plans.applied_at`）/ §10.1（`apply`・`dns`）/ §15 / §21 を追随 |
+| v0.1.6 | 2026-08-26 | §8 / §11.2: 対応 TLD の定数を `packages/shared/src/tlds.ts` に一本化し、`packages/registry` のルーティングと `apps/web` の TLD 選択肢は shared を参照する形に統一（`@dopamin/registry` は `node:crypto` 依存でブラウザから import できない） |

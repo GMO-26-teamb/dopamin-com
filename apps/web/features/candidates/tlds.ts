@@ -1,42 +1,13 @@
-import { domainNameSchema, sldSchema } from "@dopamin/shared";
+import { domainNameSchema, SUPPORTED_TLDS, sldSchema } from "@dopamin/shared";
 
 /**
- * 対応 TLD 22 種（kitaqsign 4 + kitaqnic 18）。
- *
- * 正は `packages/registry/src/routing.ts` の `REGISTRY_TLDS` / `SUPPORTED_TLDS`
- * （`GET /sessions/hello` で確定済み。同ファイルのコメントどおり UI の選択肢もここから生成する）。
- * ただし `@dopamin/registry` は `node:crypto` に依存していてブラウザには載せられないため、
- * ここでは値をコピーしている。`@dopamin/shared` への移設（issue #32）が済んだら import に置き換える。
+ * 対応 TLD 22 種（kitaqsign 4 + kitaqnic 18）。正は `@dopamin/shared` の
+ * `REGISTRY_TLDS` / `SUPPORTED_TLDS`（`GET /sessions/hello` で確定済み。§11.2）。
  *
  * `POST /domains/check` の `tlds` は最大 22 件（`domainCheckRequestSchema`）なので、
  * 全選択がちょうど上限と一致する（ui-screens S-20 / S-24「TLD 22 種を一括確認」）。
  */
-export const SUPPORTED_TLDS = [
-  // kitaqsign
-  "com",
-  "net",
-  "org",
-  "info",
-  // kitaqnic
-  "xyz",
-  "online",
-  "site",
-  "tech",
-  "space",
-  "store",
-  "website",
-  "press",
-  "host",
-  "fun",
-  "icu",
-  "cyou",
-  "sbs",
-  "bond",
-  "cfd",
-  "art",
-  "build",
-  "ceo",
-] as const;
+export { SUPPORTED_TLDS };
 
 /** 希望 TLD の既定値 = 全対応 TLD（ui-screens S-20 / S-24）。 */
 export const DEFAULT_TLDS: readonly string[] = SUPPORTED_TLDS;

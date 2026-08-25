@@ -1,60 +1,14 @@
-import { type RegistryId, splitDomainName } from "@dopamin/shared";
-
 /**
- * TLD → レジストリのルーティング表（docs/requirements.md §11.2）。
- * `GET /sessions/hello` で確定済み（2026-08-25）。両者に重複は無い。
- * UI の TLD 選択肢もここから生成する。
+ * TLD → レジストリのルーティング（docs/requirements.md §11.2）。
+ *
+ * 対応 TLD の定数とルーティング関数の実体は `@dopamin/shared`（`src/tlds.ts`）が持つ。
+ * このパッケージはアダプタ実装（`node:crypto` 依存）を同じエントリから export していて
+ * ブラウザから import できないため、UI の TLD 選択肢も shared 側を参照する。
+ * ここは Bridge 層から従来どおり参照できるようにする re-export。
  */
-export const REGISTRY_TLDS: Record<
-  Exclude<RegistryId, "mock">,
-  readonly string[]
-> = {
-  kitaqsign: ["com", "net", "org", "info"],
-  kitaqnic: [
-    "xyz",
-    "online",
-    "site",
-    "tech",
-    "space",
-    "store",
-    "website",
-    "press",
-    "host",
-    "fun",
-    "icu",
-    "cyou",
-    "sbs",
-    "bond",
-    "cfd",
-    "art",
-    "build",
-    "ceo",
-  ],
-} as const;
-
-/** 対応する全 TLD（22 種）。 */
-export const SUPPORTED_TLDS: readonly string[] = [
-  ...REGISTRY_TLDS.kitaqsign,
-  ...REGISTRY_TLDS.kitaqnic,
-];
-
-/** TLD からレジストリを引く。未対応 TLD は null。 */
-export function registryIdForTld(
-  tld: string,
-): Exclude<RegistryId, "mock"> | null {
-  const normalized = tld.toLowerCase().replace(/^\./, "");
-  if (REGISTRY_TLDS.kitaqsign.includes(normalized)) {
-    return "kitaqsign";
-  }
-  if (REGISTRY_TLDS.kitaqnic.includes(normalized)) {
-    return "kitaqnic";
-  }
-  return null;
-}
-
-/** FQDN からレジストリを引く。未対応 TLD は null。 */
-export function registryIdForDomain(
-  name: string,
-): Exclude<RegistryId, "mock"> | null {
-  return registryIdForTld(splitDomainName(name).tld);
-}
+export {
+  REGISTRY_TLDS,
+  registryIdForDomain,
+  registryIdForTld,
+  SUPPORTED_TLDS,
+} from "@dopamin/shared";
