@@ -1,10 +1,11 @@
 import { render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockServices } from "@/lib/api/mock/mock-services";
 import type { MockScenario } from "@/lib/api/mock/scenario";
 import { resetMockStore } from "@/lib/api/mock/store";
 import { AppProviders } from "@/lib/api/query-client";
-import DashboardPage from "./page";
+import type { DomainSummary } from "@/lib/api/types";
+import DashboardPage, { shouldAutoSync } from "./page";
 
 /**
  * S-10 / S-11 / S-12 / S-13 の分岐をモックサービス越しに確かめる。
@@ -18,9 +19,39 @@ function renderDashboard(scenario: MockScenario) {
   );
 }
 
+const NOW = new Date("2026-08-26T10:00:00+09:00");
+
+/** shouldAutoSync は syncedAt しか見ないので、他のフィールドはダミーで固定する。 */
+function domainSyncedAgo(seconds: number): DomainSummary {
+  return {
+    name: "takutaku.com",
+    sld: "takutaku",
+    tld: "com",
+    registry: "kitaqsign",
+    statuses: ["ok"],
+    rgpStatuses: [],
+    ownership: "owned",
+    displayStatus: "active",
+    registeredAt: new Date(NOW.getTime() - 400 * 86_400_000).toISOString(),
+    expiresAt: new Date(NOW.getTime() + 330 * 86_400_000).toISOString(),
+    rgpUntil: null,
+    syncedAt: new Date(NOW.getTime() - seconds * 1000).toISOString(),
+    stale: false,
+    transfer: null,
+  };
+}
+
 describe("DashboardPage", () => {
   beforeEach(() => {
     resetMockStore();
+    // fixtures（MOCK_NOW）は実時刻より先の可能性があるため、実時刻に依存しないよう固定する
+    // （固定しないと自動同期の鮮度ガードが「まだ新しい」と誤判定し S-13 の Banner が出なくなる）。
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-26T11:00:00+09:00"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("S-12: 取得中は Domain Card 型の Skeleton を出す", () => {
@@ -81,5 +112,26 @@ describe("DashboardPage", () => {
       }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "再試行" })).toBeInTheDocument();
+  });
+});
+
+describe("shouldAutoSync", () => {
+  it("最終同期が 60 秒未満（新鮮）ならスキップする", () => {
+    expect(shouldAutoSync([domainSyncedAgo(1)], NOW)).toBe(false);
+    expect(shouldAutoSync([domainSyncedAgo(59)], NOW)).toBe(false);
+  });
+
+  it("最終同期が 60 秒以上（陳腐化）なら同期する", () => {
+    expect(shouldAutoSync([domainSyncedAgo(60)], NOW)).toBe(true);
+    expect(shouldAutoSync([domainSyncedAgo(600)], NOW)).toBe(true);
+  });
+
+  it("一覧が空（初回ロード前）なら同期する", () => {
+    expect(shouldAutoSync([], NOW)).toBe(true);
+  });
+
+  it("複数件あるときはもっとも新しい syncedAt を基準にする", () => {
+    const domains = [domainSyncedAgo(600), domainSyncedAgo(1)];
+    expect(shouldAutoSync(domains, NOW)).toBe(false);
   });
 });

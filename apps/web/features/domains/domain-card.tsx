@@ -135,7 +135,7 @@ function present(
   status: DomainCardStatus,
   now: Date,
 ): CardPresentation {
-  const detailHref = `/domains/${domain.name}`;
+  const detailHref = `/domains/${encodeURIComponent(domain.name)}`;
   const rgpRemaining =
     domain.rgpUntil === null ? null : daysUntil(domain.rgpUntil, now);
 
@@ -326,7 +326,7 @@ export function DomainCard({
   const reasonId = useId();
   const status = deriveCardStatus(domain, now);
   const view = present(domain, status, now);
-  const detailHref = `/domains/${domain.name}`;
+  const detailHref = `/domains/${encodeURIComponent(domain.name)}`;
 
   const handlers: Record<
     Exclude<ActionKind, "link">,

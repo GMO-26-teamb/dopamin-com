@@ -68,6 +68,34 @@ function syncErrorBody(lastSyncedAt: string | null, now: Date): string {
   return `${prefix}参照系は自動で 2 回再試行しました。しばらくして「最新化」を押してください。`;
 }
 
+/** 自動同期をスキップする鮮度のしきい値（ms）。「最新化」ボタンの手動実行はこのガードの対象外。 */
+const AUTO_SYNC_FRESHNESS_MS = 60_000;
+
+/** 一覧の中でもっとも新しい `syncedAt`。1 件もなければ null。 */
+function latestSyncedAt(domains: readonly DomainSummary[]): string | null {
+  return domains.reduce<string | null>(
+    (latest, domain) =>
+      latest === null || domain.syncedAt > latest ? domain.syncedAt : latest,
+    null,
+  );
+}
+
+/**
+ * 背後の自動同期（マウント / シナリオ変更のたびに 1 回走る `useSyncDomains`）を実行してよいか。
+ * 一覧の中でもっとも新しい `syncedAt` が 60 秒未満なら、まだ十分新しいのでスキップする。
+ */
+export function shouldAutoSync(
+  domains: readonly DomainSummary[],
+  now: Date,
+): boolean {
+  const syncedAt = latestSyncedAt(domains);
+  if (syncedAt === null) {
+    return true;
+  }
+  const elapsed = now.getTime() - new Date(syncedAt).getTime();
+  return elapsed >= AUTO_SYNC_FRESHNESS_MS;
+}
+
 export default function DashboardPage() {
   const domains = useDomains();
   const sync = useSyncDomains();
@@ -76,25 +104,24 @@ export default function DashboardPage() {
     null,
   );
 
-  // シナリオ（?mock=）が変わったら 1 回だけ背後で同期し直す
+  // シナリオ（?mock=）が変わったら 1 回だけ背後で同期し直す。ただしすでに十分新しければスキップする
   const syncedScopeRef = useRef<string | null>(null);
   const syncMutate = sync.mutate;
   const listLoaded = domains.isSuccess;
+  const loadedDomains = domains.data;
   useEffect(() => {
     if (!listLoaded || syncedScopeRef.current === scope) {
       return;
     }
     syncedScopeRef.current = scope;
-    syncMutate();
-  }, [listLoaded, scope, syncMutate]);
+    if (shouldAutoSync(loadedDomains ?? [], new Date())) {
+      syncMutate();
+    }
+  }, [listLoaded, scope, syncMutate, loadedDomains]);
 
   const now = new Date();
   const list = visibleDomains(domains.data ?? []);
-  const lastSyncedAt = list.reduce<string | null>(
-    (latest, domain) =>
-      latest === null || domain.syncedAt > latest ? domain.syncedAt : latest,
-    null,
-  );
+  const lastSyncedAt = latestSyncedAt(list);
   const hasStale = list.some((domain) => domain.stale);
 
   const refreshing = sync.isPending;
