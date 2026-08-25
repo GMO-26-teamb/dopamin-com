@@ -59,6 +59,45 @@ describe("LogList", () => {
     expect(refetch).toHaveBeenCalledTimes(1);
   });
 
+  it("再試行しても意味の無いエラーには再試行を出さない", () => {
+    renderList(
+      query({
+        error: new ApiClientError({
+          code: "NOT_IMPLEMENTED",
+          message: "GET /logs/operations はまだ実装されていません。",
+        }),
+      }),
+    );
+
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "再試行" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("再取得に失敗しても取得済みの行は残す（ui-screens §4 参照系エラー）", () => {
+    renderList(
+      query({
+        data: ITEMS,
+        error: new ApiClientError({
+          code: "REGISTRY_UNAVAILABLE",
+          message: "Kitaqsign に接続できません。",
+          registry: "kitaqsign",
+        }),
+      }),
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Kitaqsign に接続できません",
+    );
+    expect(
+      screen.getByRole("list", { name: "操作ログ" }).children,
+    ).toHaveLength(3);
+    expect(
+      screen.getByRole("button", { name: "もっと見る（残り 2 件）" }),
+    ).toBeInTheDocument();
+  });
+
   it("0 件は Empty State を出す（S-62）", () => {
     renderList(query({ data: [] }));
 

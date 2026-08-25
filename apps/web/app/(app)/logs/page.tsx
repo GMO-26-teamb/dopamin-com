@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { PageHeader } from "@/components/app/page-header";
-import { Skeleton } from "@/components/ui/skeleton";
+import { LogRowsSkeleton } from "@/features/logs/log-skeleton";
 import { LogTabs } from "@/features/logs/log-tabs";
 
 /**
@@ -11,18 +11,11 @@ import { LogTabs } from "@/features/logs/log-tabs";
  * （`node_modules/next/dist/docs/01-app/03-api-reference/04-functions/use-search-params.md`）。
  */
 
-const SKELETON_ROWS = 6;
-
 function LogsFallback() {
   return (
     <>
       <PageHeader title="ログ" />
-      <div aria-hidden="true" className="flex w-full flex-col gap-4 py-2">
-        {Array.from({ length: SKELETON_ROWS }, (_, index) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: 並び順が固定のプレースホルダ
-          <Skeleton key={index} />
-        ))}
-      </div>
+      <LogRowsSkeleton />
     </>
   );
 }

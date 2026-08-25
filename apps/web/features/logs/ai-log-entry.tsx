@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
  * AI ログ 1 件（FR-14）。Result（Ok / Error）× Feature / Model / Input / Output / Meta。
  */
 
-export const FEATURE_LABEL: Record<AiLog["feature"], string> = {
+const FEATURE_LABEL: Record<AiLog["feature"], string> = {
   domain_candidates: "候補生成",
   uniqueness: "独自性スコア",
   subdomain_plan: "サブドメイン提案",

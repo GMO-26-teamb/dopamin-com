@@ -5,10 +5,10 @@ import type { ReactNode } from "react";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Skeleton } from "@/components/ui/skeleton";
 import type { ApiClientError } from "@/lib/api/errors";
 import { toErrorCopy } from "@/lib/error-messages";
 import { LoadMore, usePagedLogs } from "./load-more";
+import { LogRowsSkeleton } from "./log-skeleton";
 
 /**
  * ログ一覧の状態分岐（S-60 / S-61 / S-62 / S-63）。
@@ -17,8 +17,6 @@ import { LoadMore, usePagedLogs } from "./load-more";
  * （docs/specs/ui-screens.md §2.7 / §4）。操作ログ・AI ログで行の中身だけが違うので、
  * 行の描画だけ呼び出し側から渡す。
  */
-
-const SKELETON_ROWS = 6;
 
 /** 参照のたびに新しい配列を作らないための空配列。 */
 const NO_ITEMS: readonly never[] = [];
@@ -39,6 +37,43 @@ export interface LogQuery<T> {
   refetch: () => unknown;
 }
 
+/**
+ * S-63 の取得失敗（Banner Warn）。
+ * 再試行は `error.retryable` のときだけ出す（`components/ui/error-card.tsx` と同じ規則）。
+ * `NOT_IMPLEMENTED` や `UNAUTHORIZED` に再試行を出しても失敗し続けるだけなので出さない。
+ */
+function LogListErrorBanner({
+  error,
+  onRetry,
+}: {
+  error: ApiClientError;
+  onRetry: () => void;
+}) {
+  const copy = toErrorCopy(error);
+
+  return (
+    <Banner
+      {...(error.retryable
+        ? {
+            action: (
+              <Button
+                leadingIcon={<RefreshCw />}
+                onClick={onRetry}
+                size="sm"
+                variant="outline"
+              >
+                再試行
+              </Button>
+            ),
+          }
+        : {})}
+      body={copy.body}
+      title={copy.title}
+      tone="warn"
+    />
+  );
+}
+
 export interface LogListProps<T> {
   query: LogQuery<T>;
   /** 一覧のアクセシブルネーム（「操作ログ」/「AI ログ」） */
@@ -50,45 +85,31 @@ export function LogList<T>({ query, listLabel, renderRow }: LogListProps<T>) {
   const paged = usePagedLogs<T>(query.data ?? NO_ITEMS);
 
   if (query.isPending) {
-    return (
-      <div aria-hidden="true" className="flex w-full flex-col gap-4 py-2">
-        {Array.from({ length: SKELETON_ROWS }, (_, index) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: 並び順が固定のプレースホルダ
-          <Skeleton key={index} />
-        ))}
-      </div>
-    );
+    return <LogRowsSkeleton />;
   }
 
-  if (query.error !== null) {
-    const copy = toErrorCopy(query.error);
-    return (
-      <Banner
-        action={
-          <Button
-            leadingIcon={<RefreshCw />}
-            onClick={() => {
-              query.refetch();
-            }}
-            size="sm"
-            variant="outline"
-          >
-            再試行
-          </Button>
-        }
-        body={copy.body}
-        title={copy.title}
-        tone="warn"
+  /**
+   * 参照系エラーは「画面内・キャッシュ表示を継続」（ui-screens §4）。
+   * 再取得に失敗しても直前まで出ていた行は残し、Banner を上に足すだけにする。
+   */
+  const banner =
+    query.error === null ? null : (
+      <LogListErrorBanner
+        error={query.error}
+        onRetry={() => {
+          query.refetch();
+        }}
       />
     );
-  }
 
   if (paged.total === 0) {
-    return <EmptyState body={EMPTY_BODY} title={EMPTY_TITLE} />;
+    // 出せる行が無いときだけ Banner（または Empty State）で画面を占める
+    return banner ?? <EmptyState body={EMPTY_BODY} title={EMPTY_TITLE} />;
   }
 
   return (
     <div className="flex w-full flex-col gap-3">
+      {banner}
       <ul aria-label={listLabel} className="flex w-full flex-col">
         {paged.visible.map(renderRow)}
       </ul>
