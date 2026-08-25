@@ -51,17 +51,6 @@ async function request<T>(
   return data as T;
 }
 
-/** ブラウザのキャンセルや API エラーをユーザー向けの文言にする */
-export function toAuthErrorMessage(e: unknown): string {
-  if (e instanceof Error && e.name === "NotAllowedError") {
-    return "キャンセルされました。もう一度お試しください。";
-  }
-  if (e instanceof ApiRequestError) {
-    return e.message;
-  }
-  return "エラーが発生しました。もう一度お試しください。";
-}
-
 // ---- サインアップ（FR-01 spec §3.1） ----
 export async function signupWithPasskey(
   displayName: string,
