@@ -816,7 +816,7 @@ export interface RegistryAdapter {
 
 ### 11.2 TLD ルーティング
 
-両 Swagger の仕様メモは `docs/registry/README.md`。認証方式・エンベロープ・result code は両レジストリで同一。
+両 Swagger の仕様メモは `docs/registry/spec-notes.md`。認証方式・エンベロープ・result code は両レジストリで同一。
 
 `GET /sessions/hello` で確定済み（2026-08-25 取得）。**両者に重複は無く、TLD からレジストリが一意に決まる。**
 
