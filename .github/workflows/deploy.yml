@@ -57,7 +57,12 @@ jobs:
         run: vercel build ${{ env.PROD_FLAG }} --token=${{ secrets.VERCEL_TOKEN }}
       - name: Deploy
         id: deploy
-        run: echo "url=$(vercel deploy --prebuilt ${{ env.PROD_FLAG }} --token=${{ secrets.VERCEL_TOKEN }})" >> "$GITHUB_OUTPUT"
+        # CLI は環境によって URL のみ / JSON を出力するため、どちらからも URL を取り出す
+        run: |
+          vercel deploy --prebuilt ${{ env.PROD_FLAG }} --token=${{ secrets.VERCEL_TOKEN }} | tee deploy.out
+          url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.vercel\.app' deploy.out | head -1)
+          test -n "$url"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
 
   web:
     name: Deploy Web
@@ -92,7 +97,12 @@ jobs:
           vercel build ${{ env.PROD_FLAG }} --token=${{ secrets.VERCEL_TOKEN }}
       - name: Deploy
         id: deploy
-        run: echo "url=$(vercel deploy --prebuilt ${{ env.PROD_FLAG }} --token=${{ secrets.VERCEL_TOKEN }})" >> "$GITHUB_OUTPUT"
+        # CLI は環境によって URL のみ / JSON を出力するため、どちらからも URL を取り出す
+        run: |
+          vercel deploy --prebuilt ${{ env.PROD_FLAG }} --token=${{ secrets.VERCEL_TOKEN }} | tee deploy.out
+          url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.vercel\.app' deploy.out | head -1)
+          test -n "$url"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
 
   comment:
     name: Comment preview URLs
