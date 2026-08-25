@@ -7,9 +7,8 @@ import {
 } from "./tlds";
 
 /**
- * 対応 TLD の正は `packages/registry/src/routing.ts` の `REGISTRY_TLDS`。
- * ここがずれると実在しない TLD をレジストリに投げてしまうので、件数と代表値で固定する
- * （共有パッケージへの移設は issue #32）。
+ * 対応 TLD の正は `@dopamin/shared` の `REGISTRY_TLDS`（docs/requirements.md §11.2）。
+ * ここがずれると実在しない TLD をレジストリに投げてしまうので、件数と代表値で固定する。
  */
 
 /** `toContain` に未対応 TLD を渡せるよう、リテラル union ではなく string[] として見る。 */

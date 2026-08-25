@@ -49,8 +49,7 @@ const OTHER_NAMESERVERS = ["ns1.example-dns.com", "ns2.example-dns.com"];
 
 /**
  * モックの表示を実データに寄せるための TLD → レジストリ表（デモで使う TLD だけの部分集合）。
- * 正は `packages/registry` の `REGISTRY_TLDS` だが、あちらは `node:crypto` に依存する
- * アダプタを同じエントリから export しているためブラウザバンドルに載せられない。
+ * 正は `@dopamin/shared` の `REGISTRY_TLDS`（§11.2）。
  * ここはモックの見た目用で、実際のルーティングには使わない（表に無い TLD は "mock"）。
  */
 const MOCK_REGISTRY_BY_TLD: Record<string, DomainDetail["registry"]> = {

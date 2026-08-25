@@ -3,8 +3,8 @@ import {
   type KitaqAdapterConfig,
   type RegistryAdapter,
   type RegistrySet,
-  SUPPORTED_TLDS,
 } from "@dopamin/registry";
+import { SUPPORTED_TLDS } from "@dopamin/shared";
 import { ApiError } from "./api-error";
 import { type ApiEnv, getApiEnv } from "./env";
 
