@@ -35,6 +35,14 @@ export function SettingsScreen() {
       )}
       <PageHeader title="設定" />
 
+      {/*
+        テーマとパスキーは `GET /auth/me` に依存しない。
+        `settings.me()` が落ちても（HTTP モードでは NOT_IMPLEMENTED）画面が使えなくならないよう
+        `me` の分岐より前に置き、`usePasskeys` も `me` を待たずに走らせる。
+      */}
+      <ThemeSection />
+      <PasskeySection onNotify={setNotice} />
+
       {me.isPending ? (
         <SettingsSkeleton />
       ) : me.error ? (
@@ -46,48 +54,35 @@ export function SettingsScreen() {
           showLogsLink
         />
       ) : (
-        <>
-          <ThemeSection />
-          <PasskeySection onNotify={setNotice} />
-          <div className="flex w-full items-start gap-3">
-            <AiSettingsSection
-              ai={me.data.ai}
-              className="min-w-0 flex-1"
-              onNotify={setNotice}
-            />
-            {me.data.features.demoReset ? (
-              <DemoResetSection
-                className="min-w-0 flex-1"
-                onNotify={setNotice}
-              />
-            ) : null}
-          </div>
-        </>
+        <div className="flex w-full items-start gap-3">
+          <AiSettingsSection
+            ai={me.data.ai}
+            className="min-w-0 flex-1"
+            onNotify={setNotice}
+          />
+          {me.data.features.demoReset ? (
+            <DemoResetSection className="min-w-0 flex-1" onNotify={setNotice} />
+          ) : null}
+        </div>
       )}
     </>
   );
 }
 
-/** 読み込み中はカードの形に合わせた骨組みを出す（ui-screens §4） */
+/**
+ * `me` 待ちのあいだの骨組み（ui-screens §4）。
+ * 対象は `me` に依存する AI 設定とデモリセットの 2 枚だけで、
+ * パスキーカードは `PasskeySection` が自前の骨組みを出す。
+ */
 function SettingsSkeleton() {
   return (
-    <div aria-busy="true" className="flex w-full flex-col gap-3.5">
-      <Card kicker="テーマ">
-        <Skeleton className="w-55" shape="block" />
+    <div aria-busy="true" className="flex w-full items-start gap-3">
+      <Card className="min-w-0 flex-1" kicker="AI 設定">
+        <Skeleton shape="block" />
       </Card>
-      <Card kicker="パスキー管理">
-        <Skeleton className="h-7" shape="block" />
-        <Skeleton className="h-7" shape="block" />
-        <Skeleton className="w-37" shape="block" />
+      <Card className="min-w-0 flex-1" emphasis="warn">
+        <Skeleton shape="block" />
       </Card>
-      <div className="flex w-full items-start gap-3">
-        <Card className="min-w-0 flex-1" kicker="AI 設定">
-          <Skeleton shape="block" />
-        </Card>
-        <Card className="min-w-0 flex-1" emphasis="warn">
-          <Skeleton shape="block" />
-        </Card>
-      </div>
     </div>
   );
 }

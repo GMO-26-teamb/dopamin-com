@@ -154,6 +154,10 @@ interface PasskeyRowProps {
 
 function PasskeyRow({ passkey, isLast, busy, onDelete }: PasskeyRowProps) {
   const name = passkeyName(passkey);
+  // 同名の「削除」が並ぶので名前で区別する。Disabled の理由も読み上げに残す
+  const label = isLast
+    ? `${name} のパスキーを削除（最後の1つは不可）`
+    : `${name} のパスキーを削除`;
 
   return (
     <div className="flex w-full items-center gap-2">
@@ -163,7 +167,7 @@ function PasskeyRow({ passkey, isLast, busy, onDelete }: PasskeyRowProps) {
         {formatPasskeyMeta(passkey)}
       </span>
       <Button
-        aria-label={`${name} のパスキーを削除`}
+        aria-label={label}
         disabled={isLast || busy}
         onClick={onDelete}
         size="sm"

@@ -121,8 +121,9 @@ describe("PasskeySection", () => {
     if (only === undefined) throw new Error("fixture が壊れている");
     renderSection({ listPasskeys: () => Promise.resolve([only]) });
 
+    // Disabled の理由はアクセシブルネームにも残す
     const remove = await screen.findByRole("button", {
-      name: "MacBook Touch ID のパスキーを削除",
+      name: "MacBook Touch ID のパスキーを削除（最後の1つは不可）",
     });
     expect(remove).toBeDisabled();
     expect(remove).toHaveTextContent("削除（最後の1つは不可）");

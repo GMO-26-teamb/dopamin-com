@@ -75,15 +75,22 @@ describe("SettingsScreen", () => {
     resetMockStore();
   });
 
-  it("読み込み中はカードの骨組みを出す", () => {
+  it("me を待つあいだも テーマ / パスキーは出し、AI・リセットだけ骨組みにする", async () => {
     renderScreen(stubServices({ me: () => new Promise<Me>(() => {}) }));
 
     expect(screen.getByRole("heading", { name: "設定" })).toBeInTheDocument();
-    // カードの見出しは骨組みでも出す（形を実コンテンツに合わせる。ui-screens §4）
-    expect(document.querySelector('[aria-busy="true"]')).not.toBeNull();
+    expect(screen.getByText("テーマ")).toBeInTheDocument();
     expect(screen.getByText("パスキー管理")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "パスキーを追加" })).toBeNull();
+    // me に依存する 2 枚だけが骨組み
+    expect(document.querySelector('[aria-busy="true"]')).not.toBeNull();
     expect(screen.queryByRole("button", { name: "リセット実行" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "モデル" })).toBeNull();
+
+    // パスキーは me を待たずに取得が進む
+    expect(
+      await screen.findByRole("button", { name: "パスキーを追加" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("MacBook Pro")).toBeInTheDocument();
   });
 
   it("取得に失敗したら Error Card と再試行を出す（HTTP モードの NOT_IMPLEMENTED 相当）", async () => {
@@ -104,6 +111,15 @@ describe("SettingsScreen", () => {
     expect(
       within(alert).getByRole("button", { name: "再試行" }),
     ).toBeInTheDocument();
+
+    // me が落ちてもテーマとパスキー管理は使える（HTTP モードで /settings が死なないこと）
+    expect(screen.getByText("テーマ")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "パスキーを追加" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "MacBook Pro のパスキーを削除" }),
+    ).toBeEnabled();
   });
 
   it("features.demoReset が false ならリセットのカードを出さない（§7-3）", async () => {
