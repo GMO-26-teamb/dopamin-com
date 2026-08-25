@@ -15,8 +15,8 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { Transfer } from "@/lib/api/types";
+import { formatCountdown, useCountdown } from "@/lib/use-countdown";
 import { cn } from "@/lib/utils";
-import { formatCountdown, useCountdown } from "./countdown";
 
 export type TransferKind =
   | "out-received"
@@ -128,7 +128,7 @@ export function TransferItem({
 }: TransferItemProps) {
   const kind = transferKind(transfer);
   // 自動承認までの残り時間は out-received / in-pending だけが持つ
-  const remainingMs = useCountdown(
+  const { remainingMs } = useCountdown(
     kind === "out-received" || kind === "in-pending" ? transfer.actByAt : null,
   );
   // 0 到達で操作を止め、再照会を促す（ui-screens §4）
