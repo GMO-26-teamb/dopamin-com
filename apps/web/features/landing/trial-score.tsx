@@ -78,7 +78,7 @@ export function TrialScore() {
   };
 
   return (
-    <section className="flex flex-col justify-center gap-3 px-8 py-10">
+    <section className="flex flex-col justify-center gap-4 px-6 py-10 md:px-10 lg:py-14 xl:px-14">
       <div className="flex items-baseline justify-between gap-2">
         <label className="text-caption text-muted" htmlFor={inputId}>
           ためしてみる
@@ -87,7 +87,7 @@ export function TrialScore() {
       </div>
 
       <form
-        className="flex items-start gap-2"
+        className="flex flex-col gap-2 sm:flex-row sm:items-start"
         onSubmit={(event) => {
           event.preventDefault();
           run();

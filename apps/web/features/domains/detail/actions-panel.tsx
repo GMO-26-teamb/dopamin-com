@@ -13,6 +13,7 @@ import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, Divider } from "@/components/ui/card";
+import { HelpTip } from "@/components/ui/help-tip";
 import type { DomainDetail } from "@/lib/api/types";
 import { isTransferLocked } from "./derive";
 import {
@@ -130,14 +131,17 @@ export function ActionsPanel({
 
       <Divider weight="thin" />
       <div className="flex w-full items-center justify-between gap-2">
-        <span className="text-body-sm text-muted">移管ロック</span>
+        <span className="inline-flex items-center gap-1 text-body-sm text-muted">
+          移管ロック
+          <HelpTip
+            content="ON のあいだは他社への移管を受け付けません。レジストリ側の状態が優先されるため、できない操作はボタンに理由が出ます。"
+            label="移管ロックとは"
+          />
+        </span>
         <Badge tone="neutral" variant="solid">
           {isTransferLocked(domain.statuses) ? "ON" : "OFF"}
         </Badge>
       </div>
-      <p className="w-full text-caption-sm text-muted">
-        Serverステータス優先（AC-07-1）。不可操作は理由を表示
-      </p>
     </Card>
   );
 }

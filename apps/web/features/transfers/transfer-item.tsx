@@ -143,7 +143,7 @@ export function TransferItem({
   return (
     <div
       className={cn(
-        "flex w-full items-center gap-3 border-2 border-solid bg-panel px-3 py-2",
+        "flex w-full flex-col items-start gap-2 border-2 border-solid bg-panel px-3 py-2 sm:flex-row sm:items-center sm:gap-3",
         KIND_BORDER[kind],
       )}
       data-kind={kind}
@@ -176,7 +176,7 @@ export function TransferItem({
         </p>
       </div>
 
-      <div className="flex shrink-0 items-center gap-1.5">
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5">
         {kind === "out-received" ? (
           <>
             {/* 期限切れは承認 / 拒否を止め、再照会だけを残す（ui-screens §4） */}

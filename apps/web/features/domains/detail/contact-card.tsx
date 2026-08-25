@@ -16,7 +16,7 @@ export function ContactCard({ domain }: ContactCardProps) {
   return (
     <Card
       emphasis={domain.registrant.migrated ? "default" : "warn"}
-      kicker="コンタクト（ダミーPII）"
+      kicker="コンタクト"
     >
       <KeyValueRow label="登録者" value={domain.registrant.name} />
       <KeyValueRow label="メール" value={domain.registrant.email} />

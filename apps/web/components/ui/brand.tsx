@@ -34,14 +34,7 @@ export function Logo({ size = "md", className }: LogoProps) {
       className={cn("inline-flex items-baseline whitespace-nowrap", className)}
     >
       <span className={cn("text-ink", style.jp)}>ドパ民</span>
-      <span
-        className={cn(
-          "bg-[image:var(--gradient-brand)] bg-clip-text text-transparent",
-          style.latin,
-        )}
-      >
-        .com
-      </span>
+      <span className={cn("brand-text", style.latin)}>.com</span>
     </span>
   );
 }
@@ -98,7 +91,7 @@ export function BrandBar({ variant = "accent", className }: BrandBarProps) {
     <div
       aria-hidden="true"
       className={cn(
-        "gradient-animated",
+        "brand-gradient",
         variant === "rule" ? "h-2 w-full" : "h-1.5 w-16",
         className,
       )}

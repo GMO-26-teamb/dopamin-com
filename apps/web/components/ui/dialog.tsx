@@ -79,7 +79,7 @@ export function DialogContent({
         <motion.div
           animate={{ opacity: 1, scale: 1 }}
           className={cn(
-            "fixed top-1/2 left-1/2 z-50 flex max-h-dvh w-dialog max-w-full flex-col items-start overflow-y-auto border-2 border-solid bg-panel focus:outline-none",
+            "fixed top-1/2 left-1/2 z-50 flex max-h-dvh w-dialog max-w-[calc(100vw-2rem)] flex-col items-start overflow-y-auto border-2 border-solid bg-panel focus:outline-none",
             TONE_BORDER[tone],
             className,
           )}

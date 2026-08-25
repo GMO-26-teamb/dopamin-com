@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
  * 有効期限プログレス。Tone（Brand / Warn）× Size（Default 6px / Thin 4px）。
  */
 const TONE = {
-  brand: "bg-[image:var(--gradient-brand)]",
+  brand: "brand-gradient",
   warn: "bg-warn",
 } as const;
 

@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScoreGauge } from "@/components/ui/score-gauge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { REGISTRY_LABEL } from "@/features/domains/registry-label";
 import type { SearchResult } from "@/lib/api/types";
 import {
   AvailabilityBadge,
@@ -66,7 +67,7 @@ export function SearchResultRow({
         <DomainLabel muted={taken} name={result.name} size="sm" />
       </span>
       <span className="shrink-0 text-caption text-muted">
-        {result.registry}
+        {REGISTRY_LABEL[result.registry]}
       </span>
       {registered ? (
         <Badge tone="muted" variant="solid">

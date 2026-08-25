@@ -10,6 +10,7 @@ import Link from "next/link";
 import { type ReactNode, useId } from "react";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { Button, type ButtonProps } from "@/components/ui/button";
+import { HelpTip } from "@/components/ui/help-tip";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import type { DomainSummary } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
@@ -19,6 +20,7 @@ import {
   formatRelativeTime,
   remainingPercent,
 } from "./format";
+import { REGISTRY_LABEL } from "./registry-label";
 import { statusBadgeTone, statusBadgeVariant } from "./status-badge";
 
 /**
@@ -75,6 +77,22 @@ export function deriveCardStatus(
     }
   }
 }
+
+/** 状態バッジ横の「？」で出す補足（初めての人向け。ui-screens §2.2 の意味を平易に）。 */
+export const STATUS_HELP: Record<DomainCardStatus, string> = {
+  active: "使える状態です。有効期限が近づくと、ここで更新できます。",
+  expiring: "有効期限まで 30 日を切りました。切れる前に「更新」してください。",
+  redeemable: "期限切れで停止中ですが、猶予期間内なら「復旧」で元に戻せます。",
+  transferring:
+    "移管の手続き中です。完了するまで名前や設定の変更はできません。",
+  hold: "レジストリ側で保留中です。理由は詳細画面の EPP ステータスで確認できます。",
+  inactive:
+    "ネームサーバー未設定などで動いていません。詳細画面で設定を確認してください。",
+  pendingDelete:
+    "削除待ちです。猶予期間を過ぎたため、このドメインは復旧できません。",
+  locked:
+    "ロック中です。誤操作や不正な移管を防ぐため、該当する操作が止まっています。",
+};
 
 /** Locked のバッジ文言（ui-screens §2.2「移管ロック / 削除ロック / 更新ロック」）。 */
 const LOCK_LABELS: readonly (readonly [RegExp, string])[] = [
@@ -379,7 +397,7 @@ export function DomainCard({
     <article
       aria-labelledby={titleId}
       className={cn(
-        "flex w-full flex-col gap-2 border-2 border-solid bg-panel px-4 py-3",
+        "flex w-full flex-col gap-2 border-2 border-solid bg-panel px-4 py-3 transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-[0_6px_0_-2px_var(--color-line)] motion-reduce:transition-none motion-reduce:hover:translate-y-0",
         view.border,
         view.faded && "opacity-[var(--opacity-muted)]",
         className,
@@ -396,6 +414,10 @@ export function DomainCard({
         >
           {view.badge.label}
         </Badge>
+        <HelpTip
+          content={STATUS_HELP[status]}
+          label={`${view.badge.label}とは`}
+        />
       </div>
 
       {view.progress === null ? null : (
@@ -407,9 +429,9 @@ export function DomainCard({
       )}
 
       <div className="flex w-full items-center justify-between gap-2 overflow-hidden text-caption text-muted">
-        <span className="shrink-0">{domain.registry}</span>
+        <span className="shrink-0">{REGISTRY_LABEL[domain.registry]}</span>
         <span className="flex min-w-0 items-center gap-1.5">
-          {domain.stale ? <Badge tone="muted">Stale</Badge> : null}
+          {domain.stale ? <Badge tone="muted">未同期</Badge> : null}
           <span className="truncate">
             {domain.stale
               ? `最終同期 ${formatRelativeTime(domain.syncedAt, now)}`

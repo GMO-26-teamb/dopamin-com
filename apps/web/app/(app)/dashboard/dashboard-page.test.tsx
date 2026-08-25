@@ -97,7 +97,7 @@ describe("DashboardPage", () => {
       "Kitaqsign が応答しません — 一覧はキャッシュを表示しています",
     );
     expect(screen.getByText(/（キャッシュ）$/)).toBeInTheDocument();
-    expect(screen.getAllByText("Stale")).toHaveLength(4);
+    expect(screen.getAllByText("未同期")).toHaveLength(4);
     // 更新系は Disabled、参照系（詳細）は押せる
     expect(screen.getByRole("button", { name: "更新" })).toBeDisabled();
     expect(screen.getAllByRole("link", { name: "詳細" }).length).toBe(3);

@@ -12,12 +12,12 @@ import { cn } from "@/lib/utils";
  * ラベルは左寄せ。Primary は 1 画面 1 つ。
  */
 export const buttonVariants = cva(
-  "inline-flex shrink-0 items-center justify-start py-0.5 transition-[color,background-color,opacity] disabled:pointer-events-none disabled:opacity-[var(--opacity-disabled)]",
+  "inline-flex shrink-0 items-center justify-start py-0.5 transition-[color,background-color,opacity,transform,box-shadow] duration-150 ease-out active:scale-[0.97] disabled:pointer-events-none disabled:opacity-[var(--opacity-disabled)] motion-reduce:transition-none motion-reduce:active:scale-100",
   {
     variants: {
       variant: {
         primary:
-          "bg-[image:var(--gradient-brand)] text-on-brand shadow-[var(--glow-brand)] hover:opacity-90",
+          "brand-gradient text-on-brand shadow-[var(--glow-brand)] hover:brightness-110 hover:shadow-[var(--glow-brand-hover)]",
         solid: "bg-ink text-bg hover:opacity-90",
         outline: "border-2 border-ink border-solid text-ink hover:bg-hover",
         subtle:

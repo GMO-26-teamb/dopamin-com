@@ -113,7 +113,7 @@ Figma の code syntax（`var(--color-bg)` 等）は Dev Mode で確認できる�
 | `color/effect/glow-1` | `--glow-1` | 未登録（`--glow-brand` 経由のみ） | `#00000000` | `#ff2fb359` |
 | `color/effect/glow-2` | `--glow-2` | 未登録（`--glow-brand` 経由のみ） | `#00000000` | `#22d3ee40` |
 
-`--gradient-brand`（`linear-gradient(90deg, --color-brand-1, --color-brand-mid, --color-brand-2)`）と `--glow-brand`（`--glow-1` / `--glow-2` の box-shadow 合成）は `tokens.css` で組み立てる複合変数で `@theme` には登録しない。Button primary は `bg-[image:var(--gradient-brand)] shadow-[var(--glow-brand)]`、Goku ロゴのアニメーションは `.gradient-animated` クラスで使う（§4）。
+`--gradient-brand`（`linear-gradient(90deg, --color-brand-1, --color-brand-mid, --color-brand-2)`）と `--glow-brand`（`--glow-1` / `--glow-2` の box-shadow 合成）は `tokens.css` で組み立てる複合変数で `@theme` には登録しない。ブランド面は `.brand-gradient`（塗り）/ `.brand-text`（文字のグラデーション）クラスで使う。`bg-[image:var(--gradient-brand)]` を直接書かない（§4）。
 
 ### 3.2 サイズ・間隔
 
@@ -121,8 +121,8 @@ Figma の code syntax（`var(--color-bg)` 等）は Dev Mode で確認できる�
 
 | CSS 変数 | 値 | Tailwind クラス |
 |---|---|---|
-| `--size-sidebar` | `190px` | `w-sidebar` |
-| `--size-page` | `1120px` | `max-w-page` |
+| `--size-sidebar` | `14rem`（224px） | `w-sidebar` |
+| `--size-page` | `80rem`（1280px） | `max-w-page` |
 | `--size-auth-card` | `440px` | `max-w-auth-card` |
 | `--size-dialog` | `420px` | `w-dialog` |
 | `--size-control-sm` | `28px` | `h-control-sm` |
@@ -185,7 +185,10 @@ next/font のインスタンス（`--font-noto-sans-jp` 等）は `app/layout.ts
 - `<html data-theme="standard">` / `"goku"` が唯一の切替スイッチ。`tokens.css` は色だけを `:root[data-theme="standard"]` / `:root[data-theme="goku"]` に持ち、dimensions / opacity / font は `:root` 直下（テーマ非依存）。
 - `apps/web/lib/theme/theme-provider.tsx` の `ThemeProvider` / `useTheme()` が状態を持つ。初期値は `app/layout.tsx` のインラインスクリプトが `localStorage`（キー `dopamin-theme`、`THEME_STORAGE_KEY`）から読んで `document.documentElement.dataset.theme` に先付けし、FOUC を防ぐ。既定は `"standard"`。OS の `prefers-color-scheme` は見ない（製品仕様として明示トグルのみ）。
 - テーマ切替 UI は `components/app/theme-toggle.tsx`（Sidebar 下部）・`features/settings/theme-section.tsx`（S-70）。
-- `.gradient-animated`（`background-image: var(--gradient-brand)`）は `:root[data-theme="goku"] .gradient-animated` かつ `@media (prefers-reduced-motion: no-preference)` のときだけ `gradient-pan` アニメーションが付く（Standard では静止したグラデーションのまま）。
+- `.brand-gradient` / `.brand-text` は `--gradient-size` / `--gradient-motion` を参照する。Standard では `100% 100%` / `none`（静止）、極ドパでは `:root[data-theme="goku"]` が `--gradient-brand` を 7 色のスペクトル（末尾＝先頭色）に差し替え、`300% 100%` + `gradient-pan 5s linear infinite` で常時流す。`prefers-reduced-motion: reduce` では `animation: none`。
+- 寸法とテキストスタイルは rem（16px 基準）。`html` の font-size を `≥1536px` で 106.25%、`≥1920px` で 112.5% に上げるので、大画面では文字・余白・コントロールがまとめて拡大する。線幅（`--stroke-*`）だけは px 固定。
+- ブレークポイント: `md` 未満はサイドバーの代わりに `MobileNav`（横スクロールのナビ）。グリッドは 1 列 → `sm` 2 列 → `lg`/`2xl` 3 列。2 カラムのパネル（詳細の操作パネル・サブドメインの編集パネル・設定）は `lg`/`md` 未満で縦積み。
+- 補足は `HelpTip`（「？」+ Tooltip）で出す。専門用語や迷いやすい操作の横に置き、本文には書かない。
 - 角丸は常に 0（Modernist DS）。`:focus-visible` は `outline: 2px solid var(--color-brand-1)`。
 
 ## 5. モックモード（`?mock=`）

@@ -243,16 +243,16 @@ export function DomainDetailPage({ name }: DomainDetailPageProps) {
         resyncing={domainQuery.isFetching}
       />
 
-      <div className="flex w-full items-start gap-3.5">
-        <div className="flex min-w-0 flex-1 flex-col gap-3">
+      <div className="flex w-full flex-col items-start gap-4 lg:flex-row">
+        <div className="flex w-full min-w-0 flex-1 flex-col gap-3">
           <InfoCard domain={domain} now={now} />
           <NameserverCard
             domain={domain}
             editable={editable}
             onEdit={() => openDialog("ns-edit")}
           />
-          <div className="flex w-full items-start gap-3">
-            <div className="min-w-0 flex-1">
+          <div className="flex w-full flex-col items-start gap-3 md:flex-row">
+            <div className="w-full min-w-0 flex-1">
               <ContactCard domain={domain} />
             </div>
             <div className="min-w-0 flex-1">
@@ -261,7 +261,7 @@ export function DomainDetailPage({ name }: DomainDetailPageProps) {
           </div>
         </div>
         {showActions ? (
-          <div className="w-80 shrink-0">
+          <div className="w-full shrink-0 lg:w-80">
             <ActionsPanel
               countdownExpired={countdown.expired}
               countdownLabel={countdown.label}

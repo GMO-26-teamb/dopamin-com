@@ -54,7 +54,7 @@ export function SettingsScreen() {
           showLogsLink
         />
       ) : (
-        <div className="flex w-full items-start gap-3">
+        <div className="flex w-full flex-col items-start gap-3 md:flex-row">
           <AiSettingsSection
             ai={me.data.ai}
             className="min-w-0 flex-1"
@@ -76,7 +76,10 @@ export function SettingsScreen() {
  */
 function SettingsSkeleton() {
   return (
-    <div aria-busy="true" className="flex w-full items-start gap-3">
+    <div
+      aria-busy="true"
+      className="flex w-full flex-col items-start gap-3 md:flex-row"
+    >
       <Card className="min-w-0 flex-1" kicker="AI 設定">
         <Skeleton shape="block" />
       </Card>

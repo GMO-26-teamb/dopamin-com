@@ -35,7 +35,7 @@ export interface CandidateGridProps {
 export function CandidateGridSkeleton() {
   return (
     <div className="flex w-full flex-col gap-3">
-      <ul className="grid w-full grid-cols-3 gap-3">
+      <ul className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {SKELETON_KEYS.map((key) => (
           <li key={key}>
             <Skeleton className="h-38" shape="card" />
@@ -74,7 +74,7 @@ export function CandidateGrid({
           tone="warn"
         />
       ) : null}
-      <ul className="grid w-full grid-cols-3 gap-3">
+      <ul className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {candidates.map((candidate, index) => {
           const name = `${candidate.sld}.${candidate.tld}`;
           return (

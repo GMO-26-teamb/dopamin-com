@@ -12,7 +12,7 @@ import { ThemeToggle } from "./theme-toggle";
 
 /**
  * Figma: Sidebar `51:348`
- * 190px 固定。Logo → 主要 CTA → ナビ 5 項目 → 下部にテーマトグル + ユーザー行
+ * `--size-sidebar` 固定。Logo → 主要 CTA → ナビ 5 項目 → 下部にテーマトグル + ユーザー行
  * （docs/specs/ui-screens.md §1）。
  */
 
@@ -101,7 +101,7 @@ export function Sidebar({
   return (
     <div
       className={cn(
-        "flex w-sidebar shrink-0 flex-col gap-1 border-line border-r-2 border-solid bg-bg px-3 py-4",
+        "flex w-sidebar shrink-0 flex-col gap-1 border-line border-r-2 border-solid bg-bg px-4 py-5",
         className,
       )}
     >

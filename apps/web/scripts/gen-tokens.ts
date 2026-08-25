@@ -85,6 +85,35 @@ export function uniqueColors(color: TokensFile["color"]): ColorToken[] {
   return [...byCss.values()];
 }
 
+/** 16px = 1rem。`html` の font-size を画面幅で段階的に上げると全体が追従する */
+const REM_BASE_PX = 16;
+
+/** 数値を rem 文字列にする（末尾の 0 を落として決定的に） */
+export function rem(px: number): string {
+  const value = Number((px / REM_BASE_PX).toFixed(4));
+  return value === 0 ? "0" : `${value}rem`;
+}
+
+/** 線幅（--stroke-*）と角丸は px のまま。それ以外の寸法は rem */
+export function dimension(name: string, px: number): string {
+  if (name.startsWith("--stroke-") || name.startsWith("--radius-")) {
+    return `${px}px`;
+  }
+  return rem(px);
+}
+
+/**
+ * 大画面での基準サイズ。Tailwind の rem スペーシングと text-* ユーティリティ（rem）が
+ * まとめて追従するので、これだけで「大きな画面ではひとまわり大きく」が効く。
+ */
+const HTML_SCALE_STEPS: readonly [
+  minWidthPx: number,
+  fontSizePercent: number,
+][] = [
+  [1536, 106.25],
+  [1920, 112.5],
+];
+
 function block(selector: string, lines: string[]): string {
   // 区切りの空行に末尾スペースを残さない（Biome の format と生成物を一致させる）
   const body = lines.map((line) => (line === "" ? "" : `  ${line}`)).join("\n");
@@ -109,10 +138,10 @@ export function generateTokensCss(tokens: TokensFile): string {
   );
 
   const rootLines: string[] = [
-    "/* dimensions（px 固定。Figma の値をそのまま） */",
+    "/* dimensions（Figma の px 値を rem 化。線幅だけは px のまま） */",
   ];
   for (const [name, value] of Object.entries(tokens.dimensions)) {
-    rootLines.push(`${name}: ${value}px;`);
+    rootLines.push(`${name}: ${dimension(name, value)};`);
   }
 
   rootLines.push("", "/* opacity */");
@@ -134,6 +163,9 @@ export function generateTokensCss(tokens: TokensFile): string {
   const glow = tokens.glow
     .map((layer) => `0 0 ${layer.radius}px var(${layer.color})`)
     .join(", ");
+  const glowHover = tokens.glow
+    .map((layer) => `0 0 ${layer.radius * 1.5}px var(${layer.color})`)
+    .join(", ");
   rootLines.push(
     "",
     "/* brand（テーマごとの色を参照するので :root に置いても両テーマで正しく解決する） */",
@@ -145,7 +177,39 @@ export function generateTokensCss(tokens: TokensFile): string {
     "  var(--color-brand-2)",
     ");",
     `--glow-brand: ${glow};`,
+    "/* hover 時は半径を 1.5 倍に広げる（Primary ボタン） */",
+    `--glow-brand-hover: ${glowHover};`,
+    "",
+    "/* brand-gradient の動き。標準は静止、極ドパは下のブロックで上書きする */",
+    "--gradient-size: 100% 100%;",
+    "--gradient-motion: none;",
   );
+
+  // 極ドパ: ブランド 3 色の間にゲーミング RGB の色相を挟み、末尾を先頭色に戻して継ぎ目なく流す
+  const gokuBrand = block(':root[data-theme="goku"]', [
+    "--gradient-brand: linear-gradient(",
+    "  90deg,",
+    "  var(--color-brand-1) 0%,",
+    "  var(--color-brand-mid) 18%,",
+    "  var(--color-brand-2) 36%,",
+    "  #3dff8f 52%,",
+    "  #ffe14d 68%,",
+    "  #ff7a3d 84%,",
+    "  var(--color-brand-1) 100%",
+    ");",
+    "--gradient-size: 300% 100%;",
+    "--gradient-motion: gradient-pan 5s linear infinite;",
+  ]);
+
+  const htmlScale = HTML_SCALE_STEPS.map(([minWidth, percent]) =>
+    [
+      `@media (min-width: ${minWidth}px) {`,
+      "  html {",
+      `    font-size: ${percent}%;`,
+      "  }",
+      "}",
+    ].join("\n"),
+  ).join("\n\n");
 
   const motion = [
     "@keyframes gradient-pan {",
@@ -153,24 +217,38 @@ export function generateTokensCss(tokens: TokensFile): string {
     "    background-position: 0% 50%;",
     "  }",
     "  to {",
-    "    background-position: 200% 50%;",
+    "    background-position: 300% 50%;",
     "  }",
     "}",
     "",
-    block(".gradient-animated", [
+    "/*",
+    " * ブランドグラデーション面。`bg-[image:var(--gradient-brand)]` の代わりにこれを使う。",
+    " * 極ドパモードでは --gradient-motion が動き、動きを減らす設定では止まる（要件 §15.3）。",
+    " */",
+    block(".brand-gradient", [
       "background-image: var(--gradient-brand);",
-      "background-size: 200% 100%;",
+      "background-size: var(--gradient-size);",
+      "animation: var(--gradient-motion);",
     ]),
     "",
-    "/* 極ドパモードのときだけ、かつ動きを減らす設定でないときだけ動かす（設計 §3） */",
-    "@media (prefers-reduced-motion: no-preference) {",
-    '  :root[data-theme="goku"] .gradient-animated {',
-    "    animation: gradient-pan 6s linear infinite;",
+    block(".brand-text", [
+      "background-image: var(--gradient-brand);",
+      "background-size: var(--gradient-size);",
+      "-webkit-background-clip: text;",
+      "background-clip: text;",
+      "color: transparent;",
+      "animation: var(--gradient-motion);",
+    ]),
+    "",
+    "@media (prefers-reduced-motion: reduce) {",
+    "  .brand-gradient,",
+    "  .brand-text {",
+    "    animation: none;",
     "  }",
     "}",
   ].join("\n");
 
-  return `${[HEADER, fallbackBlock, ...themeBlocks, block(":root", rootLines), motion].join("\n\n")}\n`;
+  return `${[HEADER, fallbackBlock, ...themeBlocks, block(":root", rootLines), gokuBrand, htmlScale, motion].join("\n\n")}\n`;
 }
 
 function main(): void {

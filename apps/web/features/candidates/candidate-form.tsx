@@ -66,7 +66,7 @@ export function CandidateForm({ busy, onSubmit }: CandidateFormProps) {
       noValidate
       onSubmit={handleSubmit}
     >
-      <div className="flex w-full items-end gap-3">
+      <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-end">
         <div className="min-w-0 flex-1">
           <Input
             autoComplete="off"

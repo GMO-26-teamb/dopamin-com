@@ -46,7 +46,10 @@ export function DomainGridSkeleton({
   return (
     <div
       aria-busy="true"
-      className={cn("grid w-full grid-cols-2 gap-x-4 gap-y-3", className)}
+      className={cn(
+        "grid w-full grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2 2xl:grid-cols-3",
+        className,
+      )}
       role="status"
     >
       <span className="sr-only">保有ドメインを読み込み中…</span>

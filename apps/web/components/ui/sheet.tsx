@@ -67,7 +67,7 @@ export function Sheet({
           <motion.div
             animate={{ x: 0 }}
             className={cn(
-              "fixed z-50 flex w-90 max-w-full flex-col gap-3 border-solid bg-panel px-6 py-5 focus:outline-none",
+              "fixed z-50 flex w-90 max-w-[calc(100vw-1.5rem)] flex-col gap-3 border-solid bg-panel px-6 py-5 focus:outline-none",
               SIDE[side],
               className,
             )}
