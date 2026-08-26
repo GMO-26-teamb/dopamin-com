@@ -29,6 +29,47 @@ describe("maskSensitiveValues（AC-15-2）", () => {
     });
   });
 
+  it("接頭辞・接尾辞付きのキー（x-api-key / accessToken / clientSecret など）も部分一致で対象にする", () => {
+    expect(
+      maskSensitiveValues({
+        "x-api-key": "a",
+        X_API_KEY: "b",
+        accessToken: "c",
+        refresh_token: "d",
+        clientSecret: "e",
+        apiSecret: "f",
+        gatePassword: "g",
+        passwd: "h",
+      }),
+    ).toEqual({
+      "x-api-key": MASKED_VALUE,
+      X_API_KEY: MASKED_VALUE,
+      accessToken: MASKED_VALUE,
+      refresh_token: MASKED_VALUE,
+      clientSecret: MASKED_VALUE,
+      apiSecret: MASKED_VALUE,
+      gatePassword: MASKED_VALUE,
+      passwd: MASKED_VALUE,
+    });
+  });
+
+  it("EPP authInfo の pw 要素は完全一致で対象にする（pwd 等の無関係なキーは残す）", () => {
+    expect(
+      maskSensitiveValues({ pw: "x", PW: "y", pwd: "keep", spw: "keep" }),
+    ).toEqual({ pw: MASKED_VALUE, PW: MASKED_VALUE, pwd: "keep", spw: "keep" });
+  });
+
+  it("機密語彙を含まない通常のキー（name / status / clTRID など）はマスクしない", () => {
+    const input = {
+      name: "example.com",
+      status: "ok",
+      clTRID: "req-1",
+      svTRID: "sv-1",
+      registrant: "c1",
+    };
+    expect(maskSensitiveValues(input)).toEqual(input);
+  });
+
   it("ネストしたオブジェクト・配列の中もマスクする", () => {
     const masked = maskSensitiveValues({
       body: {
