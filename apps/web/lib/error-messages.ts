@@ -137,6 +137,29 @@ const COPY: Record<ClientErrorCode, CopyTemplate> = {
     body: "時間をおいて、もう一度お試しください。",
     action: "retry",
   },
+  // ---- FR-01 パスキー認証（docs/requirements.md §10.3 v0.1.8 / ui-screens §4） ----
+  CHALLENGE_NOT_FOUND: {
+    title: "認証の有効期限が切れました",
+    body: "時間内に完了しなかったか、すでに使われた認証です。最初からやり直してください。",
+    action: "retry",
+  },
+  VERIFICATION_FAILED: {
+    title: "パスキーの検証に失敗しました",
+    body: "別のパスキーを選ぶか、もう一度お試しください。",
+    action: "retry",
+  },
+  CREDENTIAL_NOT_FOUND: {
+    title: "このパスキーは登録されていません",
+    body: "別の環境で作成したパスキーの可能性があります。登録済みのパスキーでログインするか、新規登録してください。",
+    action: "none",
+  },
+  LAST_PASSKEY: {
+    // ui-screens §4: CONFLICT 行の「最後のパスキーは削除できません」を専用コードで出す
+    title: "最後のパスキーは削除できません",
+    body: "ログインできなくなるため、先に別のパスキーを追加してください。",
+    required: true,
+    action: "none",
+  },
   NOT_IMPLEMENTED: {
     title: "この機能はまだ利用できません",
     body: "API が未実装です。モックモード（NEXT_PUBLIC_API_MODE=mock）でお試しください。",

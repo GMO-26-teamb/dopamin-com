@@ -27,6 +27,7 @@ import type {
   SearchResult,
   SubdomainHost,
   SubdomainPlan,
+  SyncResult,
   Transfer,
   UniquenessScore,
 } from "../types";
@@ -342,7 +343,9 @@ export function createMockServices(
         ? []
         : [toSummary(domain)];
     });
-    return isStale ? summaries.map(asStale) : summaries;
+    // 一覧は DB キャッシュを読むだけでレジストリに問い合わせないので stale は立てない。
+    // 「同期に失敗した行だけ Stale」は sync() が作る（S-13）。
+    return summaries;
   }
 
   function planFor(domain: string): SubdomainPlan {
@@ -439,19 +442,38 @@ export function createMockServices(
         return isEmpty ? [] : listDomains();
       },
 
-      /** POST /domains/sync */
-      async sync() {
+      /**
+       * POST /domains/sync。
+       *
+       * `error` はリクエストごと落ちる（ハード失敗 → Error Card）。
+       * `stale` は実 API と同じ「200 + 部分失敗」で返す: kitaqsign だけが応答せず、
+       * その行だけ `stale: true`、kitaqnic の行は最新化できている（S-13 / AC-18-1）。
+       */
+      async sync(): Promise<SyncResult> {
         await wait();
         if (isError) {
           registryUnavailable();
         }
-        if (isStale) {
-          // S-13: 片方のレジストリだけ落ちている同期エラー（AC-18-1）
-          fail("REGISTRY_TIMEOUT", "同期に失敗しました。", {
-            registry: "kitaqsign",
-          });
+        const domains = isEmpty ? [] : listDomains();
+        if (!isStale) {
+          return { domains, failures: [] };
         }
-        return isEmpty ? [] : listDomains();
+        const down = new Set(
+          domains
+            .filter((domain) => domain.registry === "kitaqsign")
+            .map((domain) => domain.name),
+        );
+        return {
+          domains: domains.map((domain) =>
+            down.has(domain.name) ? asStale(domain) : domain,
+          ),
+          failures: [...down].map((name) => ({
+            name,
+            code: "REGISTRY_UNAVAILABLE" as const,
+            message: "Kitaqsign に接続できません。",
+            registry: "kitaqsign" as const,
+          })),
+        };
       },
 
       /** GET /domains/:name */

@@ -15,7 +15,7 @@ import {
   type UpdateInput,
 } from "@dopamin/shared";
 import { Hono } from "hono";
-import { ApiError } from "../lib/api-error";
+import { ApiException } from "../lib/errors";
 import { reconcileOnTimeout } from "../lib/reconcile";
 import { adapterForDomain, getRegistrySet } from "../lib/registries";
 import { jsonValidator } from "../lib/validator";
@@ -49,7 +49,7 @@ function generateAuthInfo(): string {
 function parseDomainNameParam(raw: string): string {
   const parsed = domainNameSchema.safeParse(raw);
   if (!parsed.success) {
-    throw new ApiError(400, "VALIDATION_ERROR", "ドメイン名の形式が不正です。");
+    throw new ApiException("VALIDATION_ERROR", "ドメイン名の形式が不正です。");
   }
   return parsed.data;
 }
@@ -64,8 +64,7 @@ function assertRenewWithinLimit(
   const limit = new Date();
   limit.setUTCFullYear(limit.getUTCFullYear() + 10);
   if (newExpiry.getTime() > limit.getTime()) {
-    throw new ApiError(
-      400,
+    throw new ApiException(
       "VALIDATION_ERROR",
       "合計の有効期間が上限（10 年）を超えます。",
     );
@@ -239,8 +238,7 @@ export const domains = new Hono<AuthedEnv>()
 
     const [check] = await adapter.check([body.name]);
     if (!check?.available) {
-      throw new ApiError(
-        409,
+      throw new ApiException(
         "CONFLICT",
         "このドメインは取得できません（既に登録されているか、登録が制限されています）。",
         check?.reason ? { reason: check.reason } : undefined,
@@ -310,8 +308,7 @@ export const domains = new Hono<AuthedEnv>()
       rgpStatuses: current.rgpStatuses,
     });
     if (!opCheck.allowed) {
-      throw new ApiError(
-        409,
+      throw new ApiException(
         "OPERATION_NOT_ALLOWED",
         "現在のステータスでは更新できません。",
         {
@@ -320,8 +317,7 @@ export const domains = new Hono<AuthedEnv>()
       );
     }
     if (!current.expiresAt) {
-      throw new ApiError(
-        409,
+      throw new ApiException(
         "OPERATION_NOT_ALLOWED",
         "有効期限を取得できませんでした。",
       );
@@ -369,8 +365,7 @@ export const domains = new Hono<AuthedEnv>()
       unlockOnly,
     });
     if (!opCheck.allowed) {
-      throw new ApiError(
-        409,
+      throw new ApiException(
         "OPERATION_NOT_ALLOWED",
         "現在のステータスでは変更できません。",
         {
@@ -437,8 +432,7 @@ export const domains = new Hono<AuthedEnv>()
       rgpStatuses: current.rgpStatuses,
     });
     if (!opCheck.allowed) {
-      throw new ApiError(
-        409,
+      throw new ApiException(
         "OPERATION_NOT_ALLOWED",
         "現在のステータスでは廃止できません。",
         {
@@ -497,8 +491,7 @@ export const domains = new Hono<AuthedEnv>()
 
     const current = await adapter.info(name);
     if (!isRestorable(current.rgpStatuses, current.statuses)) {
-      throw new ApiError(
-        409,
+      throw new ApiException(
         "OPERATION_NOT_ALLOWED",
         "復旧猶予期間（RGP）ではないため復旧できません。",
         { statuses: current.statuses, rgpStatuses: current.rgpStatuses },
@@ -535,8 +528,7 @@ export const domains = new Hono<AuthedEnv>()
       rgpStatuses: current.rgpStatuses,
     });
     if (!opCheck.allowed) {
-      throw new ApiError(
-        409,
+      throw new ApiException(
         "OPERATION_NOT_ALLOWED",
         "現在のステータスでは AuthCode を発行できません。",
         { statuses: opCheck.blockedBy },

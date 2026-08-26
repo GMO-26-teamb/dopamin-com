@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { RegistryError } from "./errors";
 import { type KitaqAdapterConfig, KitaqHttpClient } from "./http";
+import type { RegistryCallRecord } from "./observer";
 
 /**
  * KitaqHttpClient のユニットテスト。fetch をスタブし、
@@ -252,5 +253,174 @@ describe("レスポンス判定の接続（interpretEppResponse / parseResData �
     });
     expect(resData.ping).toBe("pong");
     expect(envelope.result.code).toBe(1000);
+  });
+});
+
+describe("観測フック（onCall / FR-15）", () => {
+  const REJECT_BODY = JSON.stringify({
+    result: {
+      code: 2303,
+      message: "Object does not exist",
+      reason: "not found",
+    },
+    trID: { svTRID: "KQSGN-ERR-1" },
+  });
+
+  function observedClient(overrides?: Partial<KitaqAdapterConfig>) {
+    const records: RegistryCallRecord[] = [];
+    const c = client({
+      onCall: (record) => {
+        records.push(record);
+      },
+      ...overrides,
+    });
+    return { c, records };
+  }
+
+  it("成功時に 1 レコード発行し、clTrid は送信した X-Cl-TRID と一致する", async () => {
+    const { c, records } = observedClient();
+    await c.command({
+      method: "GET",
+      path: "/domains/example.com",
+      kind: "read",
+      command: "info",
+      domainName: "example.com",
+      resDataSchema: pingSchema,
+    });
+    expect(records).toHaveLength(1);
+    const record = records[0];
+    expect(record?.clTrid).toBe(headersOfLastCall()["X-Cl-TRID"]);
+    expect(record).toMatchObject({
+      registry: "kitaqsign",
+      command: "info",
+      domainName: "example.com",
+      svTrid: "KQSGN-TEST-1",
+      status: "success",
+      errorCode: null,
+      registryCode: "1000",
+    });
+    expect(record?.latencyMs).toBeGreaterThanOrEqual(0);
+    expect(record?.request).toEqual({
+      method: "GET",
+      path: "/domains/example.com",
+      body: null,
+    });
+  });
+
+  it("レジストリ拒否（result 2303）は error + registryCode + svTrid 付きで記録し、従来どおり throw する", async () => {
+    const { c, records } = observedClient();
+    fetchMock.mockResolvedValueOnce(new Response(REJECT_BODY, { status: 404 }));
+    const err = await commandError(
+      c.command({
+        method: "GET",
+        path: "/domains/gone.com",
+        kind: "read",
+        command: "info",
+        domainName: "gone.com",
+        resDataSchema: pingSchema,
+      }),
+    );
+    expect(err.code).toBe("NOT_FOUND");
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      status: "error",
+      errorCode: "NOT_FOUND",
+      registryCode: "2303",
+      svTrid: "KQSGN-ERR-1",
+    });
+  });
+
+  it("タイムアウトは status timeout・svTrid null で記録する（AC-15-1）", async () => {
+    const { c, records } = observedClient();
+    fetchMock.mockRejectedValueOnce(
+      new DOMException("The operation timed out", "TimeoutError"),
+    );
+    await commandError(
+      c.command({
+        method: "GET",
+        path: "/domains/slow.com",
+        kind: "read",
+        command: "info",
+        domainName: "slow.com",
+        resDataSchema: pingSchema,
+      }),
+    );
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      status: "timeout",
+      errorCode: "REGISTRY_TIMEOUT",
+      registryCode: null,
+      svTrid: null,
+    });
+  });
+
+  it("resData 不一致は status spec_mismatch・svTrid 付きで記録する", async () => {
+    const { c, records } = observedClient();
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          result: { code: 1000, message: "OK" },
+          resData: { unexpected: 1 },
+          trID: { svTRID: "KQSGN-TEST-9" },
+        }),
+        { status: 200 },
+      ),
+    );
+    await commandError(
+      c.command({
+        method: "GET",
+        path: "/sessions/hello",
+        kind: "read",
+        command: "hello",
+        resDataSchema: pingSchema,
+      }),
+    );
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      status: "spec_mismatch",
+      errorCode: "REGISTRY_SPEC_MISMATCH",
+      svTrid: "KQSGN-TEST-9",
+      domainName: null,
+    });
+  });
+
+  it("observer が throw してもコマンドの成否に影響しない", async () => {
+    const c = client({
+      onCall: () => {
+        throw new Error("observer down");
+      },
+    });
+    const { resData } = await c.command({
+      method: "GET",
+      path: "/sessions/hello",
+      kind: "read",
+      command: "hello",
+      resDataSchema: pingSchema,
+    });
+    expect(resData.ping).toBe("pong");
+  });
+
+  it("makeClTrid 注入時はその値を X-Cl-TRID に使い、null ならば既定採番へフォールバックする", async () => {
+    let value: string | null = "req_test-1";
+    const { c, records } = observedClient({ makeClTrid: () => value });
+    await c.command({
+      method: "GET",
+      path: "/sessions/hello",
+      kind: "read",
+      command: "hello",
+      resDataSchema: pingSchema,
+    });
+    expect(headersOfLastCall()["X-Cl-TRID"]).toBe("req_test-1");
+    expect(records[0]?.clTrid).toBe("req_test-1");
+
+    value = null;
+    await c.command({
+      method: "GET",
+      path: "/sessions/hello",
+      kind: "read",
+      command: "hello",
+      resDataSchema: pingSchema,
+    });
+    expect(headersOfLastCall()["X-Cl-TRID"]).toMatch(/^dp-/);
   });
 });

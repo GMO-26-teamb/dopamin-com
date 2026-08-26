@@ -19,8 +19,8 @@ function copyFor(
 }
 
 describe("toErrorCopy", () => {
-  it("13 の API エラーコード + NOT_IMPLEMENTED + NETWORK すべてに文言がある", () => {
-    expect(ALL_CODES).toHaveLength(15);
+  it("17 の API エラーコード（§10.3 の 13 種 + FR-01 の 4 種）+ NOT_IMPLEMENTED + NETWORK すべてに文言がある", () => {
+    expect(ALL_CODES).toHaveLength(19);
     for (const code of ALL_CODES) {
       const copy = copyFor(code);
       expect(copy.title, code).not.toBe("");
@@ -229,6 +229,26 @@ describe("toErrorCopy", () => {
   it("NOT_IMPLEMENTED / NETWORK の action", () => {
     expect(copyFor("NOT_IMPLEMENTED").action).toBe("none");
     expect(copyFor("NETWORK").action).toBe("retry");
+  });
+
+  // ---- FR-01 パスキー認証（§10.3 v0.1.8） ----
+
+  it("LAST_PASSKEY は message がタイトルの言い換えでも別のパスキー追加の案内を出す（ui-screens §4）", () => {
+    const copy = toErrorCopy(
+      new ApiClientError({
+        code: "LAST_PASSKEY",
+        message: "最後のパスキーは削除できません。",
+      }),
+    );
+    expect(copy.title).toBe("最後のパスキーは削除できません");
+    expect(copy.body).toContain("別のパスキーを追加");
+    expect(copy.action).toBe("none");
+  });
+
+  it("CHALLENGE_NOT_FOUND / VERIFICATION_FAILED は再試行、CREDENTIAL_NOT_FOUND は再試行しない", () => {
+    expect(copyFor("CHALLENGE_NOT_FOUND").action).toBe("retry");
+    expect(copyFor("VERIFICATION_FAILED").action).toBe("retry");
+    expect(copyFor("CREDENTIAL_NOT_FOUND").action).toBe("none");
   });
 
   // ---- AI 由来の失敗（ui-screens S-23 / S-41） ----

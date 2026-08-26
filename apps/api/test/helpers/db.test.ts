@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTestDb, resetTestDb } from "./db";
 
-/** packages/db/drizzle の 3 マイグレーションが作るテーブル */
+/** packages/db/drizzle の全マイグレーション（journal 順）が作るテーブル */
 const EXPECTED_TABLES = [
   "contacts",
   "domains",
@@ -22,14 +22,15 @@ const tableRowsSchema = z.object({
 });
 
 let db: Db;
-let closeDb: () => Promise<void>;
+let closeDb: (() => Promise<void>) | undefined;
 
 beforeAll(async () => {
   ({ db, close: closeDb } = await createTestDb());
 }, 30_000);
 
 afterAll(async () => {
-  await closeDb();
+  // beforeAll が timeout した場合は未代入。ここで TypeError を出すと本来の原因を隠すので省略可能にする
+  await closeDb?.();
 });
 
 describe("createTestDb", () => {
@@ -75,7 +76,7 @@ describe("createTestDb", () => {
     expect(rows[0]?.transports).toEqual(["internal"]);
   });
 
-  it("resetTestDb で全テーブルが空になる（FK 先も CASCADE で消える）", async () => {
+  it("resetTestDb で全テーブルが空になる（users を参照するテーブルも TRUNCATE CASCADE で消える）", async () => {
     const users = await db
       .insert(schema.users)
       .values({ displayName: "消える人" })

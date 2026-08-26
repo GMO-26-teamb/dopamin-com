@@ -152,19 +152,30 @@ describe("domains.list（GET /domains）", () => {
 });
 
 describe("domains.sync（POST /domains/sync）", () => {
-  it("失敗が無ければ最新化した一覧を返す", async () => {
+  it("失敗が無ければ最新化した一覧と空の failures を返す", async () => {
     stubFetch(200, { domains: [apiSummary()], failures: [] });
 
-    const list = await services().domains.sync();
+    const result = await services().domains.sync();
 
     expect(calls[0]?.url).toContain("/api/v1/domains/sync");
     expect(calls[0]?.method).toBe("POST");
-    expect(list[0]?.displayStatus).toBe("active");
+    expect(result.domains[0]?.displayStatus).toBe("active");
+    expect(result.failures).toEqual([]);
   });
 
-  it("部分失敗（200 + failures）は例外に変換し、落ちたレジストリを載せる（S-13）", async () => {
+  it("部分失敗（200 + failures）でも例外にせず、成功行と stale 行の両方を返す（S-13）", async () => {
     stubFetch(200, {
-      domains: [apiSummary({ stale: true })],
+      domains: [
+        apiSummary(),
+        apiSummary({
+          name: "ng.xyz",
+          sld: "ng",
+          tld: "xyz",
+          registry: "kitaqnic",
+          stale: true,
+          syncedAt: "2026-08-25T00:00:00.000Z",
+        }),
+      ],
       failures: [
         {
           name: "ng.xyz",
@@ -174,20 +185,31 @@ describe("domains.sync（POST /domains/sync）", () => {
       ],
     });
 
-    const error = await services()
-      .domains.sync()
-      .catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(ApiClientError);
-    expect(error).toMatchObject({
-      code: "REGISTRY_UNAVAILABLE",
-      message: "Kitaqnic に接続できません。",
-      // TLD からレジストリを特定して Banner の見出しを具体名にする
-      registry: "kitaqnic",
-      retryable: true,
+    const result = await services().domains.sync();
+
+    // 一覧は捨てない。捨てると失敗行の stale がキャッシュに入らず S-13 が出せない
+    expect(result.domains).toHaveLength(2);
+    expect(result.domains[0]).toMatchObject({
+      name: "example.com",
+      stale: false,
     });
+    expect(result.domains[1]).toMatchObject({
+      name: "ng.xyz",
+      stale: true,
+      syncedAt: "2026-08-25T00:00:00.000Z",
+    });
+    // 落ちた相手は TLD から引く（Banner の見出しを具体名にする）
+    expect(result.failures).toEqual([
+      {
+        name: "ng.xyz",
+        code: "REGISTRY_UNAVAILABLE",
+        message: "Kitaqnic に接続できません。",
+        registry: "kitaqnic",
+      },
+    ]);
   });
 
-  it("両レジストリが落ちているときは registry を特定しない", async () => {
+  it("両レジストリが落ちているときは failures に両方の registry が載る", async () => {
     stubFetch(200, {
       domains: [],
       failures: [
@@ -196,11 +218,43 @@ describe("domains.sync（POST /domains/sync）", () => {
       ],
     });
 
-    const error = (await services()
+    const { failures } = await services().domains.sync();
+
+    expect(failures.map((f) => f.registry)).toEqual(["kitaqsign", "kitaqnic"]);
+  });
+
+  it("未対応 TLD の失敗は registry を特定しない（null）", async () => {
+    stubFetch(200, {
+      domains: [],
+      failures: [
+        {
+          name: "a.example",
+          code: "VALIDATION_ERROR",
+          message: "未対応の TLD です。",
+        },
+      ],
+    });
+
+    const { failures } = await services().domains.sync();
+
+    expect(failures[0]?.registry).toBeNull();
+  });
+
+  it("リクエスト自体が失敗したときは例外にする（401 / 5xx）", async () => {
+    stubFetch(401, {
+      error: {
+        code: "UNAUTHORIZED",
+        message: "ログインが必要です。",
+        retryable: false,
+      },
+    });
+
+    const error = await services()
       .domains.sync()
-      .catch((e: unknown) => e)) as ApiClientError;
-    expect(error.code).toBe("REGISTRY_TIMEOUT");
-    expect(error.registry).toBeUndefined();
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ApiClientError);
+    expect(error).toMatchObject({ code: "UNAUTHORIZED" });
   });
 });
 

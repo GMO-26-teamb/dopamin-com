@@ -1,6 +1,6 @@
 import { domainNameSchema, transferCreateRequestSchema } from "@dopamin/shared";
 import { Hono } from "hono";
-import { ApiError } from "../lib/api-error";
+import { ApiException } from "../lib/errors";
 import { reconcileOnTimeout } from "../lib/reconcile";
 import { adapterForDomain } from "../lib/registries";
 import { jsonValidator } from "../lib/validator";
@@ -32,8 +32,7 @@ export const transfers = new Hono<AuthedEnv>()
   .get("/:name", async (c) => {
     const parsed = domainNameSchema.safeParse(c.req.param("name"));
     if (!parsed.success) {
-      throw new ApiError(
-        400,
+      throw new ApiException(
         "VALIDATION_ERROR",
         "ドメイン名の形式が不正です。",
       );

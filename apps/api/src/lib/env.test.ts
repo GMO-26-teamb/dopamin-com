@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { ApiError } from "./api-error";
 import { getApiEnv, requireEnv, resetApiEnvCacheForTesting } from "./env";
+import { ApiException } from "./errors";
 
 // apiEnvSchema が読む変数だけをテスト間で確実にリセットする
 // （シェル環境や他テストファイルの汚染を受けないようにする）
@@ -141,21 +141,22 @@ describe("requireEnv", () => {
     expect(requireEnv("GITHUB_TOKEN")).toBe("ghp_xxx");
   });
 
-  it("未設定なら 500 INTERNAL の ApiError を投げる", () => {
-    expect(() => requireEnv("GITHUB_TOKEN")).toThrow(ApiError);
+  it("未設定なら 500 INTERNAL の ApiException を投げる", () => {
+    expect(() => requireEnv("GITHUB_TOKEN")).toThrow(ApiException);
     try {
       requireEnv("GITHUB_TOKEN");
       throw new Error("unreachable");
     } catch (e) {
-      expect(e).toBeInstanceOf(ApiError);
-      const err = e as ApiError;
+      expect(e).toBeInstanceOf(ApiException);
+      const err = e as ApiException;
       expect(err.status).toBe(500);
       expect(err.code).toBe("INTERNAL");
+      expect(err.retryable).toBe(false);
     }
   });
 
   it("空文字も未設定として扱う", () => {
     process.env.GITHUB_TOKEN = "";
-    expect(() => requireEnv("GITHUB_TOKEN")).toThrow(ApiError);
+    expect(() => requireEnv("GITHUB_TOKEN")).toThrow(ApiException);
   });
 });

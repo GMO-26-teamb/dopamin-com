@@ -32,6 +32,7 @@ import type {
   OperationLog,
   SearchResult,
   SubdomainPlan,
+  SyncResult,
   Transfer,
 } from "./types";
 
@@ -182,14 +183,21 @@ export function useDomains(): Query<DomainSummary[]> {
   });
 }
 
-export function useSyncDomains(): Mutation<DomainSummary[]> {
+/**
+ * FR-02 最新化。部分失敗（200 + `failures`）は例外にしない。
+ *
+ * 失敗した行も API が `stale: true` を付けて返すので、`failures` の有無に関わらず
+ * 一覧を必ず書き込む。そうしないと「同期に失敗したカードだけ Stale」（S-13）も、
+ * 同じ同期で成功した行の反映も画面に出ない。Banner は呼び出し側が `failures` から出す。
+ */
+export function useSyncDomains(): Mutation<SyncResult> {
   const services = useServices();
   const queryClient = useQueryClient();
   const keys = useQueryKeys();
   return useMutation({
     mutationFn: () => services.domains.sync(),
-    onSuccess: (domains) => {
-      queryClient.setQueryData(keys.domains(), domains);
+    onSuccess: (result) => {
+      queryClient.setQueryData(keys.domains(), result.domains);
     },
   });
 }

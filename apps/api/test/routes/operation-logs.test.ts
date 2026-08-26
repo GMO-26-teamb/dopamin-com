@@ -1,0 +1,238 @@
+import { type Db, schema } from "@dopamin/db";
+import { asc } from "drizzle-orm";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  type MockInstance,
+  vi,
+} from "vitest";
+import app from "../../src/index";
+import { setDbForTesting } from "../../src/lib/db";
+import { resetApiEnvCacheForTesting } from "../../src/lib/env";
+import { setRegistrySetForTesting } from "../../src/lib/registries";
+import { createTestDb, resetTestDb } from "../helpers/db";
+import { createTestSession } from "../helpers/session";
+
+/**
+ * 操作ログ（FR-15）の統合テスト。setRegistrySetForTesting を使わず、
+ * 環境変数（REGISTRY_MODE=mock）から本番と同じ配線（onCall / makeClTrid 込み）で
+ * RegistrySet を構築させ、HTTP リクエスト → mock アダプタ → observer →
+ * operation_logs INSERT（pglite）までの全経路を検証する。
+ */
+
+let db: Db;
+let closeDb: () => Promise<void>;
+let consoleLog: MockInstance<typeof console.log>;
+let consoleError: MockInstance<typeof console.error>;
+
+beforeAll(async () => {
+  ({ db, close: closeDb } = await createTestDb());
+  setDbForTesting(db);
+}, 30_000);
+
+afterAll(async () => {
+  setDbForTesting(null);
+  await closeDb();
+});
+
+beforeEach(async () => {
+  await resetTestDb(db);
+  // INSERT 失敗のテストで差し替えた Db を毎回 pglite に戻す
+  setDbForTesting(db);
+  process.env.REGISTRY_MODE = "mock";
+  delete process.env.MOCK_REGISTRY_FAIL_MODE;
+  // 環境変数から onCall 配線込みで再構築させる
+  resetApiEnvCacheForTesting();
+  setRegistrySetForTesting(null);
+  // 構造化ログでテスト出力が汚れないよう抑止しつつ、内容の検証にも使う
+  consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
+  consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+});
+
+afterEach(() => {
+  setRegistrySetForTesting(null);
+  resetApiEnvCacheForTesting();
+  vi.restoreAllMocks();
+});
+
+async function selectLogs() {
+  return db
+    .select()
+    .from(schema.operationLogs)
+    .orderBy(asc(schema.operationLogs.createdAt));
+}
+
+/** console の spy から単一行 JSON を取り出し、type が一致する最初の行を返す。 */
+function findConsoleLine(
+  spy: MockInstance<typeof console.log>,
+  type: string,
+): Record<string, unknown> | undefined {
+  return (
+    spy.mock.calls
+      .map((call) => {
+        try {
+          return JSON.parse(String(call[0])) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })
+      .find((parsed) => parsed?.type === type) ?? undefined
+  );
+}
+
+describe("operation_logs への永続化（FR-15）", () => {
+  it("認証済みの check が userId・clTRID（request_id）付きで 1 行記録される", async () => {
+    const { user, cookie } = await createTestSession(db);
+    const res = await app.request("/api/v1/domains/check", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie,
+        "x-request-id": "reqtest123",
+      },
+      body: JSON.stringify({ names: ["example.com"] }),
+    });
+    expect(res.status).toBe(200);
+
+    const rows = await selectLogs();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      userId: user.id,
+      // request_id = X-Cl-TRID（Hono requestId + 連番）で API リクエストと相関できる（§9.1）
+      requestId: "reqtest123-1",
+      svTrid: null,
+      registry: "mock",
+      command: "check",
+      status: "success",
+      errorCode: null,
+    });
+    expect(rows[0]?.latencyMs).toBeGreaterThanOrEqual(0);
+
+    // NFR-06: Vercel で見る単一行 JSON が console に出る
+    const line = findConsoleLine(consoleLog, "operation_log");
+    expect(line).toMatchObject({
+      level: "info",
+      type: "operation_log",
+      requestId: "reqtest123",
+      clTrid: "reqtest123-1",
+      command: "check",
+      status: "success",
+    });
+    expect(line).not.toHaveProperty("request");
+  });
+
+  it("未認証の /health（hello）は userId null で記録される", async () => {
+    const res = await app.request("/api/v1/health");
+    expect(res.status).toBe(200);
+    const rows = await selectLogs();
+    const hello = rows.find((row) => row.command === "hello");
+    expect(hello).toMatchObject({
+      userId: null,
+      registry: "mock",
+      status: "success",
+    });
+  });
+
+  it("INSERT が失敗しても API 応答は壊れず、根本原因だけを console.error に出す（ペイロードは載せない）", async () => {
+    // drizzle の DrizzleQueryError 相当: message に全パラメータ、cause に DB ドライバのエラー
+    const failingDb = {
+      insert: () => ({
+        values: () =>
+          Promise.reject(
+            new Error(
+              'Failed query: insert into "operation_logs" ... params: raw-payload-should-not-leak',
+              { cause: new Error("connect ECONNREFUSED 127.0.0.1:1") },
+            ),
+          ),
+      }),
+    } as unknown as Db;
+    setDbForTesting(failingDb);
+
+    const res = await app.request("/api/v1/health");
+    expect(res.status).toBe(200);
+
+    // console.log の operation_log 行は INSERT の成否に関係なく先に出る
+    expect(findConsoleLine(consoleLog, "operation_log")).toMatchObject({
+      command: "hello",
+      status: "success",
+    });
+    const failed = findConsoleLine(consoleError, "operation_log_write_failed");
+    expect(failed).toMatchObject({
+      level: "error",
+      registry: "mock",
+      command: "hello",
+      reason: "error",
+      errorName: "Error",
+      message: "connect ECONNREFUSED 127.0.0.1:1",
+    });
+    expect(JSON.stringify(failed)).not.toContain("raw-payload-should-not-leak");
+  });
+
+  it("タイムアウトはエラー種別付きで記録される（AC-15-1）", async () => {
+    process.env.MOCK_REGISTRY_FAIL_MODE = "timeout";
+    resetApiEnvCacheForTesting();
+    setRegistrySetForTesting(null);
+
+    const { cookie } = await createTestSession(db);
+    await app.request("/api/v1/domains/check", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ names: ["example.com"] }),
+    });
+
+    const rows = await selectLogs();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      command: "check",
+      status: "timeout",
+      errorCode: "REGISTRY_TIMEOUT",
+    });
+  });
+
+  it("AuthCode は *** にマスクして保存される（AC-15-2）", async () => {
+    const { cookie } = await createTestSession(db);
+    // mock に存在しないドメインへの移管申請 → NOT_FOUND でも記録は残り、authCode はマスクされる
+    const res = await app.request("/api/v1/transfers", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ name: "example.com", authCode: "raw-auth-code" }),
+    });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+
+    const rows = await selectLogs();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      command: "transfer_request",
+      domainName: "example.com",
+      status: "error",
+    });
+    const requestJson = JSON.stringify(rows[0]?.request);
+    expect(requestJson).toContain('"***"');
+    expect(requestJson).not.toContain("raw-auth-code");
+  });
+
+  it("同一リクエスト内の複数呼び出しは request_id の連番で相関できる", async () => {
+    const { cookie } = await createTestSession(db);
+    // create は mock では 1 レコードだが、check を 2 レジストリ分に分けるのは
+    // mock モードでは単一アダプタのため、renew の前提 info + renew の 2 呼び出しで検証する
+    await app.request("/api/v1/domains", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie,
+        "x-request-id": "reqcreate",
+      },
+      body: JSON.stringify({ name: "multi.com", periodYears: 1 }),
+    });
+    const rows = await selectLogs();
+    // POST /domains は check（重複確認）→ create の順に呼ぶ
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+    const requestIds = rows.map((row) => row.requestId);
+    expect(requestIds).toEqual(rows.map((_, i) => `reqcreate-${i + 1}`));
+  });
+});

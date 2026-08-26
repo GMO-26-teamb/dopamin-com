@@ -1,8 +1,13 @@
 import { z } from "zod";
+import { registryIdSchema } from "./registry";
 
 /**
- * 統一エラーコード（docs/requirements.md §10.3 + FR-01 spec §4 の追加分）。
+ * 統一エラーコード（docs/requirements.md §10.3 v0.1.8: 基本 13 種 + FR-01 の 4 種）。
  * API のエラーレスポンスは必ずこの形で返す。
+ *
+ * ここが唯一の定義（issue #30）。`api.ts` の `API_ERROR_CODES` / `apiErrorCodeSchema` /
+ * `apiErrorBodySchema` / `ApiErrorCode` / `ApiErrorBody` は後方互換の別名で、
+ * 新しいコードは本ファイルの名前を使う。
  */
 export const ERROR_CODES = [
   "VALIDATION_ERROR",
@@ -49,15 +54,20 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   LAST_PASSKEY: 409,
 };
 
+/**
+ * 統一エラー形式（docs/requirements.md §10.3）。
+ * `retryable` は必須（API は常に返す）。`details` はコードごとに形が違う
+ * （`VALIDATION_ERROR` は issue の配列、`OPERATION_NOT_ALLOWED` は `{ statuses }` など）ので unknown。
+ */
 export const apiErrorSchema = z.object({
   error: z.object({
     code: errorCodeSchema,
     message: z.string(),
-    retryable: z.boolean().optional(),
-    registry: z.string().optional(),
+    retryable: z.boolean(),
+    registry: registryIdSchema.optional(),
     registryCode: z.string().optional(),
     requestId: z.string().optional(),
-    details: z.record(z.string(), z.unknown()).optional(),
+    details: z.unknown().optional(),
   }),
 });
 export type ApiError = z.infer<typeof apiErrorSchema>;

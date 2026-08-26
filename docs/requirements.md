@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.1.9（2026-08-26） |
+| 版 | v0.1.10（2026-08-26） |
 | プロダクト | ドパ民.com / dopamin.com — Z世代向けドメイン管理プラットフォーム（疑似レジストラ） |
 | チーム | チームドパ民（Team B）: 佐々木 琢登・星 はるか・上原 拓也 |
 | 位置づけ | GMO Internet Internship in kitaQ Webアプリケーションコース（2026/08/24–28）成果物 |
@@ -702,8 +702,8 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。すべてのテーブル
 | 列 | 型 | 備考 |
 |---|---|---|
 | id | uuid PK | |
-| user_id | uuid FK users | NULL 可。Poll 由来などシステム起点の呼び出しは NULL |
-| request_id | text | `X-Cl-TRID` に送る値（clTRID）と一致させる |
+| user_id | uuid FK users | NULL 可。Poll 由来などシステム起点の呼び出しは NULL。FK は `ON DELETE SET NULL`（退会後も通信ログは恒久保存し、`user_id` だけ NULL 化する。他テーブルの `ON DELETE CASCADE` とは異なる） |
+| request_id | text | `X-Cl-TRID` に送る値（clTRID）と一致させる。値は `<x-request-id>-<連番>`（§10.2 の `requestId` を prefix にし、同一 API リクエスト内の複数呼び出しを相関する。連番はリクエスト内で単調増加） |
 | sv_trid | text | レジストリ採番の svTRID（障害調査・他チームとの突合キー） |
 | registry | text NOT NULL | |
 | command | text NOT NULL | 主コマンド 15 種: `check` / `info` / `create` / `renew` / `update` / `delete` / `restore` / `transfer_request` / `transfer_query` / `transfer_approve` / `transfer_reject` / `transfer_cancel` / `auth_info` / `poll` / `ack`。補助コマンド 4 種: `hello`（疎通確認。親コマンドを持たない）/ `host_info` / `host_create`（NS の自動作成）/ `contact_create`。いずれも `packages/shared` の `OPERATION_COMMANDS` が正。レジストリ側の HTTP パス（`rotate-auth-info` 等）とは別語彙で、対応付けは `packages/registry` の中だけで行う |
@@ -885,7 +885,7 @@ export interface RegistryAdapter {
 - 入出力型（`CheckResult` / `DomainInfo` / ...）は `packages/shared` の正規化型。レジストリ固有のフィールド名・日付形式・エラーコードはアダプタ内で変換する。
 - 各アダプタは `fetch` ベースの薄い HTTP クライアント + zod によるレスポンス検証（`.passthrough()` で未知フィールドは許容、必須フィールド欠落は `REGISTRY_SPEC_MISMATCH`）。
 - タイムアウト: 参照系 5 秒、更新系 15 秒（`AbortSignal.timeout`）。
-- すべての呼び出しは `operation_logs` に記録する（呼び出し側の `RegistryClient` ラッパーが担当。アダプタはログを意識しない）。
+- すべての呼び出し（`mock` 含む）は `operation_logs` に記録する。発行点は `packages/registry` の HTTP クライアント層で、**1 HTTP 呼び出し = 1 レコード**（clTRID / svTRID を含む `RegistryCallRecord` を `onCall` フックへ通知する。`create` 内部の `host_info` / `host_create` / `contact_create` も独立したレコードになる）。マスク・保存・構造化ログ出力は `apps/api` 側の observer（`RegistryClient` ラッパー相当）が担当し、アダプタは保存先を知らない。`mock` は公開メソッド 1 回 = 1 レコードで、補助コマンドのレコードと svTRID を持たない。
 - `mock` アダプタ: インメモリ + DB（`domains.raw_info`）で状態遷移を再現。`MOCK_REGISTRY_FAIL_MODE=timeout|5xx|reject|spec_mismatch` でエラーシミュレーションができる。
   - 移管の再現: 相手レジストラ（`MOCK_FOREIGN_REGISTRAR_ID`）が保有するドメインを seed でき、Poll キューと自動承認タイマー（`MOCK_TRANSFER_AUTO_APPROVE_MS`、既定 20 分）を持つ。テスト・デモ用に `simulateInboundTransferRequest(name)` / `simulateCounterpartApprove(name)` / `simulateCounterpartReject(name)` を公開し、integration テスト（§19）と FR-16 の「移管中」サンプル投入から呼ぶ。
 
@@ -1359,4 +1359,5 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | v0.1.7 | 2026-08-26 | §9.1 operation_logs.command: レジストリアダプタが実際に発行する補助コマンド 4 種（`hello` / `host_info` / `host_create` / `contact_create`）を enum に追加。`hello` は親コマンドを持たず、NS・コンタクトの自動作成は主コマンドの内部で個別に失敗し得るため、親名に寄せず独立した値で記録する（AC-15-1）。正は `packages/shared/src/operation-log.ts` の `OPERATION_COMMANDS` で、`packages/registry` の `command` もこの語彙に統一（`host:info` → `host_info`、`rotate-auth-info` → `auth_info` 等） |
 | v0.1.6 | 2026-08-26 | §8 / §11.2: 対応 TLD の定数を `packages/shared/src/tlds.ts` に一本化し、`packages/registry` のルーティングと `apps/web` の TLD 選択肢は shared を参照する形に統一（`@dopamin/registry` は `node:crypto` 依存でブラウザから import できない） |
 | v0.1.8 | 2026-08-26 | FR-01 周辺の仕上げ: `GET /auth/me` を `{ user, features.demoReset, ai }` に拡張（`docs/specs/ui-screens.md` §7 要確認 #2 / #3 を確定。FR-16 / FR-17 に追随）、`PATCH /auth/passkeys/:id`（名前変更）と AAGUID からの名前推定を FR-01 に追加、§10.3 に FR-01 の 4 エラーコード（`CHALLENGE_NOT_FOUND` / `VERIFICATION_FAILED` / `CREDENTIAL_NOT_FOUND` / `LAST_PASSKEY`）を追記。実装計画は `docs/specs/passkey-auth.md` §12 |
-| v0.1.9 | 2026-08-26 | §16.2: `deploy.yml` に `migrate` ジョブ（`pnpm --filter @dopamin/db migrate`）を追加し、**migrate → api → web** の 3 ジョブ構成に変更。マイグレーション適用の【要確認】を解消し、drizzle の適用判定（`drizzle.__drizzle_migrations` の最新 `created_at` より新しい journal エントリのみ）と手動適用を避ける運用を明記。§16.3 / §17: `DIRECT_DATABASE_URL` を Supavisor session mode（5432）に変更（直結ホストは IPv6 のみで GitHub Actions から到達できないため）。INFRA-01 |
+| v0.1.9 | 2026-08-26 | FR-15（PR #139）の設計判断を追記: §9.1 `operation_logs.user_id` の FK を `ON DELETE SET NULL`（退会後も通信ログを恒久保存）、`request_id` = `<x-request-id>-<連番>` の形式、§11.1 のログ発行点を `packages/registry` の HTTP クライアント層（1 HTTP 呼び出し = 1 レコード、`onCall` フック）に変更しマスク・保存は `apps/api` の observer が担当、`mock` は公開メソッド 1 回 = 1 レコードで補助コマンド行・svTRID を持たない例外を明記 |
+| v0.1.10 | 2026-08-26 | §16.2: `deploy.yml` に `migrate` ジョブ（`pnpm --filter @dopamin/db migrate`）を追加し、**migrate → api → web** の 3 ジョブ構成に変更。マイグレーション適用の【要確認】を解消し、drizzle の適用判定（`drizzle.__drizzle_migrations` の最新 `created_at` より新しい journal エントリのみ）と手動適用を避ける運用を明記。§16.3 / §17: `DIRECT_DATABASE_URL` を Supavisor session mode（5432）に変更（直結ホストは IPv6 のみで GitHub Actions から到達できないため）。INFRA-01 |

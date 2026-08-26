@@ -1,6 +1,5 @@
 "use client";
 
-import type { RegistryId } from "@dopamin/shared";
 import { Plus, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -14,11 +13,11 @@ import { latestSyncedAt, shouldAutoSync } from "@/features/domains/auto-sync";
 import { DomainGridSkeleton } from "@/features/domains/domain-card-skeleton";
 import { DomainGrid, visibleDomains } from "@/features/domains/domain-grid";
 import { formatRelativeTime } from "@/features/domains/format";
-import { REGISTRY_LABEL } from "@/features/domains/registry-label";
+import { syncNotice } from "@/features/domains/sync-notice";
 import type { ApiClientError } from "@/lib/api/errors";
 import { useDomains, useSyncDomains } from "@/lib/api/hooks";
 import { useQueryScope } from "@/lib/api/provider";
-import type { DomainSummary } from "@/lib/api/types";
+import type { SyncResult } from "@/lib/api/types";
 
 /**
  * S-10 保有ドメイン一覧 / S-11 0 件 / S-12 読み込み / S-13 同期エラー（FR-02・AC-18-1）。
@@ -27,51 +26,16 @@ import type { DomainSummary } from "@/lib/api/types";
  * （ui-screens S-12）。同期に失敗したら Banner Warn を出し、キャッシュ表示を続ける。
  */
 
-/** S-13: 落ちているレジストリ名から見出しを作る。特定できなければ総称にする。 */
-function syncErrorTitle(
-  error: ApiClientError,
-  domains: readonly DomainSummary[],
-): string {
-  // エラーがレジストリを名指ししていればそれが正。無いときだけ Stale なカードから推定する
-  const registries = new Set<RegistryId>();
-  if (error.registry === undefined) {
-    for (const domain of domains) {
-      if (domain.stale) {
-        registries.add(domain.registry);
-      }
-    }
-  } else {
-    registries.add(error.registry);
-  }
-
-  const names = [...registries];
-  const only = names[0];
-  const subject =
-    names.length >= 2
-      ? "両レジストリ"
-      : only === undefined
-        ? "レジストリ"
-        : REGISTRY_LABEL[only];
-  // 英字のレジストリ名のときだけ和文との間に半角スペースを入れる
-  const separator = /[A-Za-z0-9]$/.test(subject) ? " " : "";
-  return `${subject}${separator}が応答しません — 一覧はキャッシュを表示しています`;
-}
-
-function syncErrorBody(lastSyncedAt: string | null, now: Date): string {
-  const prefix =
-    lastSyncedAt === null
-      ? ""
-      : `最終同期 ${formatRelativeTime(lastSyncedAt, now)}。`;
-  return `${prefix}参照系は自動で 2 回再試行しました。しばらくして「最新化」を押してください。`;
-}
+/** 1 回の同期試行の結果。ハード失敗（error）か、部分失敗を含む応答（data）のどちらか。 */
+type SyncOutcome = ApiClientError | SyncResult;
 
 export default function DashboardPage() {
   const domains = useDomains();
   const sync = useSyncDomains();
   const scope = useQueryScope();
-  const [dismissedError, setDismissedError] = useState<ApiClientError | null>(
-    null,
-  );
+  // 閉じた Banner を覚えるキー。ハード失敗（error）と部分失敗（data）を
+  // 同じ 1 本で扱えるよう、その同期試行の結果オブジェクトの同一性で比べる
+  const [dismissed, setDismissed] = useState<SyncOutcome | null>(null);
 
   // シナリオ（?mock=）が変わったら 1 回だけ背後で同期し直す。ただしすでに十分新しければスキップする
   const syncedScopeRef = useRef<string | null>(null);
@@ -167,20 +131,29 @@ export default function DashboardPage() {
     content = <DomainGrid domains={list} now={now} />;
   }
 
-  const syncError = sync.error;
-  const showSyncBanner =
-    syncError !== null && syncError !== dismissedError && !domains.isError;
+  // 部分失敗（200 + failures）とリクエストごとの失敗（error）の両方をここで拾う。
+  // 一覧そのものが取れていないときは Error Card が出ているので Banner は重ねない
+  const syncOutcome: SyncOutcome | null = sync.error ?? sync.data ?? null;
+  const notice = syncNotice({
+    error: sync.error,
+    failures: sync.data?.failures ?? [],
+    domains: list,
+  });
+  const banner =
+    notice !== null && syncOutcome !== dismissed && !domains.isError
+      ? notice
+      : null;
 
   return (
     <>
-      {showSyncBanner ? (
+      {banner === null ? null : (
         <Banner
-          body={syncErrorBody(lastSyncedAt, now)}
-          onClose={() => setDismissedError(syncError)}
-          title={syncErrorTitle(syncError, list)}
+          body={banner.body}
+          onClose={() => setDismissed(syncOutcome)}
+          title={banner.title}
           tone="warn"
         />
-      ) : null}
+      )}
       <PageHeader
         action={refreshButton}
         {...(meta === undefined ? {} : { meta })}

@@ -1,18 +1,21 @@
 import { randomUUID } from "node:crypto";
-import type {
-  CheckResult,
-  ClientStatus,
-  CreateInput,
-  DeleteResult,
-  DomainInfo,
-  HelloResult,
-  RegistryId,
-  RenewInput,
-  TransferResult,
-  UpdateInput,
+import {
+  type CheckResult,
+  type ClientStatus,
+  type CreateInput,
+  type DeleteResult,
+  type DomainInfo,
+  type HelloResult,
+  type OperationCommand,
+  operationLogStatusFromErrorCode,
+  type RegistryId,
+  type RenewInput,
+  type TransferResult,
+  type UpdateInput,
 } from "@dopamin/shared";
 import type { RegistryAdapter } from "./adapter";
 import { RegistryError } from "./errors";
+import type { ClTridFactory, RegistryCallObserver } from "./observer";
 import { REGISTRY_TLDS, SUPPORTED_TLDS } from "./routing";
 
 /** エラーシミュレーション用の失敗モード（docs/requirements.md §11.6）。 */
@@ -75,6 +78,8 @@ export class MockRegistryAdapter implements RegistryAdapter {
   private readonly domains = new Map<string, MockDomainState>();
   private readonly now: () => Date;
   private failMode: MockFailMode;
+  private readonly onCall?: RegistryCallObserver;
+  private readonly makeClTrid?: ClTridFactory;
 
   constructor(options?: {
     /**
@@ -85,15 +90,102 @@ export class MockRegistryAdapter implements RegistryAdapter {
     id?: RegistryId;
     failMode?: MockFailMode;
     now?: () => Date;
+    /** 操作ログ（FR-15）用の観測フック。公開メソッド 1 回 = 1 レコード。 */
+    onCall?: RegistryCallObserver;
+    /** clTRID の採番上書き。null 返却時は既定の採番。 */
+    makeClTrid?: ClTridFactory;
   }) {
     this.id = options?.id ?? "mock";
     this.failMode = options?.failMode ?? "none";
     this.now = options?.now ?? (() => new Date());
+    this.onCall = options?.onCall;
+    this.makeClTrid = options?.makeClTrid;
   }
 
   /** テスト・デモリセット用に失敗モードを切り替える。 */
   setFailMode(mode: MockFailMode): void {
     this.failMode = mode;
+  }
+
+  /**
+   * 公開メソッド 1 回 = 1 レコードで観測フックを呼ぶ（FR-15）。
+   * 実レジストリと違い HTTP 往復が無いため、補助コマンド行は発行せず svTrid は null。
+   * observer の失敗はレジストリ操作の成否に影響させない。
+   */
+  private async recorded<T>(
+    command: OperationCommand,
+    domainName: string | null,
+    request: unknown,
+    fn: () => Promise<T>,
+    toResponse: (result: T) => unknown = (result) => result,
+  ): Promise<T> {
+    if (!this.onCall) {
+      return fn();
+    }
+    const clTrid = this.makeClTrid?.() ?? `mock-${randomUUID().slice(0, 12)}`;
+    const startedAt = Date.now();
+    try {
+      const result = await fn();
+      await this.emit({
+        command,
+        domainName,
+        clTrid,
+        errorCode: null,
+        registryCode: null,
+        request,
+        response: toResponse(result),
+        latencyMs: Date.now() - startedAt,
+      });
+      return result;
+    } catch (err) {
+      const error = err instanceof RegistryError ? err : null;
+      await this.emit({
+        command,
+        domainName,
+        clTrid,
+        errorCode: error?.code ?? null,
+        registryCode:
+          error?.registryCode !== undefined ? String(error.registryCode) : null,
+        request,
+        response: error
+          ? { message: error.message, reason: error.reason ?? null }
+          : null,
+        latencyMs: Date.now() - startedAt,
+      });
+      throw err;
+    }
+  }
+
+  private async emit(input: {
+    command: OperationCommand;
+    domainName: string | null;
+    clTrid: string;
+    errorCode: RegistryError["code"] | null;
+    registryCode: string | null;
+    request: unknown;
+    response: unknown;
+    latencyMs: number;
+  }): Promise<void> {
+    if (!this.onCall) {
+      return;
+    }
+    try {
+      await this.onCall({
+        registry: this.id,
+        command: input.command,
+        domainName: input.domainName,
+        clTrid: input.clTrid,
+        svTrid: null,
+        status: operationLogStatusFromErrorCode(input.errorCode),
+        errorCode: input.errorCode,
+        registryCode: input.registryCode,
+        request: input.request,
+        response: input.response,
+        latencyMs: input.latencyMs,
+      });
+    } catch {
+      // 観測フックの失敗は握りつぶす
+    }
   }
 
   private gate(command: string): void {
@@ -159,6 +251,10 @@ export class MockRegistryAdapter implements RegistryAdapter {
   }
 
   async hello(): Promise<HelloResult> {
+    return this.recorded("hello", null, null, () => this.doHello());
+  }
+
+  private async doHello(): Promise<HelloResult> {
     this.gate("hello");
     // 特定レジストリを名乗る場合は対応 TLD もそのレジストリの部分集合にする
     const id = this.id;
@@ -167,6 +263,10 @@ export class MockRegistryAdapter implements RegistryAdapter {
   }
 
   async check(names: string[]): Promise<CheckResult[]> {
+    return this.recorded("check", null, { names }, () => this.doCheck(names));
+  }
+
+  private async doCheck(names: string[]): Promise<CheckResult[]> {
     this.gate("check");
     return names.map((name) => {
       const taken = this.domains.has(name.toLowerCase());
@@ -177,11 +277,21 @@ export class MockRegistryAdapter implements RegistryAdapter {
   }
 
   async info(name: string): Promise<DomainInfo> {
+    return this.recorded("info", name, { name }, () => this.doInfo(name));
+  }
+
+  private async doInfo(name: string): Promise<DomainInfo> {
     this.gate("info");
     return this.toInfo(this.getState(name, "info"));
   }
 
   async create(input: CreateInput): Promise<DomainInfo> {
+    return this.recorded("create", input.name, { input }, () =>
+      this.doCreate(input),
+    );
+  }
+
+  private async doCreate(input: CreateInput): Promise<DomainInfo> {
     this.gate("create");
     const name = input.name.toLowerCase();
     if (this.domains.has(name)) {
@@ -214,6 +324,12 @@ export class MockRegistryAdapter implements RegistryAdapter {
   }
 
   async renew(name: string, input: RenewInput): Promise<DomainInfo> {
+    return this.recorded("renew", name, { name, input }, () =>
+      this.doRenew(name, input),
+    );
+  }
+
+  private async doRenew(name: string, input: RenewInput): Promise<DomainInfo> {
     this.gate("renew");
     const state = this.getState(name, "renew");
     const statuses = deriveStatuses(state);
@@ -243,6 +359,15 @@ export class MockRegistryAdapter implements RegistryAdapter {
   }
 
   async update(name: string, input: UpdateInput): Promise<DomainInfo> {
+    return this.recorded("update", name, { name, input }, () =>
+      this.doUpdate(name, input),
+    );
+  }
+
+  private async doUpdate(
+    name: string,
+    input: UpdateInput,
+  ): Promise<DomainInfo> {
     this.gate("update");
     const state = this.getState(name, "update");
     const removingOnly =
@@ -284,6 +409,10 @@ export class MockRegistryAdapter implements RegistryAdapter {
   }
 
   async delete(name: string): Promise<DeleteResult> {
+    return this.recorded("delete", name, { name }, () => this.doDelete(name));
+  }
+
+  private async doDelete(name: string): Promise<DeleteResult> {
     this.gate("delete");
     const state = this.getState(name, "delete");
     if (
@@ -305,6 +434,10 @@ export class MockRegistryAdapter implements RegistryAdapter {
   }
 
   async restore(name: string): Promise<DomainInfo> {
+    return this.recorded("restore", name, { name }, () => this.doRestore(name));
+  }
+
+  private async doRestore(name: string): Promise<DomainInfo> {
     this.gate("restore");
     const state = this.getState(name, "restore");
     if (!state.rgpStatuses.includes("redemptionPeriod")) {
@@ -322,6 +455,19 @@ export class MockRegistryAdapter implements RegistryAdapter {
   }
 
   async transferRequest(
+    name: string,
+    authCode: string,
+  ): Promise<TransferResult> {
+    // AuthCode はマスク対象キー（authInfo）で記録する（AC-15-2）
+    return this.recorded(
+      "transfer_request",
+      name,
+      { name, authInfo: authCode },
+      () => this.doTransferRequest(name, authCode),
+    );
+  }
+
+  private async doTransferRequest(
     name: string,
     authCode: string,
   ): Promise<TransferResult> {
@@ -357,6 +503,12 @@ export class MockRegistryAdapter implements RegistryAdapter {
   }
 
   async transferQuery(name: string): Promise<TransferResult> {
+    return this.recorded("transfer_query", name, { name }, () =>
+      this.doTransferQuery(name),
+    );
+  }
+
+  private async doTransferQuery(name: string): Promise<TransferResult> {
     this.gate("transfer:query");
     const state = this.getState(name, "transfer:query");
     return {
@@ -368,6 +520,17 @@ export class MockRegistryAdapter implements RegistryAdapter {
   }
 
   async authCode(name: string): Promise<string> {
+    // 応答の AuthCode 値がマスクされるよう authInfo キーで包んで記録する（AC-15-2）
+    return this.recorded(
+      "auth_info",
+      name,
+      { name },
+      () => this.doAuthCode(name),
+      (authInfo) => ({ authInfo }),
+    );
+  }
+
+  private async doAuthCode(name: string): Promise<string> {
     this.gate("rotate-auth-info");
     const state = this.getState(name, "rotate-auth-info");
     state.authInfo = `mock-${randomUUID()}`;

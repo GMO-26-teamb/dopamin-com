@@ -64,9 +64,29 @@ describe("createMockServices - domains", () => {
     expect((error as ApiClientError).code).toBe("REGISTRY_UNAVAILABLE");
   });
 
-  it("stale シナリオはキャッシュ表示（stale: true）で返す", async () => {
+  it("一覧は stale を立てない（DB キャッシュを読むだけで同期を試みない）", async () => {
     const list = await services("stale").domains.list();
-    expect(list.every((d) => d.stale)).toBe(true);
+    expect(list.every((d) => !d.stale)).toBe(true);
+  });
+
+  it("stale シナリオの sync は kitaqsign だけ落ちた部分失敗を返す（S-13 / AC-18-1）", async () => {
+    const { domains, failures } = await services("stale").domains.sync();
+
+    const down = domains.filter((d) => d.stale).map((d) => d.name);
+    const alive = domains.filter((d) => !d.stale);
+
+    // 落ちた側だけ stale。もう一方は最新化できている = 部分縮退が画面に出せる
+    expect(down).toEqual(["takutaku.com", "tkt-lab.net"]);
+    expect(alive.every((d) => d.registry === "kitaqnic")).toBe(true);
+    expect(alive.length).toBeGreaterThan(0);
+
+    expect(failures.map((f) => f.name)).toEqual(down);
+    expect(failures.every((f) => f.registry === "kitaqsign")).toBe(true);
+  });
+
+  it("失敗が無いシナリオの sync は failures が空", async () => {
+    const { failures } = await services("default").domains.sync();
+    expect(failures).toEqual([]);
   });
 });
 

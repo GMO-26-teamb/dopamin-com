@@ -1,8 +1,7 @@
 import { RegistryError } from "@dopamin/registry";
-import type { ApiErrorBody, ApiErrorCode, RegistryId } from "@dopamin/shared";
+import type { ApiErrorBody, ErrorCode, RegistryId } from "@dopamin/shared";
 import type { ErrorHandler, NotFoundHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { ApiError } from "../lib/api-error";
 import { ApiException } from "../lib/errors";
 import {
   REGISTRY_ERROR_HTTP,
@@ -11,7 +10,7 @@ import {
 import type { AppEnv } from "../types";
 
 function errorBody(options: {
-  code: ApiErrorCode;
+  code: ErrorCode;
   message: string;
   retryable: boolean;
   requestId: string;
@@ -34,31 +33,27 @@ function errorBody(options: {
   };
 }
 
+/** HTTPException（Hono / バリデータ由来）のステータス → 統一コード。無ければ INTERNAL。 */
+const CODE_FOR_STATUS: Record<number, ErrorCode> = {
+  400: "VALIDATION_ERROR",
+  401: "UNAUTHORIZED",
+  403: "FORBIDDEN",
+  404: "NOT_FOUND",
+  409: "CONFLICT",
+  429: "RATE_LIMITED",
+};
+
 /** 例外を統一エラー形式（§10.3）に変換する。想定外エラーは 500 + requestId。 */
 export const errorHandler: ErrorHandler<AppEnv> = (err, c) => {
   const requestId = c.get("requestId") ?? "unknown";
 
+  // 業務エラーは ApiException の 1 経路（status は ERROR_STATUS から導出済み）
   if (err instanceof ApiException) {
-    return c.json(
-      {
-        error: {
-          code: err.code,
-          message: err.message,
-          retryable: false,
-          requestId,
-          ...(err.details ? { details: err.details } : {}),
-        },
-      },
-      err.status,
-    );
-  }
-
-  if (err instanceof ApiError) {
     return c.json(
       errorBody({
         code: err.code,
         message: err.message,
-        retryable: false,
+        retryable: err.retryable,
         requestId,
         details: err.details,
       }),
@@ -95,17 +90,9 @@ export const errorHandler: ErrorHandler<AppEnv> = (err, c) => {
 
   if (err instanceof HTTPException) {
     // Hono / バリデータ由来の HTTPException（不正 JSON の 400 等）も統一コードに寄せる
-    const codeForStatus: Record<number, ApiErrorCode> = {
-      400: "VALIDATION_ERROR",
-      401: "UNAUTHORIZED",
-      403: "FORBIDDEN",
-      404: "NOT_FOUND",
-      409: "CONFLICT",
-      429: "RATE_LIMITED",
-    };
     return c.json(
       errorBody({
-        code: codeForStatus[err.status] ?? "INTERNAL",
+        code: CODE_FOR_STATUS[err.status] ?? "INTERNAL",
         message: err.message || "リクエストを処理できませんでした。",
         retryable: false,
         requestId,

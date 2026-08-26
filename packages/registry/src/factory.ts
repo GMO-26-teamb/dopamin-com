@@ -4,6 +4,7 @@ import { RegistryError } from "./errors";
 import type { KitaqAdapterConfig } from "./http";
 import { createKitaqAdapter } from "./kitaq";
 import { type MockFailMode, MockRegistryAdapter } from "./mock";
+import type { ClTridFactory, RegistryCallObserver } from "./observer";
 import { registryIdForTld, SUPPORTED_TLDS } from "./routing";
 
 export type RegistryMode = "real" | "mock";
@@ -15,6 +16,13 @@ export interface RegistrySetConfig {
   kitaqnic?: KitaqAdapterConfig | null;
   /** mode=mock のときのエラーシミュレーション。 */
   mockFailMode?: MockFailMode;
+  /**
+   * 操作ログ（FR-15）用の観測フック。real / mock どちらのアダプタにも配線される。
+   * `adapters` で構築済みアダプタを渡した場合は適用されない（各アダプタ側で設定する）。
+   */
+  onCall?: RegistryCallObserver;
+  /** clTRID の採番上書き（API リクエストとの相関用）。 */
+  makeClTrid?: ClTridFactory;
   /**
    * テスト用: 構築済みアダプタを id で登録し、mode による構築を行わない。
    * TLD ルーティングを効かせるには mode: "real" と、kitaqsign / kitaqnic を
@@ -42,15 +50,33 @@ export class RegistrySet {
     if (config.mode === "mock") {
       this.adapters.set(
         "mock",
-        new MockRegistryAdapter({ failMode: config.mockFailMode }),
+        new MockRegistryAdapter({
+          failMode: config.mockFailMode,
+          onCall: config.onCall,
+          makeClTrid: config.makeClTrid,
+        }),
       );
       return;
     }
     if (config.kitaqsign) {
-      this.adapters.set("kitaqsign", createKitaqAdapter(config.kitaqsign));
+      this.adapters.set(
+        "kitaqsign",
+        createKitaqAdapter({
+          ...config.kitaqsign,
+          onCall: config.kitaqsign.onCall ?? config.onCall,
+          makeClTrid: config.kitaqsign.makeClTrid ?? config.makeClTrid,
+        }),
+      );
     }
     if (config.kitaqnic) {
-      this.adapters.set("kitaqnic", createKitaqAdapter(config.kitaqnic));
+      this.adapters.set(
+        "kitaqnic",
+        createKitaqAdapter({
+          ...config.kitaqnic,
+          onCall: config.kitaqnic.onCall ?? config.onCall,
+          makeClTrid: config.kitaqnic.makeClTrid ?? config.makeClTrid,
+        }),
+      );
     }
   }
 

@@ -133,7 +133,10 @@ class KitaqRegistryAdapter implements RegistryAdapter {
    * 実測（2026-08-25）: domain:update はホスト未作成だと 2303（"<host> not found"）で拒否する。
    * 無ければ POST /hosts で作成する（並行作成による 2302 は既存扱いで無視）。
    */
-  private async ensureHosts(hostNames: string[]): Promise<void> {
+  private async ensureHosts(
+    hostNames: string[],
+    domainName: string,
+  ): Promise<void> {
     for (const host of hostNames) {
       try {
         await this.client.command({
@@ -141,6 +144,8 @@ class KitaqRegistryAdapter implements RegistryAdapter {
           path: `/hosts/${encodeURIComponent(host)}`,
           kind: "read",
           command: "host_info",
+          // ホスト操作だが、操作ログでは起点となったドメインに紐づける
+          domainName,
           resDataSchema: unitResDataSchema,
         });
         continue;
@@ -156,6 +161,7 @@ class KitaqRegistryAdapter implements RegistryAdapter {
           body: { name: host },
           kind: "write",
           command: "host_create",
+          domainName,
           resDataSchema: unitResDataSchema,
         });
       } catch (err) {
@@ -188,6 +194,7 @@ class KitaqRegistryAdapter implements RegistryAdapter {
       path: `/domains/${encodeURIComponent(name)}`,
       kind: "read",
       command: "info",
+      domainName: name,
       resDataSchema: domainResDataSchema,
     });
     return toDomainInfo(this.id, resData);
@@ -197,7 +204,7 @@ class KitaqRegistryAdapter implements RegistryAdapter {
     // registrant は既存コンタクト ID の参照が必須のため、先にダミー PII でコンタクトを作る。
     // ネームサーバも update と同様にホストオブジェクトを先に用意しておく。
     if (input.nameservers && input.nameservers.length > 0) {
-      await this.ensureHosts(input.nameservers);
+      await this.ensureHosts(input.nameservers, input.name);
     }
     const contact = input.contact ?? DEFAULT_REGISTRANT_PROFILE;
     const contactId = newContactId();
@@ -219,6 +226,8 @@ class KitaqRegistryAdapter implements RegistryAdapter {
       },
       kind: "write",
       command: "contact_create",
+      // コンタクト操作だが、操作ログでは登録対象のドメインに紐づける
+      domainName: input.name,
       resDataSchema: unitResDataSchema,
     });
 
@@ -236,6 +245,7 @@ class KitaqRegistryAdapter implements RegistryAdapter {
       },
       kind: "write",
       command: "create",
+      domainName: input.name,
       resDataSchema: createResDataSchema,
     });
 
@@ -254,6 +264,7 @@ class KitaqRegistryAdapter implements RegistryAdapter {
       },
       kind: "write",
       command: "renew",
+      domainName: name,
       resDataSchema: renewResDataSchema,
     });
     return this.info(name);
@@ -261,7 +272,7 @@ class KitaqRegistryAdapter implements RegistryAdapter {
 
   async update(name: string, input: UpdateInput): Promise<DomainInfo> {
     if (input.addNameservers && input.addNameservers.length > 0) {
-      await this.ensureHosts(input.addNameservers);
+      await this.ensureHosts(input.addNameservers, name);
     }
     const add: Record<string, unknown> = {};
     const rem: Record<string, unknown> = {};
@@ -289,6 +300,7 @@ class KitaqRegistryAdapter implements RegistryAdapter {
       },
       kind: "write",
       command: "update",
+      domainName: name,
       resDataSchema: unitResDataSchema,
     });
     const parsed = domainResDataSchema.safeParse(resData);
@@ -304,6 +316,7 @@ class KitaqRegistryAdapter implements RegistryAdapter {
       path: `/domains/${encodeURIComponent(name)}`,
       kind: "write",
       command: "delete",
+      domainName: name,
       resDataSchema: unitResDataSchema,
     });
     return { name: name.toLowerCase() };
@@ -315,6 +328,7 @@ class KitaqRegistryAdapter implements RegistryAdapter {
       path: `/domains/${encodeURIComponent(name)}/restore`,
       kind: "write",
       command: "restore",
+      domainName: name,
       resDataSchema: unitResDataSchema,
     });
     return this.info(name);
@@ -330,6 +344,7 @@ class KitaqRegistryAdapter implements RegistryAdapter {
       body: { op: "request", authInfo: authCode },
       kind: "write",
       command: "transfer_request",
+      domainName: name,
       resDataSchema: transferResDataSchema,
     });
     return {
@@ -357,6 +372,7 @@ class KitaqRegistryAdapter implements RegistryAdapter {
       path: `/domains/${encodeURIComponent(name)}/rotate-auth-info`,
       kind: "write",
       command: "auth_info",
+      domainName: name,
       resDataSchema: authInfoResDataSchema,
     });
     const entry = Object.entries(resData).find(
