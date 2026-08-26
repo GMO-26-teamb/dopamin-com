@@ -189,7 +189,20 @@ async function handleSettlement(
     if (domain === null || domain.ownership !== "owned") {
       return "skipped";
     }
-    // 申請の受信通知を取りこぼしたまま承認だけ届いた場合。履歴を残しつつ所有権を倒す
+    // pending 行が無い承認通知は 2 通りに読める:
+    //   (a) 移管 IN の確定が `GET /transfers` の照合（`info` の trDate）で先に済んでいた
+    //   (b) 申請の受信通知を取りこぼしたまま承認だけ届いた移管 OUT
+    // レジストラ ID を返さないレジストリでは向きから区別できないので、直近に承認済みの
+    // IN 行があれば (a) と読む。(b) と誤ると、取り込んだばかりの保有行を
+    // transferred_out に倒してユーザーのドメインを一覧から消してしまうため。
+    const direction = transferDirectionOf(result, adapter.registrarId);
+    const settledInbound =
+      direction === "in" ||
+      (await store.findLatest(name, "in", "approved")) !== null;
+    if (settledInbound) {
+      return "skipped";
+    }
+    // (b) 移管 OUT の完了。履歴を残しつつ所有権を倒す
     const created = await recordOutboundTransferRequest(
       domain.userId,
       adapter,

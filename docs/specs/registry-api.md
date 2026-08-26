@@ -130,6 +130,10 @@ result code ごとの**ユーザー向け理由文**は `packages/shared/src/reg
     `payload` は `z.unknown()` で受けて後段で緩く読む（想定外の形で Poll ごと落とさないため）。
     `id` は int64 → string に正規化し、ack で URL に埋める直前に整数表記かを検証する
     （非整数は `REGISTRY_SPEC_MISMATCH`。ADR-0002 決定 8）。
+    レジストラ ID を返さないレジストリでは向きが分からないため、`pending` 行が無い承認通知は
+    **直近に `approved` の IN 行があれば「確定済みの IN」と読む**（申請の通知を取りこぼした
+    OUT の完了と誤って読むと、取り込んだばかりの保有行を一覧から消してしまうため）。
+    取りこぼした OUT は `POST /domains/sync` の clID 判定で拾い直す。
 13. **mock の状態は注入したストアに逃がせる**（#46）。`MockRegistryAdapter` に
     `store: MockStateStore`（`load` / `save` でスナップショット全体を往復）を渡すと、
     公開メソッドの単位で「読み込み → 実行 → 書き戻し」を行う。Vercel Functions では

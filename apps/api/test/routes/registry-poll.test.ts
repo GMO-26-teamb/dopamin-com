@@ -4,6 +4,7 @@ import {
   apiErrorSchema,
   domainSyncWithPollResponseSchema,
   type PollConsumeResult,
+  type PollMessage,
   pollConsumeResultSchema,
   type TransfersListResponse,
   transfersListResponseSchema,
@@ -242,6 +243,67 @@ describe("POST /api/v1/registry/poll（FR-12 Poll 消化）", () => {
     // 対応する行が無く保有もしていないので、ドメインは作られない
     const res = await api("/domains");
     expect((await res.json()) as unknown).toEqual({ domains: [] });
+  });
+
+  it("レジストラ ID を返さないレジストリでも、取り込み済みの IN を移管 OUT と読み違えない", async () => {
+    // 実レジストリの transferQuery / Poll は registrarId を返さない（ADR-0002）。
+    // 向きが分からないまま「pending 行が無い承認通知」を OUT の完了と読むと、
+    // 取り込んだばかりの保有行を transferred_out に倒して一覧から消してしまう
+    class AnonymousTransferAdapter extends MockRegistryAdapter {
+      override async poll(): Promise<PollMessage | null> {
+        const message = await super.poll();
+        if (!message?.transfer) {
+          return message;
+        }
+        return {
+          ...message,
+          transfer: {
+            ...message.transfer,
+            requestingRegistrarId: undefined,
+            actingRegistrarId: undefined,
+          },
+        };
+      }
+    }
+    const anonymous = new AnonymousTransferAdapter({ id: "kitaqsign" });
+    setRegistrySetForTesting(
+      createRegistrySet({ mode: "real", adapters: [anonymous] }),
+    );
+    anonymous.seedForeignDomain("anon.com", "auth-anon");
+    const requested = await sendJson("/transfers", {
+      name: "anon.com",
+      authCode: "auth-anon",
+    });
+    expect(requested.status).toBe(202);
+    const { record } = (await requested.json()) as { record: { id: string } };
+    anonymous.simulateCounterpartApprove("anon.com");
+
+    // 先に単票の照合（`info` の trDate。Poll を消化しない導線）が承認を検知して取り込む
+    const detail = await api(`/transfers/${record.id}`);
+    expect(detail.status).toBe(200);
+    expect((await detail.json()) as unknown).toMatchObject({
+      transfer: { domainName: "anon.com", direction: "in", status: "approved" },
+    });
+    const imported = await api("/domains");
+    expect(
+      ((await imported.json()) as { domains: { name: string }[] }).domains.map(
+        (d) => d.name,
+      ),
+    ).toEqual(["anon.com"]);
+
+    // そのあとで向きの分からない承認通知が届いても、保有行を倒さない
+    expect(await poll()).toMatchObject({ processed: 1, skipped: 1 });
+
+    const res = await api("/domains");
+    expect(
+      ((await res.json()) as { domains: { name: string }[] }).domains.map(
+        (d) => d.name,
+      ),
+    ).toEqual(["anon.com"]);
+    // 履歴も IN の 1 件だけで、OUT の行は起きていない
+    const list = await listTransfers();
+    expect(list.outbound).toEqual([]);
+    expect(list.history).toHaveLength(1);
   });
 
   it("キューに溜まった複数の通知を一度で消化しきる（FIFO を詰まらせない）", async () => {
