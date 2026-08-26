@@ -11,6 +11,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../../src/index";
 import { setRegistrySetForTesting } from "../../src/lib/registries";
+import { setRetrySleepForTesting } from "../../src/lib/retry";
 import {
   createInMemoryDomainStore,
   type DomainStore,
@@ -54,6 +55,9 @@ let transferStore: TransferStore;
 let domainStore: DomainStore;
 
 beforeEach(() => {
+  // 参照系の自動再試行（#60）のバックオフでテストが待たされないようにする
+  setRetrySleepForTesting(() => Promise.resolve());
+
   kitaqsign = new MockRegistryAdapter({ id: "kitaqsign" });
   setRegistrySetForTesting(
     createRegistrySet({
@@ -71,6 +75,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  setRetrySleepForTesting(null);
+
   setRegistrySetForTesting(null);
   setDomainStoreForTesting(null);
   setTransferStoreForTesting(null);

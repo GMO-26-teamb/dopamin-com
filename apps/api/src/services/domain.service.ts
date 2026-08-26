@@ -9,6 +9,7 @@ import { isOperationAllowed, splitDomainName } from "@dopamin/shared";
 import { ApiException } from "../lib/errors";
 import { adapterForDomain } from "../lib/registries";
 import { registryErrorMessage } from "../lib/registry-message";
+import { withReadRetry } from "../lib/retry";
 import { type DomainRecord, getDomainStore } from "./domain-store";
 import { getTransferStore, type TransferRecord } from "./transfer-store";
 
@@ -227,7 +228,9 @@ export async function syncDomains(
   await Promise.all(
     records.map(async (record) => {
       try {
-        const info = await adapterForDomain(record.name).info(record.name);
+        const info = await withReadRetry(() =>
+          adapterForDomain(record.name).info(record.name),
+        );
         const updated = await upsertDomainFromInfo(userId, info);
         await options.onSynced?.(updated, info);
       } catch (err) {

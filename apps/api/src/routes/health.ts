@@ -2,6 +2,7 @@ import { RegistryError } from "@dopamin/registry";
 import type { HealthResponse, RegistryHealth } from "@dopamin/shared";
 import { Hono } from "hono";
 import { getRegistrySet } from "../lib/registries";
+import { withReadRetry } from "../lib/retry";
 import type { AppEnv } from "../types";
 
 /**
@@ -16,7 +17,7 @@ export const health = new Hono<AppEnv>().get("/", async (c) => {
       .map(async (adapter): Promise<RegistryHealth> => {
         const started = Date.now();
         try {
-          await adapter.hello();
+          await withReadRetry(() => adapter.hello());
           return { id: adapter.id, ok: true, latencyMs: Date.now() - started };
         } catch (err) {
           return {

@@ -25,6 +25,7 @@ import { ApiException } from "../lib/errors";
 import { reconcileOnTimeout } from "../lib/reconcile";
 import { adapterForDomain, getRegistrySet } from "../lib/registries";
 import { registryErrorMessage } from "../lib/registry-message";
+import { withReadRetry } from "../lib/retry";
 import { jsonValidator } from "../lib/validator";
 import { requireSession } from "../middleware/session";
 import {
@@ -230,7 +231,8 @@ export const domains = new Hono<AuthedEnv>()
     await Promise.all(
       [...groups.values()].map(async ({ adapter, names: groupNames }) => {
         try {
-          const results = await adapter.check(groupNames);
+          // §11.6 (e): 参照系は繋がらないときだけ最大 2 回まで自動再試行する
+          const results = await withReadRetry(() => adapter.check(groupNames));
           const byName = new Map(results.map((r) => [r.name, r]));
           for (const name of groupNames) {
             const result = byName.get(name);
@@ -339,7 +341,7 @@ export const domains = new Hono<AuthedEnv>()
     }
 
     try {
-      const info = await adapter.info(name);
+      const info = await withReadRetry(() => adapter.info(name));
       const record = await upsertDomainFromInfo(userId, info);
       return c.json(detailResponse(record, false, { transfer }));
     } catch (err) {

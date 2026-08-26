@@ -19,6 +19,7 @@ import {
 import app from "../../src/index";
 import { setDbForTesting } from "../../src/lib/db";
 import { setRegistrySetForTesting } from "../../src/lib/registries";
+import { setRetrySleepForTesting } from "../../src/lib/retry";
 import { createTestDb, resetTestDb } from "../helpers/db";
 import { createTestSession } from "../helpers/session";
 
@@ -63,6 +64,9 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  // 参照系の自動再試行（#60）のバックオフでテストが待たされないようにする
+  setRetrySleepForTesting(() => Promise.resolve());
+
   await resetTestDb(db);
   setDbForTesting(db);
   installRegistry();
@@ -76,6 +80,8 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  setRetrySleepForTesting(null);
+
   setRegistrySetForTesting(null);
   vi.restoreAllMocks();
 });

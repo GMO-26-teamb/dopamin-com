@@ -16,6 +16,7 @@ import {
 import { ApiException } from "../lib/errors";
 import { reconcileOnTimeout } from "../lib/reconcile";
 import { adapterForDomain } from "../lib/registries";
+import { withReadRetry } from "../lib/retry";
 import { upsertDomainFromInfo } from "./domain.service";
 import { getDomainStore } from "./domain-store";
 import {
@@ -306,11 +307,13 @@ export async function refreshTransfer(
   const adapter = adapterForDomain(record.domainName);
 
   if (needsImportRetry) {
-    const info = await adapter.info(record.domainName);
+    const info = await withReadRetry(() => adapter.info(record.domainName));
     return importApprovedInbound(userId, record, info, store, now);
   }
 
-  const queried = await adapter.transferQuery(record.domainName);
+  const queried = await withReadRetry(() =>
+    adapter.transferQuery(record.domainName),
+  );
   const patch = {
     registryStatus: queried.registryStatus ?? record.registryStatus,
     counterpartRegistrarId:
@@ -324,7 +327,7 @@ export async function refreshTransfer(
   }
 
   // 移管中でなくなった。承認だけは info の trDate から確定できる
-  const info = await adapter.info(record.domainName);
+  const info = await withReadRetry(() => adapter.info(record.domainName));
   const approved = isApprovedByInfo(info, {
     requestedAt: record.requestedAt,
     actByAt: record.actByAt,

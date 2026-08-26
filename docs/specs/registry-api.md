@@ -139,7 +139,16 @@ result code ごとの**ユーザー向け理由文**は `packages/shared/src/reg
     （create=存在確認 / renew=期限延長 / update=要求変更の全反映 / delete=RGP 入りまたは消滅 /
     restore=RGP 離脱 / transfer=pendingTransfer）。確認できない場合は元の 504 を返す。
     `rotate-auth-info` は `info` で照合できない（authInfo が resData に含まれない）ため対象外。
-15. **詳細レスポンスの契約は `packages/shared` が持ち、導出値は載せない**（#53）。
+15. **参照系だけを自動再試行する**（#60。§11.6 (e) / FR-18）。`apps/api/src/lib/retry.ts` の
+    `withReadRetry` が `REGISTRY_TIMEOUT` / `REGISTRY_UNAVAILABLE` のときだけ
+    最大 2 回、300ms → 600ms の指数バックオフで再試行する。適用先は
+    `POST /domains/check` / `info`（詳細・sync）/ `transferQuery`（移管の照会）/ `hello`（/health）。
+    `REGISTRY_REJECTED` / `NOT_FOUND` / `SPEC_MISMATCH` は「レジストリ側の事実」なので再試行しない。
+    **更新系には適用しない**（NFR-02。応答が届かなくても成立していることがあり、再送は二重実行になる。
+    そちらは `reconcileOnTimeout` が担当し、`confirm` の中の参照系も再試行しない
+    ＝ 照合は 1 回きり）。Bridge 層ではなく API 層に置いたのは mock でも挙動を検証できるようにするため。
+    再試行した分だけ `operation_logs` の行も増える（FR-15 は「全レジストリ呼び出し」を残す方針）。
+16. **詳細レスポンスの契約は `packages/shared` が持ち、導出値は載せない**（#53）。
     `domainDetailResponseSchema`（`packages/shared/src/domains.ts`）が `GET /domains/:name` と
     更新系の応答形の SSOT で、`apps/web` も同じスキーマで検証する（旧: web 側に同じ形の
     別定義があった）。issue #53 が挙げていた `displayStatus` / `transferEligibleAt` は**入れない**:
@@ -147,7 +156,7 @@ result code ごとの**ユーザー向け理由文**は `packages/shared/src/reg
     （`packages/shared`）が導出の SSOT。API も計算済みの値を返すと 2 系統になり、
     片方だけ直る事故になる（`domainSummarySchema` が表示ステータスを持たないのと同じ理由）。
     `pendingTransfer` は導出できないので `summary.transfer`（`{ direction, actByAt }`）として返す。
-16. **照合できない操作はタイムアウトで確定させない**（#57）。移管の承認 / 拒否 / 取消のうち、
+17. **照合できない操作はタイムアウトで確定させない**（#57）。移管の承認 / 拒否 / 取消のうち、
     `transferQuery` + `info` から成立を証明できるのは**承認だけ**（trDate が申請の窓の中で動く）。
     「`pendingTransfer` が消えた」は承認 / 拒否 / 取消・相手の取下げ・サーバ自動承認のどれでも起きるので、
     それを根拠に要求どおりの結果を書くと「拒否したのに移管されていた」「取り消したのに実は
