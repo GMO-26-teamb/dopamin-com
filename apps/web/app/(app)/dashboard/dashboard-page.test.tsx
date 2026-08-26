@@ -1,11 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { shouldAutoSync } from "@/features/domains/auto-sync";
 import { createMockServices } from "@/lib/api/mock/mock-services";
 import type { MockScenario } from "@/lib/api/mock/scenario";
 import { resetMockStore } from "@/lib/api/mock/store";
 import { AppProviders } from "@/lib/api/query-client";
 import type { DomainSummary } from "@/lib/api/types";
-import DashboardPage, { shouldAutoSync } from "./page";
+import DashboardPage from "./page";
 
 /**
  * S-10 / S-11 / S-12 / S-13 の分岐をモックサービス越しに確かめる。
