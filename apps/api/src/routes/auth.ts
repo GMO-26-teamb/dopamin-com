@@ -7,6 +7,7 @@ import { Hono } from "hono";
 import type { ZodType } from "zod";
 import { clearSessionCookie, setSessionCookie } from "../lib/cookies";
 import { getDb } from "../lib/db";
+import { getApiEnv } from "../lib/env";
 import { ApiException } from "../lib/errors";
 import { requireSession } from "../middleware/session";
 import {
@@ -20,6 +21,7 @@ import {
   verifyRegistration,
 } from "../services/auth";
 import { deleteSession } from "../services/session";
+import { getAiSettingsForUser } from "../services/settings";
 
 /** zod 検証失敗を統一エラー形式（VALIDATION_ERROR）にする zValidator ラッパー */
 const json = <T extends ZodType>(schema: T) =>
@@ -83,7 +85,21 @@ export const auth = new Hono()
     clearSessionCookie(c);
     return c.json({ ok: true });
   })
-  .get("/me", requireSession, (c) => c.json({ user: c.get("user") }))
+  /**
+   * GET /auth/me（requirements §10.1、FR-01 / FR-16 / FR-17）。
+   * 画面の起動時に必要な「ユーザー + 有効な機能 + AI 設定の実効値と選択肢」をまとめて返す
+   * （packages/shared の `meResponseSchema` の形）。
+   */
+  .get("/me", requireSession, async (c) => {
+    const user = c.get("user");
+    const env = getApiEnv();
+    const ai = await getAiSettingsForUser(getDb(), user.id, env);
+    return c.json({
+      user,
+      features: { demoReset: env.DEMO_RESET_ENABLED },
+      ai,
+    });
+  })
   // ---- パスキー管理 ----
   .get("/passkeys", requireSession, async (c) => {
     const passkeys = await listPasskeys(getDb(), c.get("user").id);
