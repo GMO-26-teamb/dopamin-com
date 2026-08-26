@@ -71,6 +71,7 @@ const transferResDataSchema = z.looseObject({
   reDate: z.string().nullish(),
   acDate: z.string().nullish(),
 });
+type TransferResData = z.infer<typeof transferResDataSchema>;
 
 /**
  * hello の resData はレジストリで形が違う:
@@ -125,9 +126,16 @@ function toDomainInfo(
  * 【要確認: §21.2 #13】ため、EPP（RFC 5731）の trStatus 語彙
  * （pending / clientApproved / serverApproved / clientRejected / clientCancelled /
  * serverCancelled）を前提に部分一致で寄せる。生値は registryStatus に必ず残す。
- * 未知値は例外にせず pending に倒す（移管の受理応答を落とさないため）。
+ *
+ * 未知値は例外にせず `fallback` に倒す（移管の応答そのものを落とさないため）。
+ * `fallback` は呼んだ操作から決まる期待値で、request なら pending、
+ * approve / reject / cancel ならその操作の結果。成功応答が返っている以上、
+ * 「何が起きたか」はレジストリの語彙より呼んだ操作の方が確かなため。
  */
-function toTransferStatus(raw: string): TransferStatus {
+function toTransferStatus(
+  raw: string,
+  fallback: TransferStatus,
+): TransferStatus {
   const normalized = raw.toLowerCase();
   if (normalized.includes("approve")) {
     return "approved";
@@ -138,16 +146,47 @@ function toTransferStatus(raw: string): TransferStatus {
   if (normalized.includes("cancel")) {
     return "cancelled";
   }
-  return "pending";
+  // pending は fallback より優先する（approve 応答が pending を返したら pending のまま扱う）
+  if (normalized.includes("pending")) {
+    return "pending";
+  }
+  return fallback;
+}
+
+/**
+ * `DomainTransferResponse` → 正規化 `TransferResult`（request / approve / reject / cancel 共通）。
+ *
+ * `newExpiresAt` は設定しない: 両レジストリの transfer 応答に `exDate` が無く、
+ * 埋めるには移管後の `info` 追い読みが要る（ADR-0002 / §11.1）。
+ * `raw` にはエンベロープごと入れる（障害調査で svTRID を突合できるように）。
+ */
+function toTransferResult(
+  resData: TransferResData,
+  envelope: EppEnvelope,
+  fallbackStatus: TransferStatus,
+): TransferResult {
+  return {
+    name: resData.domain.toLowerCase(),
+    status: toTransferStatus(resData.status, fallbackStatus),
+    registryStatus: resData.status,
+    requestingRegistrarId: resData.gainingRegistrar ?? undefined,
+    actingRegistrarId: resData.losingRegistrar ?? undefined,
+    requestedAt: resData.reDate ?? undefined,
+    actByAt: resData.acDate ?? undefined,
+    raw: envelope,
+  };
 }
 
 class KitaqRegistryAdapter implements RegistryAdapter {
   readonly id: KitaqAdapterConfig["id"];
+  /** `X-Registrar-Id` に送っている自レジストラ ID（§11.1 / ADR-0002 決定 3）。 */
+  readonly registrarId: string;
   readonly specVersion = SPEC_VERSION;
   private readonly client: KitaqHttpClient;
 
   constructor(config: KitaqAdapterConfig) {
     this.id = config.id;
+    this.registrarId = config.registrarId;
     this.client = new KitaqHttpClient(config);
   }
 
@@ -390,17 +429,48 @@ class KitaqRegistryAdapter implements RegistryAdapter {
       domainName: name,
       resDataSchema: transferResDataSchema,
     });
-    // newExpiresAt は設定しない: transfer 応答に exDate が無く、埋めるには info の追い読みが要る。
-    return {
-      name: resData.domain.toLowerCase(),
-      status: toTransferStatus(resData.status),
-      registryStatus: resData.status,
-      requestingRegistrarId: resData.gainingRegistrar ?? undefined,
-      actingRegistrarId: resData.losingRegistrar ?? undefined,
-      requestedAt: resData.reDate ?? undefined,
-      actByAt: resData.acDate ?? undefined,
-      raw: envelope,
-    };
+    return toTransferResult(resData, envelope, "pending");
+  }
+
+  /**
+   * approve / reject / cancel の共通実装。3 つともパス末尾だけが違い、
+   * 応答は request と同じ `DomainTransferResponse`（両 openapi.json で確認）。
+   *
+   * ボディは送らない: 両レジストリの OpenAPI は `transfer/request` にだけ `requestBody`
+   * （`DomainTransferRequest { op, authInfo?, period? }`）を宣言していて、
+   * approve / reject / cancel には無い。`restore` / `rotate-auth-info` と同じ
+   * 「requestBody を宣言しないエンドポイントにはボディを送らない」流儀に揃える。
+   * 実レジストリが 400 / 2001（Malformed JSON）や必須ボディ欠落で拒否するようなら、
+   * `body: { op }`（`DomainTransferRequest.op` の enum には approve / reject / cancel がある）を
+   * 付けて Swagger 側の欠落として spec-notes に記録する。
+   */
+  private async transferAct(
+    name: string,
+    op: "approve" | "reject" | "cancel",
+    command: "transfer_approve" | "transfer_reject" | "transfer_cancel",
+    fallbackStatus: TransferStatus,
+  ): Promise<TransferResult> {
+    const { resData, envelope } = await this.client.command({
+      method: "POST",
+      path: `/domains/${encodeURIComponent(name)}/transfer/${op}`,
+      kind: "write",
+      command,
+      domainName: name,
+      resDataSchema: transferResDataSchema,
+    });
+    return toTransferResult(resData, envelope, fallbackStatus);
+  }
+
+  async transferApprove(name: string): Promise<TransferResult> {
+    return this.transferAct(name, "approve", "transfer_approve", "approved");
+  }
+
+  async transferReject(name: string): Promise<TransferResult> {
+    return this.transferAct(name, "reject", "transfer_reject", "rejected");
+  }
+
+  async transferCancel(name: string): Promise<TransferResult> {
+    return this.transferAct(name, "cancel", "transfer_cancel", "cancelled");
   }
 
   async transferQuery(name: string): Promise<TransferResult> {

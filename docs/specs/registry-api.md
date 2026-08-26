@@ -46,7 +46,7 @@
 | POST | `/domains/:name/restore` | ✅ | `redemptionPeriod` 中のみ（AC-11-2） |
 | POST | `/domains/:name/auth-code` | ✅ | `rotate-auth-info` を実行（取得のたびに authInfo が変わる）。再発行という副作用があるため GET ではなく POST（§10.2 の Origin 検証を通すため） |
 | POST | `/transfers` | ✅ | `{name, authCode}` → transfer request → 202。応答は正規化 `TransferResult` から `raw` を除いた DTO（`transferResponseSchema`。ADR-0002） |
-| GET | `/transfers/:name` | ✅ | **spec の `GET /transfers/:id` からの変更**: ドメイン名で `transferQuery`（`info` の `pendingTransfer` から導出）を返す。移管中でなければ `status: 'none'`、相手レジストラ ID は `info` から取れないため省略。DB には保存せず一覧化もしない（移管の永続化は #56） |
+| GET | `/transfers/:name` | ✅ | **要件 §10.1 の `GET /transfers/:id` に対する暫定実装**（要件を変更するものではない）。`transfers` への永続化がまだ無く id を発番できないため、ドメイン名で `transferQuery`（`info` の `pendingTransfer` から導出）を返す。移管中でなければ `status: 'none'`、相手レジストラ ID は `info` から取れないため省略。DB には保存せず一覧化もしない。#56（transfers 永続化）で `GET /transfers/:id` に戻す |
 
 本 spec のルート（`/domains*` `/transfers*`）はすべて `requireSession` 必須（Cookie `dopamin_session`。requirements §10.1 の「認証: 要」に対応）。
 統合テストは `apps/api/test/helpers/session.ts` の `installTestSession()` + `SESSION_COOKIE_HEADER`（DB 不要の seam）
@@ -85,7 +85,14 @@
     レジストリ差分: `reDate`（→ `requestedAt`）は kitaqnic のみ必須、`acDate`（→ `actByAt`）は
     kitaqnic のみ任意で kitaqsign は両方持たない。新有効期限の `exDate` は両方に無いため
     `newExpiresAt` は当面つねに undefined。
-11. **更新系タイムアウト時は再送せず参照系で結果を照合する**（AC-06-2 / AC-18-2）。
+11. **`transfer/approve` `reject` `cancel` にはボディを送らない**（#43）。両レジストリの OpenAPI で
+    `requestBody` を宣言しているのは `transfer/request` だけで、他 3 つには無い
+    （`restore` / `rotate-auth-info` と同じ形）。`DomainTransferRequest.op` の enum には
+    approve / reject / cancel があるため、実レジストリが必須ボディ欠落で拒否したときは
+    `{ op }` を付けて `docs/registry/spec-notes.md`「移管フロー」を更新する。
+    正規化ステータスの未知値は「呼んだ操作の結果」に倒す（approve なら `approved`）。
+    生値は `registryStatus` に残すので情報は失われない。
+12. **更新系タイムアウト時は再送せず参照系で結果を照合する**（AC-06-2 / AC-18-2）。
     `apps/api/src/lib/reconcile.ts` の `reconcileOnTimeout` が `REGISTRY_TIMEOUT` を捕捉し、
     `info`（transfer は `transferQuery`）で反映を確認できた場合のみ成功として返す
     （create=存在確認 / renew=期限延長 / update=要求変更の全反映 / delete=RGP 入りまたは消滅 /
@@ -105,11 +112,14 @@
 
 - ~~操作ログ（FR-15）~~: 実装済み。全レジストリ呼び出しを `operation_logs` へ永続化し
   構造化 console ログ（NFR-06）を出す。設計は [`docs/specs/operation-logs.md`](operation-logs.md)。
+- `GET /transfers/:name` は id 発番前の暫定パス。#56 で要件 §10.1 どおり `GET /transfers/:id` に戻す。
 - `POST /domains/check` の 1 リクエストあたりの件数上限がレジストリ側で不明（API 側は 20 件に制限）。
 - コンタクト更新（FR-09 の一部）と移管の承認 / 拒否（受け側・P2）は未実装。
 - `RegistryAdapter` は §11.1 の `registrarId` / `transferApprove` / `transferReject` /
-  `transferCancel` / `poll` / `ackMessage` をまだ持たない（追加は #43 / #44）。
+  `transferCancel` を実装済み（#43）。残りは `poll` / `ackMessage`（#44）で、
   `PollMessage` 型は `packages/shared` に用意済みだが生産者はまだ居ない。
+  アダプタの承認 / 拒否 / 取消を叩く API ルート（`POST /transfers/:id/{approve,reject,cancel}`）は
+  移管の永続化（#56）とセットで #57。
 - Poll の契約テスト fixture は未整備（#44 / #48）。transfer fixture の `status` は
   実応答が未取得のため暫定値（`docs/registry/fixtures/README.md`）。
 - Poll 通知の `msgType` の値と `payload` の中身は未確定【要確認: requirements.md §21.2 #13】。
