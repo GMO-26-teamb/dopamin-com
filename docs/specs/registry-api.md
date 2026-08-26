@@ -36,7 +36,7 @@
 
 | メソッド | パス | 実装 | 備考 |
 |---|---|---|---|
-| GET | `/health` | ✅ | 各レジストリの `hello` 疎通結果 + レイテンシを返す |
+| GET | `/health` | ✅ | 各レジストリの `hello` 疎通結果 + レイテンシ + `specVersion`（仕様バージョン。§11.5 手順 4）と、DB の接続結果 `db { ok, latencyMs, error? }` を返す（#62）。**依存の解決ごと try で包む**ので、環境変数の欠落や DB 到達不能でも 200 + `status: "ok"` を返し、どこが壊れているかを個別項目で示す。認証なしで到達できるため、エラーは正規化コード・例外名だけ（接続文字列やレジストリの生文言は出さない） |
 | POST | `/domains/check` | ✅ | `{sld, tlds[]}` or `{names[]}`。レジストリ単位で並列、部分失敗許容（AC-03-2） |
 | POST | `/domains` | ✅ | check 再実行 → contact 作成 → create → info（AC-06 系）。authInfo はサーバー生成 |
 | POST | `/domains/sync` | ✅ | Poll を消化してから保有ドメイン（`ownership = 'owned'` のみ）を `info` で再同期する（#58）。`info` の `pendingTransfer` から受信中の申請を拾って `transfers(out)` を作り、`sponsoringRegistrarId` が自レジストラと違えば `transferred_out` に倒す（clID が取れるまで後者は効かない。【要確認 §21.2 #12】）。応答は `domainSyncWithPollResponseSchema`（`domains` / `failures` + `pollProcessed`）。順序が Poll → 同期なのは、先に消化しないと移管 OUT 済みの行がこの応答の保有一覧に残ってしまうため（AC-02-4） |
