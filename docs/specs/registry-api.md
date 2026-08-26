@@ -18,8 +18,12 @@
 
 ### 非スコープ（後続タスク）
 
-- 認証・セッション（FR-01）。**現状の全ルートは認証なし**。FR-01 実装時に `session`
-  ミドルウェアと所有権チェック（NFR-04）を差し込む。
+- ~~認証・セッション（FR-01）。現状の全ルートは認証なし~~ → 解決（2026-08-26、#50 / #129）:
+  `/domains*` `/transfers*` は各ルーターの先頭 `.use(requireSession)`
+  （`apps/api/src/middleware/session.ts`、環境型は `AuthedEnv`）で全ルート認証必須。
+  未認証・無効セッションは 401 `UNAUTHORIZED`（AC-01-3）。`c.get("user")` でログインユーザーを参照する。
+  所有権チェック（NFR-04）はドメイン単位のルートで `requireOwnedDomain(userId, name)` が
+  `domains` テーブル（FR-02 の DB キャッシュ）を `user_id` で引いて行う。
 - DB キャッシュ（FR-02 一覧・`domains` テーブル保存）、操作ログの永続化（FR-15）、
   独自性スコア（FR-05。check レスポンスの `uniqueness` は常に `null` のプレースホルダ）。
 
@@ -38,6 +42,10 @@
 | GET | `/domains/:name/auth-code` | ✅ | `rotate-auth-info` を実行（取得のたびに authInfo が変わる） |
 | POST | `/transfers` | ✅ | `{name, authCode}` → transfer request → 202 |
 | GET | `/transfers/:name` | ✅ | **spec の `GET /transfers/:id` からの変更**: DB 導入前のためドメイン名で `info` から導出 |
+
+`/health` 以外の全ルートは `requireSession` 必須（Cookie `dopamin_session`。requirements §10.1 の「認証: 要」に対応）。
+統合テストは `apps/api/test/helpers/session.ts` の `installTestSession()` + `SESSION_COOKIE_HEADER`（DB 不要の seam）
+または `createTestSession(db)`（pglite に実ユーザー行・セッション行を作る）で Cookie を付けて叩く（`docs/testing.md` §1）。
 
 エラーは全ルートで統一形式（requirements.md §10.3）。`RegistryError` の変換は
 `apps/api/src/middleware/error-handler.ts`、EPP result code → 正規化コードの対応は
