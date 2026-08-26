@@ -6,6 +6,7 @@
 - 優先順位: 本書 < `docs/specs/*` < `docs/requirements.md` < レジストリの Swagger UI（API 仕様の正）。
 - `【要確認】` は未確定事項。推測で実装せず、確認して requirements.md を更新してから進める。
 - 1 タスク = 1 spec = 1 PR。`pnpm check` がグリーンでない変更は main に入れない。
+- **実装・修正の依頼を受けたら、着手前に必ず `issue-checker` サブエージェント（`.claude/agents/issue-checker.md`）で既存 issue に該当するかを確認する。** 該当 issue があればその番号に紐づけて進め（ブランチ・PR で issue を参照）、`blocked:要確認` 付きなら解消してから着手する。該当がなければ新規 issue を起票してから着手する。
 
 ## 構成（Turborepo + pnpm workspaces）
 
