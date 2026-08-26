@@ -4,9 +4,12 @@ import { ApiError } from "../lib/api-error";
 import { reconcileOnTimeout } from "../lib/reconcile";
 import { adapterForDomain } from "../lib/registries";
 import { jsonValidator } from "../lib/validator";
-import type { AppEnv } from "../types";
+import { requireSession } from "../middleware/session";
+import type { AuthedEnv } from "../types";
 
-export const transfers = new Hono<AppEnv>()
+export const transfers = new Hono<AuthedEnv>()
+  // NFR-04 / AC-01-3: 移管操作も認証必須（対象ドメインの所有権は移管の性質上ここでは見ない）
+  .use(requireSession)
   /** FR-12: 移管 IN 申請。受理されると pendingTransfer になる（放置時は 20 分後に自動承認）。 */
   .post("/", jsonValidator(transferCreateRequestSchema), async (c) => {
     const { name, authCode } = c.req.valid("json");

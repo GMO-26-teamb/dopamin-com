@@ -9,6 +9,9 @@ import type { AppType } from "@dopamin/api";
 import {
   apiErrorCodeSchema,
   domainAvailabilitySchema,
+  domainListResponseSchema,
+  domainSummarySchema,
+  domainSyncResponseSchema,
   registryIdSchema,
 } from "@dopamin/shared";
 import { hc } from "hono/client";
@@ -69,10 +72,28 @@ export const domainInfoSchema = z.object({
 });
 export type DomainInfoResponse = z.infer<typeof domainInfoSchema>;
 
-export const domainEnvelopeSchema = z.object({ domain: domainInfoSchema });
+/**
+ * 詳細・更新系の応答（`{ domain, summary, stale, syncedAt }`）。
+ * `summary` は一覧（`GET /domains`）と同じ要約で、所有権・同期時刻・stale はここから取る。
+ */
+export const domainEnvelopeSchema = z.object({
+  domain: domainInfoSchema,
+  summary: domainSummarySchema,
+  stale: z.boolean(),
+  syncedAt: z.string(),
+});
+export type DomainEnvelope = z.infer<typeof domainEnvelopeSchema>;
+
+/** 廃止（`DELETE /domains/:name`）。即時削除なら domain / summary とも null。 */
 export const nullableDomainEnvelopeSchema = z.object({
   domain: domainInfoSchema.nullable(),
+  summary: domainSummarySchema.nullable(),
 });
+
+/** 一覧・同期（FR-02）。スキーマは packages/shared が SSOT。 */
+export const domainListSchema = domainListResponseSchema;
+export const domainSyncSchema = domainSyncResponseSchema;
+export type ApiDomainSummary = z.infer<typeof domainSummarySchema>;
 
 export const authCodeSchema = z.object({
   authCode: z.string(),

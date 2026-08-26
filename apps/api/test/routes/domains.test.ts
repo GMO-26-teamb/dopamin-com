@@ -5,10 +5,27 @@ import {
   RegistryError,
   type RegistryErrorCode,
 } from "@dopamin/registry";
-import { type ApiErrorBody, apiErrorBodySchema } from "@dopamin/shared";
+import {
+  type ApiErrorBody,
+  apiErrorBodySchema,
+  domainListResponseSchema,
+  domainSyncResponseSchema,
+} from "@dopamin/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../../src/index";
 import { setRegistrySetForTesting } from "../../src/lib/registries";
+import {
+  createInMemoryDomainStore,
+  type DomainStore,
+  setDomainStoreForTesting,
+} from "../../src/services/domain-store";
+import {
+  clearTestSession,
+  installTestSession,
+  OTHER_USER,
+  SESSION_COOKIE_HEADER,
+  TEST_USER,
+} from "../helpers/session";
 import { TimeoutMockAdapter } from "../helpers/timeout-mock";
 
 /**
@@ -39,9 +56,14 @@ interface CheckPayload {
 }
 
 let kitaqnic: MockRegistryAdapter;
+let store: DomainStore;
 
 beforeEach(() => {
   kitaqnic = new MockRegistryAdapter({ id: "kitaqnic" });
+  // DB を立てずに所有権チェック・write-through を検証する（#40 のテスト DB が入るまでの seam）
+  store = createInMemoryDomainStore();
+  setDomainStoreForTesting(store);
+  installTestSession();
   setRegistrySetForTesting(
     createRegistrySet({
       mode: "real",
@@ -54,11 +76,47 @@ beforeEach(() => {
 
 afterEach(() => {
   setRegistrySetForTesting(null);
+  setDomainStoreForTesting(null);
+  clearTestSession();
   vi.restoreAllMocks();
 });
 
+/** 認証済みリクエスト（ドメイン操作はすべて認証必須。AC-01-3）。 */
 async function api(path: string, init?: RequestInit): Promise<Response> {
-  return app.request(`/api/v1${path}`, init);
+  return app.request(`/api/v1${path}`, {
+    ...init,
+    headers: { cookie: SESSION_COOKIE_HEADER, ...init?.headers },
+  });
+}
+
+/**
+ * レジストリを経由せず domains 行だけを用意する。
+ * 「DB には行があるがレジストリ側が壊れている / 消えている」状況の再現に使う。
+ */
+async function seedDomain(
+  name: string,
+  userId: string = TEST_USER.id,
+): Promise<void> {
+  await store.upsert({
+    userId,
+    name,
+    registry: "kitaqsign",
+    ownership: "owned",
+    info: {
+      name,
+      registry: "kitaqsign",
+      statuses: ["ok"],
+      registrant: "C-SEED",
+      contacts: {},
+      nameservers: [],
+      registeredAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: null,
+      expiresAt: "2027-08-01T00:00:00.000Z",
+      lastTransferAt: null,
+      rgpStatuses: [],
+    },
+    syncedAt: new Date("2026-08-20T00:00:00.000Z"),
+  });
 }
 
 function sendJson(
@@ -229,6 +287,7 @@ describe("GET /api/v1/domains/:name（FR-07 詳細）", () => {
   });
 
   it("未登録は 404 NOT_FOUND（registry / registryCode 付き）", async () => {
+    await seedDomain("ghost.com");
     const res = await api("/domains/ghost.com");
     expect(res.status).toBe(404);
     const body = await parseError(res);
@@ -425,17 +484,19 @@ describe("DELETE / restore（FR-10 / FR-11）", () => {
   });
 });
 
-describe("GET /api/v1/domains/:name/auth-code（FR-12 移管 OUT）", () => {
+describe("POST /api/v1/domains/:name/auth-code（FR-12 移管 OUT）", () => {
   it("AuthCode を返し、取得のたびにローテートされる", async () => {
     await createDomain("auth.com");
-    const first = await api("/domains/auth.com/auth-code");
+    const first = await api("/domains/auth.com/auth-code", { method: "POST" });
     expect(first.status).toBe(200);
     const a = (await first.json()) as { authCode: string; rotated: boolean };
     expect(a.rotated).toBe(true);
     expect(a.authCode.length).toBeGreaterThan(0);
     expect(a.authCode.length).toBeLessThanOrEqual(64);
 
-    const second = await api("/domains/auth.com/auth-code");
+    const second = await api("/domains/auth.com/auth-code", {
+      method: "POST",
+    });
     const b = (await second.json()) as { authCode: string };
     expect(b.authCode).not.toBe(a.authCode);
   });
@@ -619,7 +680,10 @@ describe("エラー変換（§10.3: RegistryError → 統一エラー形式）",
           registryCode: 2400,
         }),
       );
-      const res = await api("/domains/foo.com");
+      // GET /domains/:name は繋がらない系をキャッシュに退避するため、
+      // フォールバックの無い renew でエラー変換そのものを検証する
+      await seedDomain("foo.com");
+      const res = await sendJson("/domains/foo.com/renew", { period: 1 });
       expect(res.status).toBe(status);
       const text = await res.text();
       const body = apiErrorBodySchema.parse(JSON.parse(text));
@@ -638,7 +702,8 @@ describe("エラー変換（§10.3: RegistryError → 統一エラー形式）",
 
   it("想定外の例外は 500 INTERNAL（詳細を漏らさない・NFR-06）", async () => {
     installThrowingAdapter(new Error("boom-secret-detail"));
-    const res = await api("/domains/foo.com");
+    await seedDomain("foo.com");
+    const res = await sendJson("/domains/foo.com/renew", { period: 1 });
     expect(res.status).toBe(500);
     const text = await res.text();
     const body = apiErrorBodySchema.parse(JSON.parse(text));
@@ -652,4 +717,439 @@ describe("エラー変換（§10.3: RegistryError → 統一エラー形式）",
     const body = await parseError(res);
     expect(body.error.requestId).toBe(res.headers.get("x-request-id"));
   });
+});
+
+describe("AC-01-3 / NFR-04: 認証と所有権", () => {
+  it.each([
+    ["GET", "/api/v1/domains"],
+    ["POST", "/api/v1/domains/sync"],
+    ["POST", "/api/v1/domains/check"],
+    ["POST", "/api/v1/domains"],
+    ["GET", "/api/v1/domains/foo.com"],
+    ["POST", "/api/v1/domains/foo.com/renew"],
+    ["PATCH", "/api/v1/domains/foo.com"],
+    ["DELETE", "/api/v1/domains/foo.com"],
+    ["POST", "/api/v1/domains/foo.com/restore"],
+    ["POST", "/api/v1/domains/foo.com/auth-code"],
+  ])("%s %s は Cookie 無しで 401 UNAUTHORIZED", async (method, path) => {
+    const res = await app.request(path, { method });
+    expect(res.status).toBe(401);
+    expect((await parseError(res)).error.code).toBe("UNAUTHORIZED");
+  });
+
+  it("他ユーザーのドメインは 403 FORBIDDEN（参照・更新とも）", async () => {
+    await seedDomain("someone-else.com", OTHER_USER.id);
+
+    const read = await api("/domains/someone-else.com");
+    expect(read.status).toBe(403);
+    expect((await parseError(read)).error.code).toBe("FORBIDDEN");
+
+    const write = await api("/domains/someone-else.com", { method: "DELETE" });
+    expect(write.status).toBe(403);
+  });
+
+  it("保有していないドメインは 404 NOT_FOUND（レジストリには問い合わせない）", async () => {
+    const res = await api("/domains/unknown.com");
+    expect(res.status).toBe(404);
+    const body = await parseError(res);
+    expect(body.error.code).toBe("NOT_FOUND");
+    // requireOwnedDomain で止まるのでレジストリ情報は載らない
+    expect(body.error.registry).toBeUndefined();
+  });
+});
+
+describe("GET /api/v1/domains（FR-02 保有一覧）", () => {
+  it("登録したドメインが名前順で返る", async () => {
+    await createDomain("beta.com");
+    await createDomain("alpha.com");
+
+    const res = await api("/domains");
+    expect(res.status).toBe(200);
+    const body = domainListResponseSchema.parse(await res.json());
+    expect(body.domains.map((d) => d.name)).toEqual(["alpha.com", "beta.com"]);
+    expect(body.domains[0]).toMatchObject({
+      sld: "alpha",
+      tld: "com",
+      registry: "kitaqsign",
+      ownership: "owned",
+      stale: false,
+      transfer: null,
+    });
+  });
+
+  it("AC-02-1: 他ユーザーのドメインは含まれない", async () => {
+    await createDomain("mine.com");
+    await seedDomain("theirs.com", OTHER_USER.id);
+
+    const body = domainListResponseSchema.parse(
+      await (await api("/domains")).json(),
+    );
+    expect(body.domains.map((d) => d.name)).toEqual(["mine.com"]);
+  });
+
+  it("0 件のときは空配列を返す", async () => {
+    const body = domainListResponseSchema.parse(
+      await (await api("/domains")).json(),
+    );
+    expect(body.domains).toEqual([]);
+  });
+
+  it("廃止すると RGP ステータス付きで一覧に残る（AC-10-1）", async () => {
+    await createDomain("gone.com");
+    await api("/domains/gone.com", { method: "DELETE" });
+
+    const body = domainListResponseSchema.parse(
+      await (await api("/domains")).json(),
+    );
+    expect(body.domains[0]?.rgpStatuses).toContain("redemptionPeriod");
+  });
+});
+
+describe("POST /api/v1/domains/sync（FR-02 最新化）", () => {
+  it("レジストリの最新状態で DB キャッシュを更新する", async () => {
+    await createDomain("sync.com");
+    // DB を古い状態にしてから sync で追いつかせる
+    await seedDomain("sync.com");
+
+    const res = await api("/domains/sync", { method: "POST" });
+    expect(res.status).toBe(200);
+    const body = domainSyncResponseSchema.parse(await res.json());
+    expect(body.failures).toEqual([]);
+    expect(body.domains[0]).toMatchObject({ name: "sync.com", stale: false });
+    // seed の "ok" ではなく、レジストリが返す登録直後の状態になっている
+    expect(body.domains[0]?.rgpStatuses).toContain("addPeriod");
+  });
+
+  it("同期に失敗した行は stale: true とし、失敗一覧に載せる（部分失敗）", async () => {
+    await createDomain("ok.com");
+    await createDomain("ng.xyz");
+    kitaqnic.setFailMode("5xx");
+
+    const res = await api("/domains/sync", { method: "POST" });
+    expect(res.status).toBe(200);
+    const body = domainSyncResponseSchema.parse(await res.json());
+
+    const byName = new Map(body.domains.map((d) => [d.name, d]));
+    expect(byName.get("ok.com")?.stale).toBe(false);
+    expect(byName.get("ng.xyz")?.stale).toBe(true);
+    expect(body.failures).toEqual([
+      expect.objectContaining({ name: "ng.xyz", code: "REGISTRY_UNAVAILABLE" }),
+    ]);
+  });
+});
+
+describe("AC-07-2: info 失敗時のキャッシュフォールバック", () => {
+  it("レジストリに繋がらないときは stale: true でキャッシュを返す", async () => {
+    await createDomain("cache.xyz");
+    kitaqnic.setFailMode("5xx");
+
+    const res = await api("/domains/cache.xyz");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      domain: { name: string };
+      stale: boolean;
+      syncedAt: string;
+    };
+    expect(body.domain.name).toBe("cache.xyz");
+    expect(body.stale).toBe(true);
+    expect(body.syncedAt).toBeTruthy();
+  });
+
+  it("NOT_FOUND はキャッシュに退避せずそのまま返す", async () => {
+    await seedDomain("vanished.com");
+    const res = await api("/domains/vanished.com");
+    expect(res.status).toBe(404);
+    expect((await parseError(res)).error.code).toBe("NOT_FOUND");
+  });
+});
+
+describe("RGP 中の操作制限（§11.3 / #54: rgpStatuses を判定に渡す）", () => {
+  /** 廃止して redemptionPeriod に入れる。 */
+  async function intoRgp(name: string): Promise<void> {
+    await createDomain(name);
+    const res = await api(`/domains/${name}`, { method: "DELETE" });
+    expect(res.status).toBe(200);
+  }
+
+  it("RGP 中は更新（renew）できない", async () => {
+    await intoRgp("rgp-renew.com");
+    const res = await sendJson("/domains/rgp-renew.com/renew", { period: 1 });
+    expect(res.status).toBe(409);
+    const body = await parseError(res);
+    expect(body.error.code).toBe("OPERATION_NOT_ALLOWED");
+    expect((body.error.details as { statuses: string[] }).statuses).toContain(
+      "redemptionPeriod",
+    );
+  });
+
+  it("RGP 中は情報修正（update）できない", async () => {
+    await intoRgp("rgp-ns.com");
+    const res = await sendJson(
+      "/domains/rgp-ns.com",
+      { nameservers: ["ns1.example.com", "ns2.example.com"] },
+      "PATCH",
+    );
+    expect(res.status).toBe(409);
+    expect((await parseError(res)).error.code).toBe("OPERATION_NOT_ALLOWED");
+  });
+
+  it("RGP 中は再度の廃止（delete）もできない", async () => {
+    await intoRgp("rgp-del.com");
+    const res = await api("/domains/rgp-del.com", { method: "DELETE" });
+    expect(res.status).toBe(409);
+    expect((await parseError(res)).error.code).toBe("OPERATION_NOT_ALLOWED");
+  });
+
+  it("RGP 中でも復旧（restore）だけは通る", async () => {
+    await intoRgp("rgp-ok.com");
+    const res = await api("/domains/rgp-ok.com/restore", { method: "POST" });
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("POST /domains/:name/auth-code の移管ロック（§11.3）", () => {
+  it("clientTransferProhibited 中は 409 OPERATION_NOT_ALLOWED", async () => {
+    await createDomain("locked-auth.com");
+    await sendJson(
+      "/domains/locked-auth.com",
+      { clientStatuses: { add: ["clientTransferProhibited"] } },
+      "PATCH",
+    );
+
+    const res = await api("/domains/locked-auth.com/auth-code", {
+      method: "POST",
+    });
+    expect(res.status).toBe(409);
+    const body = await parseError(res);
+    expect(body.error.code).toBe("OPERATION_NOT_ALLOWED");
+    expect((body.error.details as { statuses: string[] }).statuses).toContain(
+      "clientTransferProhibited",
+    );
+  });
+});
+
+describe("AC-07-2 / AC-18-1: 繋がらない系だけキャッシュに退避する", () => {
+  it.each(["timeout", "5xx", "spec_mismatch"] as const)(
+    "failMode=%s は 200 + stale: true でキャッシュを返す",
+    async (failMode) => {
+      await createDomain("fallback.xyz");
+      kitaqnic.setFailMode(failMode);
+
+      const res = await api("/domains/fallback.xyz");
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        domain: { name: string };
+        summary: { name: string; stale: boolean };
+        stale: boolean;
+      };
+      expect(body.stale).toBe(true);
+      expect(body.domain.name).toBe("fallback.xyz");
+      // 一覧と同じ要約も stale を持つ（ダッシュボードとの表示ずれを防ぐ）
+      expect(body.summary).toMatchObject({
+        name: "fallback.xyz",
+        stale: true,
+      });
+    },
+  );
+
+  it("reject（レジストリが拒否）は退避せずエラーのまま返す", async () => {
+    await createDomain("rejected.xyz");
+    kitaqnic.setFailMode("reject");
+
+    const res = await api("/domains/rejected.xyz");
+    expect(res.status).toBe(422);
+    expect((await parseError(res)).error.code).toBe("REGISTRY_REJECTED");
+  });
+});
+
+describe("廃止後に info が引けないときの扱い", () => {
+  /**
+   * 廃止は成功するが、その後の `info` だけが失敗するアダプタ。
+   * 「レジストリから消えた（NOT_FOUND）」と「読めなかっただけ（通信系）」を区別できているかを見る。
+   */
+  function installPostDeleteAdapter(
+    afterDelete: "not-found" | "timeout" | "5xx",
+  ): void {
+    const base = new MockRegistryAdapter({ id: "kitaqsign" });
+    const deleted = new Set<string>();
+    const FAILURES = {
+      "not-found": { code: "NOT_FOUND", registryCode: 2303 },
+      timeout: { code: "REGISTRY_TIMEOUT", registryCode: undefined },
+      "5xx": { code: "REGISTRY_UNAVAILABLE", registryCode: undefined },
+    } as const;
+    const failure = () => {
+      const { code, registryCode } = FAILURES[afterDelete];
+      return new RegistryError({
+        code,
+        registry: "kitaqsign",
+        message: `post-delete ${afterDelete}`,
+        ...(registryCode === undefined ? {} : { registryCode }),
+      });
+    };
+    const adapter: RegistryAdapter = {
+      id: "kitaqsign",
+      specVersion: "post-delete",
+      hello: () => base.hello(),
+      check: (names) => base.check(names),
+      info: (name) =>
+        deleted.has(name) ? Promise.reject(failure()) : base.info(name),
+      create: (input) => base.create(input),
+      renew: (name, input) => base.renew(name, input),
+      update: (name, input) => base.update(name, input),
+      delete: async (name) => {
+        const result = await base.delete(name);
+        deleted.add(name);
+        return result;
+      },
+      restore: (name) => base.restore(name),
+      transferRequest: (name, code) => base.transferRequest(name, code),
+      transferQuery: (name) => base.transferQuery(name),
+      authCode: (name) => base.authCode(name),
+    };
+    setRegistrySetForTesting(
+      createRegistrySet({ mode: "real", adapters: [adapter] }),
+    );
+  }
+
+  it("NOT_FOUND（即時削除）は domain: null を返し、保有一覧からも消える", async () => {
+    installPostDeleteAdapter("not-found");
+    await createDomain("vanish.com");
+
+    const res = await api("/domains/vanish.com", { method: "DELETE" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ domain: null, summary: null });
+
+    const list = domainListResponseSchema.parse(
+      await (await api("/domains")).json(),
+    );
+    expect(list.domains).toEqual([]);
+  });
+
+  it.each(["timeout", "5xx"] as const)(
+    "%s では廃止済みの行を消さず、stale: true でキャッシュを返す",
+    async (mode) => {
+      installPostDeleteAdapter(mode);
+      await createDomain("keep.com");
+
+      const res = await api("/domains/keep.com", { method: "DELETE" });
+      // 廃止自体は成立しているのでエラーにはしない
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        domain: { name: string } | null;
+        stale: boolean;
+      };
+      expect(body.domain?.name).toBe("keep.com");
+      expect(body.stale).toBe(true);
+
+      // AC-10-1: 復旧導線を失わないよう、行は保有一覧に残る
+      const list = domainListResponseSchema.parse(
+        await (await api("/domains")).json(),
+      );
+      expect(list.domains.map((d) => d.name)).toEqual(["keep.com"]);
+    },
+  );
+});
+
+describe("POST /api/v1/domains/sync の境界", () => {
+  it("0 件でも 200 と空配列を返す", async () => {
+    const res = await api("/domains/sync", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(domainSyncResponseSchema.parse(await res.json())).toEqual({
+      domains: [],
+      failures: [],
+    });
+  });
+
+  it("対応 TLD から外れた行はコードを保ったまま失敗一覧に載る（仕様変更耐性）", async () => {
+    await seedDomain("legacy.example");
+
+    const res = await api("/domains/sync", { method: "POST" });
+    expect(res.status).toBe(200);
+    const body = domainSyncResponseSchema.parse(await res.json());
+    expect(body.failures).toEqual([
+      expect.objectContaining({
+        name: "legacy.example",
+        code: "VALIDATION_ERROR",
+      }),
+    ]);
+    // 失敗しても行は消さず、キャッシュを stale で返す
+    expect(body.domains[0]).toMatchObject({
+      name: "legacy.example",
+      stale: true,
+    });
+  });
+});
+
+describe("AC-06-1: 登録直後のレスポンスと一覧の整合", () => {
+  it("登録レスポンスの summary が一覧の要素と一致する", async () => {
+    const res = await sendJson("/domains", { name: "fresh.com", period: 1 });
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as { summary: unknown };
+
+    const list = domainListResponseSchema.parse(
+      await (await api("/domains")).json(),
+    );
+    expect(list.domains).toHaveLength(1);
+    expect(created.summary).toEqual(list.domains[0]);
+  });
+});
+
+describe("セッションの検証（§10.2）", () => {
+  it("解決できない Cookie は 401 UNAUTHORIZED", async () => {
+    const res = await app.request("/api/v1/domains", {
+      headers: { cookie: "dopamin_session=expired-or-unknown" },
+    });
+    expect(res.status).toBe(401);
+    expect((await parseError(res)).error.code).toBe("UNAUTHORIZED");
+  });
+});
+
+describe("sync で info が NOT_FOUND のとき（AC-02-4 は #33 / #56 待ち）", () => {
+  it("行は消さず、失敗一覧に NOT_FOUND を載せてキャッシュを stale で返す", async () => {
+    await createDomain("still-here.com");
+    // レジストリからは引けないが DB には行がある状態
+    installThrowingAdapterForSync();
+
+    const res = await api("/domains/sync", { method: "POST" });
+    expect(res.status).toBe(200);
+    const body = domainSyncResponseSchema.parse(await res.json());
+
+    expect(body.failures).toEqual([
+      expect.objectContaining({ name: "still-here.com", code: "NOT_FOUND" }),
+    ]);
+    // 現状の意図した挙動: 所有権を判定できないので行は保持する
+    expect(body.domains.map((d) => d.name)).toEqual(["still-here.com"]);
+    expect(body.domains[0]?.stale).toBe(true);
+  });
+
+  /** info だけが NOT_FOUND を返すアダプタに差し替える。 */
+  function installThrowingAdapterForSync(): void {
+    const base = new MockRegistryAdapter({ id: "kitaqsign" });
+    const adapter: RegistryAdapter = {
+      id: "kitaqsign",
+      specVersion: "sync-not-found",
+      hello: () => base.hello(),
+      check: (names) => base.check(names),
+      info: () =>
+        Promise.reject(
+          new RegistryError({
+            code: "NOT_FOUND",
+            registry: "kitaqsign",
+            message: "gone",
+            registryCode: 2303,
+          }),
+        ),
+      create: (input) => base.create(input),
+      renew: (name, input) => base.renew(name, input),
+      update: (name, input) => base.update(name, input),
+      delete: (name) => base.delete(name),
+      restore: (name) => base.restore(name),
+      transferRequest: (name, code) => base.transferRequest(name, code),
+      transferQuery: (name) => base.transferQuery(name),
+      authCode: (name) => base.authCode(name),
+    };
+    setRegistrySetForTesting(
+      createRegistrySet({ mode: "real", adapters: [adapter] }),
+    );
+  }
 });

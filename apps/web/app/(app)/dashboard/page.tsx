@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorCard } from "@/components/ui/error-card";
 import { HelpTip } from "@/components/ui/help-tip";
+import { latestSyncedAt, shouldAutoSync } from "@/features/domains/auto-sync";
 import { DomainGridSkeleton } from "@/features/domains/domain-card-skeleton";
 import { DomainGrid, visibleDomains } from "@/features/domains/domain-grid";
 import { formatRelativeTime } from "@/features/domains/format";
@@ -62,34 +63,6 @@ function syncErrorBody(lastSyncedAt: string | null, now: Date): string {
       ? ""
       : `最終同期 ${formatRelativeTime(lastSyncedAt, now)}。`;
   return `${prefix}参照系は自動で 2 回再試行しました。しばらくして「最新化」を押してください。`;
-}
-
-/** 自動同期をスキップする鮮度のしきい値（ms）。「最新化」ボタンの手動実行はこのガードの対象外。 */
-const AUTO_SYNC_FRESHNESS_MS = 60_000;
-
-/** 一覧の中でもっとも新しい `syncedAt`。1 件もなければ null。 */
-function latestSyncedAt(domains: readonly DomainSummary[]): string | null {
-  return domains.reduce<string | null>(
-    (latest, domain) =>
-      latest === null || domain.syncedAt > latest ? domain.syncedAt : latest,
-    null,
-  );
-}
-
-/**
- * 背後の自動同期（マウント / シナリオ変更のたびに 1 回走る `useSyncDomains`）を実行してよいか。
- * 一覧の中でもっとも新しい `syncedAt` が 60 秒未満なら、まだ十分新しいのでスキップする。
- */
-export function shouldAutoSync(
-  domains: readonly DomainSummary[],
-  now: Date,
-): boolean {
-  const syncedAt = latestSyncedAt(domains);
-  if (syncedAt === null) {
-    return true;
-  }
-  const elapsed = now.getTime() - new Date(syncedAt).getTime();
-  return elapsed >= AUTO_SYNC_FRESHNESS_MS;
 }
 
 export default function DashboardPage() {
