@@ -8,8 +8,10 @@ import {
 import {
   type ApiErrorBody,
   apiErrorBodySchema,
+  type DomainUniqueness,
   domainListResponseSchema,
   domainSyncResponseSchema,
+  domainUniquenessSchema,
 } from "@dopamin/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../../src/index";
@@ -51,6 +53,7 @@ interface CheckPayload {
     registry: string | null;
     availability: "available" | "unavailable" | "error";
     reason?: string;
+    uniqueness: DomainUniqueness | null;
     error?: { code: string; message: string };
   }>;
 }
@@ -186,6 +189,38 @@ describe("POST /api/v1/domains/check（FR-03）", () => {
     const { results } = (await res.json()) as CheckPayload;
     expect(results[0]?.availability).toBe("unavailable");
   });
+
+  it("FR-05: available な結果に独自性スコアが付き、unavailable は null", async () => {
+    await createDomain("taken.com");
+    const res = await sendJson("/domains/check", {
+      names: ["googel.com", "zufemira.com", "taken.com"],
+    });
+    expect(res.status).toBe(200);
+    const { results } = (await res.json()) as CheckPayload;
+    const [typo, coined, taken] = results;
+    // 有名名の距離1 typo は「紛らわしい」帯で、最近傍に元の名前が入る
+    expect(domainUniquenessSchema.safeParse(typo?.uniqueness).success).toBe(
+      true,
+    );
+    expect(typo?.uniqueness?.label).toBe("low");
+    expect(typo?.uniqueness?.topSimilar[0]?.name).toBe("google");
+    // 造語は「独自性高」帯
+    expect(coined?.uniqueness?.label).toBe("high");
+    // 取得済み (unavailable) はスコアを付けない (§10.4 の例に準拠)
+    expect(taken?.availability).toBe("unavailable");
+    expect(taken?.uniqueness).toBeNull();
+  }, 60_000);
+
+  it("FR-05: sld + tlds 形式では同一 SLD のスコアが全 TLD で一致する", async () => {
+    const res = await sendJson("/domains/check", {
+      sld: "googel",
+      tlds: ["com", "xyz"],
+    });
+    const { results } = (await res.json()) as CheckPayload;
+    expect(results).toHaveLength(2);
+    expect(results[0]?.uniqueness).toEqual(results[1]?.uniqueness);
+    expect(results[0]?.uniqueness?.label).toBe("low");
+  }, 60_000);
 
   it("未対応 TLD は個別エラー項目になる（全体は 200）", async () => {
     const res = await sendJson("/domains/check", {

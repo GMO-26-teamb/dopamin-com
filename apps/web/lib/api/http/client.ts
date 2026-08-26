@@ -12,6 +12,7 @@ import {
   domainListResponseSchema,
   domainSummarySchema,
   domainSyncResponseSchema,
+  domainUniquenessSchema,
   registryIdSchema,
   transferResponseSchema,
 } from "@dopamin/shared";
@@ -109,7 +110,8 @@ export const checkResponseSchema = z.object({
       registry: registryIdSchema.nullable(),
       availability: domainAvailabilitySchema,
       reason: z.string().optional(),
-      uniqueness: z.null(),
+      // FR-05: available の行に付く（unavailable / error は null。§10.4）
+      uniqueness: domainUniquenessSchema.nullable(),
       error: z
         .object({ code: apiErrorCodeSchema, message: z.string() })
         .optional(),

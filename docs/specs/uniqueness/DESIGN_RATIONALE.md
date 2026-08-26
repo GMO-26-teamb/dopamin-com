@@ -45,6 +45,8 @@
 | rebase / push | Mac上で `git fetch` → `git rebase origin/main`(ab36924) → `git push -u origin feat/fr-05-uniqueness-score` | 完了(rebase後コミット cc43826。rebase前は c210461) |
 | 実リポジトリ 実vitest(@dopamin/shared) | Mac上 `pnpm check`(turbo経由・vitest 4.1.11)初回実行 2026-08-26 16:05 | 447 pass / 1 fail。唯一の失敗は property fuzz テストが **vitest既定timeout 5秒を超過**したもの(実測約22秒。スコア実装の不具合ではない)。本修正コミットで重いテスト3件に timeout を明示指定 |
 | api / web のテスト | 同実行内で未完走・失敗 | 新worktreeに gitignore 対象の `.env.local`(リポジトリ直下・apps/api)が未配置だったことが原因と推定(未完走はDB接続系のみ)。配置のうえ再実行 |
-| 再実行(`pnpm check` 全green)・PR作成 | **未完了** | 全green確認+PR作成をもって「本番統合完了」 |
+| 再実行 `pnpm check`(全green) | 2026-08-26 16:47、コーパス統合ブランチ上(コア+統合の両変更を含む)でMac実行 | **9タスク全て成功**(実vitest: web 494/494・registry 80/80 ほか、typecheck・lint含む) |
+| push | 両ブランチ完了 | `feat/fr-05-uniqueness-score` = c56e74a / `feat/fr-05-corpus-integration` = 5c0a0a6 |
+| PR作成・マージ | **未** | コーパス統合PR(実Tranco投入・API/Web接続・ADR-0003・AUDIT_TRANCO)まで完了をもって「FR-05本番統合完了」とする |
 
-※ 上記の未完了項目が完了するまでの状態は「TypeScript移植・単体検証完了」であり「本番統合完了」ではない。
+※ 上記の未完了項目が完了するまでは「FR-05本番統合完了」とはしない。
