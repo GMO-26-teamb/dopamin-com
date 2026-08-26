@@ -22,7 +22,7 @@
   `/domains*` `/transfers*` は各ルーターの先頭 `.use(requireSession)`
   （`apps/api/src/middleware/session.ts`、環境型は `AuthedEnv`）で全ルート認証必須。
   未認証・無効セッションは 401 `UNAUTHORIZED`（AC-01-3）。`c.get("user")` でログインユーザーを参照する。
-  所有権チェック（NFR-04 / AC-02-1）は `/domains/:name*` の各ルートで
+  所有権チェック（NFR-04。一覧側の AC-02-1 と同じ `user_id` 基準）は `/domains/:name*` の各ルートで
   `requireOwnedDomain(userId, name)`（`apps/api/src/services/domain.service.ts`）が行う:
   `domains` テーブル（FR-02 の DB キャッシュ）をドメイン名で引き、行が無ければ 404 `NOT_FOUND`
   （このアプリで保有していないドメイン）、行の `user_id` がログインユーザーと一致しなければ 403 `FORBIDDEN`。
