@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ApiError } from "./api-error";
+import { ApiException } from "./errors";
 
 const authEnvSchema = z.object({
   DATABASE_URL: z.string().min(1),
@@ -114,7 +114,7 @@ export function resetApiEnvCacheForTesting(): void {
 export function requireEnv<K extends keyof ApiEnv>(key: K): string {
   const value = getApiEnv()[key];
   if (typeof value !== "string" || value === "") {
-    throw new ApiError(500, "INTERNAL", `環境変数 ${key} が未設定です。`);
+    throw new ApiException("INTERNAL", `環境変数 ${key} が未設定です。`);
   }
   return value;
 }

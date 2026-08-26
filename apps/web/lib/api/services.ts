@@ -23,6 +23,7 @@ import type {
   OperationLog,
   SearchResult,
   SubdomainPlan,
+  SyncResult,
   Transfer,
 } from "./types";
 
@@ -42,13 +43,15 @@ export interface AuthService {
   addPasskey(): Promise<PasskeySummary>;
   listPasskeys(): Promise<PasskeySummary[]>;
   deletePasskey(id: string): Promise<void>;
+  /** PATCH /auth/passkeys/:id（FR-01。1〜32 文字、他人 / 不在は NOT_FOUND） */
+  renamePasskey(id: string, name: string): Promise<PasskeySummary>;
 }
 
 export interface DomainService {
   /** GET /domains（未実装 → NOT_IMPLEMENTED） */
   list(): Promise<DomainSummary[]>;
-  /** POST /domains/sync */
-  sync(): Promise<DomainSummary[]>;
+  /** POST /domains/sync（部分失敗は例外にせず `failures` に載せて返す・S-13） */
+  sync(): Promise<SyncResult>;
   /** GET /domains/:name */
   get(name: string): Promise<DomainDetail>;
   /** POST /domains/check */

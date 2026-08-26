@@ -11,6 +11,9 @@ import { createHttpServices } from "./http-services";
 interface Call {
   url: string;
   method: string;
+  /** 送った JSON ボディ（無ければ null）。 */
+  body: string | null;
+  contentType: string | null;
 }
 
 const calls: Call[] = [];
@@ -24,6 +27,8 @@ function stubFetch(status: number, body: unknown): void {
       calls.push({
         url: request ? request.url : String(input),
         method: request?.method ?? init?.method ?? "GET",
+        body: typeof init?.body === "string" ? init.body : null,
+        contentType: new Headers(init?.headers).get("content-type"),
       });
       return Promise.resolve(
         new Response(JSON.stringify(body), {
@@ -147,19 +152,30 @@ describe("domains.list（GET /domains）", () => {
 });
 
 describe("domains.sync（POST /domains/sync）", () => {
-  it("失敗が無ければ最新化した一覧を返す", async () => {
+  it("失敗が無ければ最新化した一覧と空の failures を返す", async () => {
     stubFetch(200, { domains: [apiSummary()], failures: [] });
 
-    const list = await services().domains.sync();
+    const result = await services().domains.sync();
 
     expect(calls[0]?.url).toContain("/api/v1/domains/sync");
     expect(calls[0]?.method).toBe("POST");
-    expect(list[0]?.displayStatus).toBe("active");
+    expect(result.domains[0]?.displayStatus).toBe("active");
+    expect(result.failures).toEqual([]);
   });
 
-  it("部分失敗（200 + failures）は例外に変換し、落ちたレジストリを載せる（S-13）", async () => {
+  it("部分失敗（200 + failures）でも例外にせず、成功行と stale 行の両方を返す（S-13）", async () => {
     stubFetch(200, {
-      domains: [apiSummary({ stale: true })],
+      domains: [
+        apiSummary(),
+        apiSummary({
+          name: "ng.xyz",
+          sld: "ng",
+          tld: "xyz",
+          registry: "kitaqnic",
+          stale: true,
+          syncedAt: "2026-08-25T00:00:00.000Z",
+        }),
+      ],
       failures: [
         {
           name: "ng.xyz",
@@ -169,20 +185,31 @@ describe("domains.sync（POST /domains/sync）", () => {
       ],
     });
 
-    const error = await services()
-      .domains.sync()
-      .catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(ApiClientError);
-    expect(error).toMatchObject({
-      code: "REGISTRY_UNAVAILABLE",
-      message: "Kitaqnic に接続できません。",
-      // TLD からレジストリを特定して Banner の見出しを具体名にする
-      registry: "kitaqnic",
-      retryable: true,
+    const result = await services().domains.sync();
+
+    // 一覧は捨てない。捨てると失敗行の stale がキャッシュに入らず S-13 が出せない
+    expect(result.domains).toHaveLength(2);
+    expect(result.domains[0]).toMatchObject({
+      name: "example.com",
+      stale: false,
     });
+    expect(result.domains[1]).toMatchObject({
+      name: "ng.xyz",
+      stale: true,
+      syncedAt: "2026-08-25T00:00:00.000Z",
+    });
+    // 落ちた相手は TLD から引く（Banner の見出しを具体名にする）
+    expect(result.failures).toEqual([
+      {
+        name: "ng.xyz",
+        code: "REGISTRY_UNAVAILABLE",
+        message: "Kitaqnic に接続できません。",
+        registry: "kitaqnic",
+      },
+    ]);
   });
 
-  it("両レジストリが落ちているときは registry を特定しない", async () => {
+  it("両レジストリが落ちているときは failures に両方の registry が載る", async () => {
     stubFetch(200, {
       domains: [],
       failures: [
@@ -191,11 +218,43 @@ describe("domains.sync（POST /domains/sync）", () => {
       ],
     });
 
-    const error = (await services()
+    const { failures } = await services().domains.sync();
+
+    expect(failures.map((f) => f.registry)).toEqual(["kitaqsign", "kitaqnic"]);
+  });
+
+  it("未対応 TLD の失敗は registry を特定しない（null）", async () => {
+    stubFetch(200, {
+      domains: [],
+      failures: [
+        {
+          name: "a.example",
+          code: "VALIDATION_ERROR",
+          message: "未対応の TLD です。",
+        },
+      ],
+    });
+
+    const { failures } = await services().domains.sync();
+
+    expect(failures[0]?.registry).toBeNull();
+  });
+
+  it("リクエスト自体が失敗したときは例外にする（401 / 5xx）", async () => {
+    stubFetch(401, {
+      error: {
+        code: "UNAUTHORIZED",
+        message: "ログインが必要です。",
+        retryable: false,
+      },
+    });
+
+    const error = await services()
       .domains.sync()
-      .catch((e: unknown) => e)) as ApiClientError;
-    expect(error.code).toBe("REGISTRY_TIMEOUT");
-    expect(error.registry).toBeUndefined();
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ApiClientError);
+    expect(error).toMatchObject({ code: "UNAUTHORIZED" });
   });
 });
 
@@ -235,5 +294,114 @@ describe("domains.get（GET /domains/:name）", () => {
     });
     // 移管可能日は登録日 + 60 日（参考表示）
     expect(detail.transferableFrom).toBe("2026-09-30T00:00:00.000Z");
+  });
+});
+
+// ---- settings（FR-17 / requirements §10.1） ----
+
+/** `GET /auth/me` の応答（packages/shared の meResponseSchema と同じ形）。 */
+const ME = {
+  user: {
+    id: "00000000-0000-4000-8000-000000000001",
+    displayName: "たくたく",
+  },
+  features: { demoReset: false },
+  ai: {
+    provider: "google",
+    model: "gemini-2.5-flash",
+    providers: [
+      { id: "google", models: ["gemini-2.5-flash", "gemini-2.5-pro"] },
+    ],
+  },
+};
+
+describe("settings.me（GET /auth/me）", () => {
+  it("同一オリジンの /api/v1/auth/me を GET し、meResponseSchema で検証した結果を返す", async () => {
+    stubFetch(200, ME);
+
+    const me = await services().settings.me();
+
+    expect(me).toEqual(ME);
+    expect(calls[0]?.url).toBe("/api/v1/auth/me");
+    expect(calls[0]?.method).toBe("GET");
+  });
+
+  it("200 でも形が違えば INTERNAL の ApiClientError", async () => {
+    stubFetch(200, { user: ME.user });
+
+    const error = await services()
+      .settings.me()
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiClientError);
+    expect((error as ApiClientError).code).toBe("INTERNAL");
+  });
+
+  it("401 は UNAUTHORIZED の ApiClientError（status ではなくコードで判定）", async () => {
+    stubFetch(401, {
+      error: {
+        code: "UNAUTHORIZED",
+        message: "ログインが必要です。",
+        retryable: false,
+        requestId: "req_test",
+      },
+    });
+
+    const error = await services()
+      .settings.me()
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiClientError);
+    expect((error as ApiClientError).code).toBe("UNAUTHORIZED");
+    expect((error as ApiClientError).requestId).toBe("req_test");
+  });
+});
+
+describe("settings.updateAi（PATCH /settings/ai）", () => {
+  it("/api/v1/settings/ai に JSON を PATCH し、aiSettingsResponseSchema で検証して返す", async () => {
+    stubFetch(200, { ...ME.ai, provider: "google", model: "gemini-2.5-pro" });
+
+    const ai = await services().settings.updateAi({
+      provider: "google",
+      model: "gemini-2.5-pro",
+    });
+
+    expect(ai.model).toBe("gemini-2.5-pro");
+    expect(calls[0]?.url).toBe("/api/v1/settings/ai");
+    expect(calls[0]?.method).toBe("PATCH");
+    expect(calls[0]?.contentType).toBe("application/json");
+    expect(JSON.parse(calls[0]?.body ?? "null")).toEqual({
+      provider: "google",
+      model: "gemini-2.5-pro",
+    });
+  });
+
+  it("無効プロバイダの 400 VALIDATION_ERROR を ApiClientError に変換する", async () => {
+    stubFetch(400, {
+      error: {
+        code: "VALIDATION_ERROR",
+        message: "このプロバイダは有効化されていません。",
+        retryable: false,
+        requestId: "req_test",
+        details: { provider: "anthropic", enabledProviders: ["google"] },
+      },
+    });
+
+    const error = await services()
+      .settings.updateAi({ provider: "anthropic", model: "claude-haiku-4-5" })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiClientError);
+    expect((error as ApiClientError).code).toBe("VALIDATION_ERROR");
+    expect((error as ApiClientError).retryable).toBe(false);
+  });
+});
+
+describe("settings.demoReset（POST /demo/reset）", () => {
+  it("API 未実装のため NOT_IMPLEMENTED のまま（FR-16 は別トラック）", async () => {
+    stubFetch(200, {});
+    const error = await services()
+      .settings.demoReset()
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiClientError);
+    expect((error as ApiClientError).code).toBe("NOT_IMPLEMENTED");
+    expect(calls).toHaveLength(0);
   });
 });

@@ -2,13 +2,16 @@
  * HTTP 実装（fe-ui 設計 §4.6）。`NEXT_PUBLIC_API_MODE=http` のときに使う。
  *
  * 各メソッドの上に docs/requirements.md §10.1 のルートを書く。
- * まだ API が無いルート（一覧・同期・AI・サブドメイン設計・ログ・設定・移管一覧）は
+ * まだ API が無いルート（AI・サブドメイン設計・ログ・デモリセット・移管一覧）は
  * `NOT_IMPLEMENTED` を投げ、画面側は `toErrorCopy` の文言でその旨を出す。
  */
 
 import {
+  aiSettingsResponseSchema,
   type DomainCheckRequest,
+  type DomainSyncResponse,
   deriveDisplayStatus,
+  meResponseSchema,
   registryIdForDomain,
   splitDomainName,
 } from "@dopamin/shared";
@@ -19,15 +22,17 @@ import {
   fetchPasskeys,
   loginWithPasskey,
   logout,
+  renamePasskeyById,
   signupWithPasskey,
 } from "../../webauthn";
 import { transferEligibleAt } from "../derive";
-import { ApiClientError, notImplemented, toApiClientError } from "../errors";
+import { notImplemented, toApiClientError } from "../errors";
 import type { Services } from "../services";
 import type {
   DomainDetail,
   DomainSummary,
   SearchResult,
+  SyncFailure,
   Transfer,
 } from "../types";
 import {
@@ -84,28 +89,17 @@ function toDomainDetail({ domain, summary }: DomainEnvelope): DomainDetail {
 }
 
 /**
- * `POST /domains/sync` の部分失敗を画面用のエラーにする（S-13 / AC-18-1）。
+ * `POST /domains/sync` の失敗 1 件を画面用にする（S-13 / AC-18-1）。
  *
- * API は 200 + `failures[]` で部分失敗を返すが、画面は「同期エラーの Banner を出しつつ
- * キャッシュ表示を続ける」= mutation を reject する契約なので、ここで例外に変換する。
- * 落ちたレジストリが 1 つに特定できるときだけ `registry` を載せ、見出しを具体名にする。
+ * API は 200 + `failures[]` で部分失敗を返す。ここで例外にはせず、落ちた相手を
+ * 名前の TLD から引いて載せるだけにする（Banner の見出しを具体名にするため）。
+ * 成功した行と失敗した行の両方を画面に出すのが S-13 の仕様なので、
+ * ここで throw すると失敗行の `stale` がキャッシュに入らなくなる。
  */
-function syncFailureError(
-  failures: readonly { name: string; code: string; message: string }[],
-): ApiClientError {
-  const first = failures[0];
-  const registries = new Set(
-    failures
-      .map((f) => registryIdForDomain(f.name))
-      .filter((id) => id !== null),
-  );
-  const only = registries.size === 1 ? [...registries][0] : undefined;
-  return new ApiClientError({
-    // code は §10.3 の統一コード。zod で検証済みの値がそのまま入る
-    code: (first?.code ?? "INTERNAL") as ApiClientError["code"],
-    message: first?.message ?? "同期に失敗しました。",
-    ...(only === undefined ? {} : { registry: only }),
-  });
+function toSyncFailure(
+  failure: DomainSyncResponse["failures"][number],
+): SyncFailure {
+  return { ...failure, registry: registryIdForDomain(failure.name) };
 }
 
 /** レジストリの移管ステータス文字列を画面用の状態に寄せる。 */
@@ -181,6 +175,15 @@ export function createHttpServices(): Services {
           throw toApiClientError(e);
         }
       },
+
+      /** PATCH /auth/passkeys/:id */
+      async renamePasskey(id, name) {
+        try {
+          return await renamePasskeyById(id, name);
+        } catch (e) {
+          throw toApiClientError(e);
+        }
+      },
     },
 
     domains: {
@@ -193,16 +196,21 @@ export function createHttpServices(): Services {
         return domains.map(toDomainSummaryVm);
       },
 
-      /** POST /domains/sync（FR-02 最新化。部分失敗は例外に変換する） */
+      /**
+       * POST /domains/sync（FR-02 最新化）。
+       * 部分失敗は 200 のまま `failures` に載せて返す。失敗した行は API 側で
+       * `stale: true` になっているので、そのままキャッシュに書けば S-13 の
+       * 「失敗したカードだけ Stale」が成立する。
+       */
       async sync() {
         const { domains, failures } = await unwrap(
           apiClient.api.v1.domains.sync.$post(),
           domainSyncSchema,
         );
-        if (failures.length > 0) {
-          throw syncFailureError(failures);
-        }
-        return domains.map(toDomainSummaryVm);
+        return {
+          domains: domains.map(toDomainSummaryVm),
+          failures: failures.map(toSyncFailure),
+        };
       },
 
       /** GET /domains/:name（FR-07。失敗時は stale なキャッシュが返る・AC-07-2） */
@@ -421,14 +429,22 @@ export function createHttpServices(): Services {
     },
 
     settings: {
-      /** GET /auth/me + AI 設定（FR-17 の取得 API が未実装） */
+      /**
+       * GET /auth/me（FR-01 / FR-16 / FR-17、requirements §10.1）。
+       * `MeResponse`（packages/shared）は ViewModel `Me`（types.ts）と同じ形なので写像しない。
+       */
       me() {
-        return Promise.reject(notImplemented("GET /settings"));
+        return unwrap(apiClient.api.v1.auth.me.$get(), meResponseSchema);
       },
-      /** PATCH /settings/ai（FR-17、未実装） */
-      updateAi() {
-        return Promise.reject(notImplemented("PATCH /settings/ai"));
+
+      /** PATCH /settings/ai（FR-17）。更新後の実効値が返る */
+      updateAi(input) {
+        return unwrap(
+          apiClient.api.v1.settings.ai.$patch({ json: input }),
+          aiSettingsResponseSchema,
+        );
       },
+
       /** POST /demo/reset（FR-16、未実装） */
       demoReset() {
         return Promise.reject(notImplemented("POST /demo/reset"));

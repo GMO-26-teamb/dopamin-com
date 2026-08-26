@@ -90,18 +90,28 @@ describe("DashboardPage", () => {
     expect(screen.getByText("0件")).toBeInTheDocument();
   });
 
-  it("S-13: 同期に失敗したら Banner Warn + キャッシュ表示（AC-18-1）", async () => {
+  it("S-13: 同期に失敗したカードだけ Stale にし、生きている側は操作できる（AC-18-1）", async () => {
     renderDashboard("stale");
 
     const banner = await screen.findByRole("alert");
     expect(banner).toHaveTextContent(
       "Kitaqsign が応答しません — 一覧はキャッシュを表示しています",
     );
+    expect(banner).toHaveTextContent("2 件が最新化できませんでした。");
     expect(screen.getByText(/（キャッシュ）$/)).toBeInTheDocument();
-    expect(screen.getAllByText("未同期")).toHaveLength(4);
-    // 更新系は Disabled、参照系（詳細）は押せる
+
+    // 落ちた kitaqsign（takutaku.com / tkt-lab.net）だけが未同期。
+    // kitaqnic 側は最新化できているのでバッジは付かない = 部分縮退が画面に出ている
+    expect(screen.getAllByText("未同期")).toHaveLength(2);
+    // 落ちた側の更新系は Disabled な button になる
     expect(screen.getByRole("button", { name: "更新" })).toBeDisabled();
-    expect(screen.getAllByRole("link", { name: "詳細" }).length).toBe(3);
+    // 生きている側は実行できるので詳細へのリンクとして描かれる（全画面を止めない・AC-18-1）
+    expect(
+      screen.getByRole("link", { name: "今すぐ更新" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "復旧する" })).toBeInTheDocument();
+    // 参照系（詳細）は stale でも塞がない
+    expect(screen.getAllByRole("link", { name: "詳細" })).toHaveLength(3);
   });
 
   it("参照系が落ちたら Error Card + 再試行（ui-screens §4）", async () => {

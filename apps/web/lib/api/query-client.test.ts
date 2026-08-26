@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ApiClientError } from "./errors";
 import { createQueryClient, expiredLoginUrl } from "./query-client";
+import { ALLOW_UNAUTHORIZED_META } from "./query-meta";
 
 function unauthorized(): ApiClientError {
   return new ApiClientError({
@@ -106,6 +107,25 @@ describe("createQueryClient の 401 ハンドラ", () => {
     const client = createQueryClient({ navigate });
 
     await runFailingQuery(client, unauthorized());
+
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("meta.allowUnauthorized のクエリは 401 でも送らない（SignedInRedirect の未ログイン確認）", async () => {
+    const navigate = vi.fn();
+    const client = createQueryClient({
+      navigate,
+      redirectOnUnauthorized: true,
+    });
+
+    await client
+      .fetchQuery({
+        queryKey: ["query-client-test", "probe"],
+        queryFn: () => Promise.reject(unauthorized()),
+        retry: false,
+        meta: ALLOW_UNAUTHORIZED_META,
+      })
+      .catch(() => undefined);
 
     expect(navigate).not.toHaveBeenCalled();
   });

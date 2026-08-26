@@ -19,6 +19,7 @@ import {
 import { useMemo } from "react";
 import type { ApiClientError } from "./errors";
 import { type QueryScope, useQueryScope, useServices } from "./provider";
+import { ALLOW_UNAUTHORIZED_META } from "./query-meta";
 import type { CandidateService, DomainUpdateInput } from "./services";
 import type {
   AiLog,
@@ -31,6 +32,7 @@ import type {
   OperationLog,
   SearchResult,
   SubdomainPlan,
+  SyncResult,
   Transfer,
 } from "./types";
 
@@ -75,12 +77,23 @@ type Mutation<TData, TVariables = void> = UseMutationResult<
 
 // ---- 設定・ユーザー（FR-01 / 16 / 17） ----
 
-export function useMe(): Query<Me> {
+export interface UseMeOptions {
+  /**
+   * 「ログイン済みか確かめるだけ」の用途（S-00 / S-02 の `SignedInRedirect`）。
+   * 401 は未ログインの正常系なので `/login?reason=expired` への誘導（query-client.tsx）を抑止する。
+   * queryKey は通常の `useMe()` と同じ（`meta` は最後にマウントした observer のものが使われるが、
+   * S-00 / S-02 と `(app)` 配下は同時に描画されない）。
+   */
+  probe?: boolean;
+}
+
+export function useMe(options: UseMeOptions = {}): Query<Me> {
   const services = useServices();
   const keys = useQueryKeys();
   return useQuery({
     queryKey: keys.me(),
     queryFn: () => services.settings.me(),
+    ...(options.probe ? { meta: ALLOW_UNAUTHORIZED_META } : {}),
   });
 }
 
@@ -144,6 +157,21 @@ export function useDeletePasskey(): Mutation<void, string> {
   });
 }
 
+export function useRenamePasskey(): Mutation<
+  PasskeySummary,
+  { id: string; name: string }
+> {
+  const services = useServices();
+  const queryClient = useQueryClient();
+  const keys = useQueryKeys();
+  return useMutation({
+    mutationFn: ({ id, name }) => services.auth.renamePasskey(id, name),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.passkeys() });
+    },
+  });
+}
+
 // ---- ドメイン（FR-02 / 03 / 06〜12） ----
 
 export function useDomains(): Query<DomainSummary[]> {
@@ -155,14 +183,21 @@ export function useDomains(): Query<DomainSummary[]> {
   });
 }
 
-export function useSyncDomains(): Mutation<DomainSummary[]> {
+/**
+ * FR-02 最新化。部分失敗（200 + `failures`）は例外にしない。
+ *
+ * 失敗した行も API が `stale: true` を付けて返すので、`failures` の有無に関わらず
+ * 一覧を必ず書き込む。そうしないと「同期に失敗したカードだけ Stale」（S-13）も、
+ * 同じ同期で成功した行の反映も画面に出ない。Banner は呼び出し側が `failures` から出す。
+ */
+export function useSyncDomains(): Mutation<SyncResult> {
   const services = useServices();
   const queryClient = useQueryClient();
   const keys = useQueryKeys();
   return useMutation({
     mutationFn: () => services.domains.sync(),
-    onSuccess: (domains) => {
-      queryClient.setQueryData(keys.domains(), domains);
+    onSuccess: (result) => {
+      queryClient.setQueryData(keys.domains(), result.domains);
     },
   });
 }

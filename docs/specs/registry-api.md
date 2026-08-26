@@ -18,8 +18,16 @@
 
 ### 非スコープ（後続タスク）
 
-- 認証・セッション（FR-01）。**現状の全ルートは認証なし**。FR-01 実装時に `session`
-  ミドルウェアと所有権チェック（NFR-04）を差し込む。
+- ~~認証・セッション（FR-01）。現状の全ルートは認証なし~~ → 解決（2026-08-26、#50 / #129）:
+  `/domains*` `/transfers*` は各ルーターの先頭 `.use(requireSession)`
+  （`apps/api/src/middleware/session.ts`、環境型は `AuthedEnv`）で全ルート認証必須。
+  未認証・無効セッションは 401 `UNAUTHORIZED`（AC-01-3）。`c.get("user")` でログインユーザーを参照する。
+  所有権チェック（NFR-04。一覧側の AC-02-1 と同じ `user_id` 基準）は `/domains/:name*` の各ルートで
+  `requireOwnedDomain(userId, name)`（`apps/api/src/services/domain.service.ts`）が行う:
+  `domains` テーブル（FR-02 の DB キャッシュ）をドメイン名で引き、行が無ければ 404 `NOT_FOUND`
+  （このアプリで保有していないドメイン）、行の `user_id` がログインユーザーと一致しなければ 403 `FORBIDDEN`。
+  未対応 TLD の 400 `VALIDATION_ERROR`（`adapterForDomain`）が所有権より先に返る。
+  `/transfers*` は移管の性質上、所有権は見ない（認証のみ）。
 - DB キャッシュ（FR-02 一覧・`domains` テーブル保存）、操作ログの永続化（FR-15）、
   独自性スコア（FR-05。check レスポンスの `uniqueness` は常に `null` のプレースホルダ）。
 
@@ -30,14 +38,18 @@
 | GET | `/health` | ✅ | 各レジストリの `hello` 疎通結果 + レイテンシを返す |
 | POST | `/domains/check` | ✅ | `{sld, tlds[]}` or `{names[]}`。レジストリ単位で並列、部分失敗許容（AC-03-2） |
 | POST | `/domains` | ✅ | check 再実行 → contact 作成 → create → info（AC-06 系）。authInfo はサーバー生成 |
-| GET | `/domains/:name` | ✅ | `info` で最新化（DB キャッシュ導入前のため stale フォールバックなし） |
+| GET | `/domains/:name` | ✅ | `info` で最新化して DB キャッシュに write-through。レジストリに繋がらない（`REGISTRY_TIMEOUT` / `REGISTRY_UNAVAILABLE` / `REGISTRY_SPEC_MISMATCH`）ときは DB キャッシュを `stale: true` + `syncedAt` 付きで返す（AC-07-2、#129）。`NOT_FOUND` や拒否応答はそのまま返す |
 | POST | `/domains/:name/renew` | ✅ | `{period}`。curExpDate は API 側で `info` から取得。10 年上限ガード（AC-08-2） |
 | PATCH | `/domains/:name` | ✅ | `{nameservers?（全量指定→差分変換）, clientStatuses?{add,remove}}`。コンタクト変更は未対応 |
 | DELETE | `/domains/:name` | ✅ | 削除ロック中 409（AC-10-2）。削除後の状態（RGP）を返す |
 | POST | `/domains/:name/restore` | ✅ | `redemptionPeriod` 中のみ（AC-11-2） |
-| GET | `/domains/:name/auth-code` | ✅ | `rotate-auth-info` を実行（取得のたびに authInfo が変わる） |
+| POST | `/domains/:name/auth-code` | ✅ | `rotate-auth-info` を実行（取得のたびに authInfo が変わる）。再発行という副作用があるため GET ではなく POST（§10.2 の Origin 検証を通すため） |
 | POST | `/transfers` | ✅ | `{name, authCode}` → transfer request → 202 |
-| GET | `/transfers/:name` | ✅ | **spec の `GET /transfers/:id` からの変更**: DB 導入前のためドメイン名で `info` から導出 |
+| GET | `/transfers/:name` | ✅ | **spec の `GET /transfers/:id` からの変更**: ドメイン名で `transferQuery`（`info` の `pendingTransfer` から導出）を返す。DB には保存せず一覧化もしない（移管の永続化は #56） |
+
+本 spec のルート（`/domains*` `/transfers*`）はすべて `requireSession` 必須（Cookie `dopamin_session`。requirements §10.1 の「認証: 要」に対応）。
+統合テストは `apps/api/test/helpers/session.ts` の `installTestSession()` + `SESSION_COOKIE_HEADER`（DB 不要の seam）
+または `createTestSession(db)`（pglite に実ユーザー行・セッション行を作る）で Cookie を付けて叩く（`docs/testing.md` §1）。
 
 エラーは全ルートで統一形式（requirements.md §10.3）。`RegistryError` の変換は
 `apps/api/src/middleware/error-handler.ts`、EPP result code → 正規化コードの対応は

@@ -88,6 +88,8 @@ describe("requireSession (AC-01-3)", () => {
     ["POST", "/api/v1/auth/logout"],
     ["POST", "/api/v1/auth/passkeys/register/options"],
     ["DELETE", "/api/v1/auth/passkeys/some-id"],
+    ["PATCH", "/api/v1/auth/passkeys/some-id"],
+    ["PATCH", "/api/v1/settings/ai"],
   ])(
     "%s %s returns 401 UNAUTHORIZED without a session cookie",
     async (method, path) => {

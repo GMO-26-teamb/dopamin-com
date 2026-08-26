@@ -12,9 +12,9 @@ import {
   OperationLogWriteTimeoutError,
   recordOperationLog,
 } from "../services/operation-log.service";
-import { ApiError } from "./api-error";
 import { getDb } from "./db";
 import { type ApiEnv, getApiEnv } from "./env";
+import { ApiException } from "./errors";
 import { getRequestContext, nextClTrid } from "./operation-log-context";
 
 function kitaqConfig(
@@ -114,7 +114,7 @@ export function setRegistrySetForTesting(set: RegistrySet | null): void {
 export function adapterForDomain(name: string): RegistryAdapter {
   const adapter = getRegistrySet().forDomain(name);
   if (!adapter) {
-    throw new ApiError(400, "VALIDATION_ERROR", "未対応の TLD です。", {
+    throw new ApiException("VALIDATION_ERROR", "未対応の TLD です。", {
       supportedTlds: SUPPORTED_TLDS,
     });
   }

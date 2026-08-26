@@ -64,9 +64,29 @@ describe("createMockServices - domains", () => {
     expect((error as ApiClientError).code).toBe("REGISTRY_UNAVAILABLE");
   });
 
-  it("stale シナリオはキャッシュ表示（stale: true）で返す", async () => {
+  it("一覧は stale を立てない（DB キャッシュを読むだけで同期を試みない）", async () => {
     const list = await services("stale").domains.list();
-    expect(list.every((d) => d.stale)).toBe(true);
+    expect(list.every((d) => !d.stale)).toBe(true);
+  });
+
+  it("stale シナリオの sync は kitaqsign だけ落ちた部分失敗を返す（S-13 / AC-18-1）", async () => {
+    const { domains, failures } = await services("stale").domains.sync();
+
+    const down = domains.filter((d) => d.stale).map((d) => d.name);
+    const alive = domains.filter((d) => !d.stale);
+
+    // 落ちた側だけ stale。もう一方は最新化できている = 部分縮退が画面に出せる
+    expect(down).toEqual(["takutaku.com", "tkt-lab.net"]);
+    expect(alive.every((d) => d.registry === "kitaqnic")).toBe(true);
+    expect(alive.length).toBeGreaterThan(0);
+
+    expect(failures.map((f) => f.name)).toEqual(down);
+    expect(failures.every((f) => f.registry === "kitaqsign")).toBe(true);
+  });
+
+  it("失敗が無いシナリオの sync は failures が空", async () => {
+    const { failures } = await services("default").domains.sync();
+    expect(failures).toEqual([]);
   });
 });
 
@@ -321,6 +341,47 @@ describe("createMockServices - その他", () => {
     await expect(services("default").auth.listPasskeys()).resolves.toHaveLength(
       2,
     );
+  });
+
+  it("renamePasskey は store に反映され、listPasskeys で新しい名前が読める", async () => {
+    const api = services("default");
+    const renamed = await api.auth.renamePasskey(
+      "pk_01HZY0000000000000000001",
+      "仕事用 MacBook",
+    );
+
+    expect(renamed).toMatchObject({
+      id: "pk_01HZY0000000000000000001",
+      name: "仕事用 MacBook",
+      deviceType: "multiDevice",
+    });
+    const list = await api.auth.listPasskeys();
+    expect(list.map((p) => p.name)).toEqual(["仕事用 MacBook", "iPhone"]);
+  });
+
+  it("renamePasskey は前後の空白を除去し、0・33 文字は VALIDATION_ERROR", async () => {
+    const api = services("default");
+    await expect(
+      api.auth.renamePasskey("pk_01HZY0000000000000000002", "  自宅  "),
+    ).resolves.toMatchObject({ name: "自宅" });
+
+    const tooLong = await api.auth
+      .renamePasskey("pk_01HZY0000000000000000002", "あ".repeat(33))
+      .catch((e: unknown) => e);
+    expect(tooLong).toBeInstanceOf(ApiClientError);
+    expect((tooLong as ApiClientError).code).toBe("VALIDATION_ERROR");
+  });
+
+  it("renamePasskey は不在なら NOT_FOUND、error シナリオなら INTERNAL", async () => {
+    const missing = await services("default")
+      .auth.renamePasskey("pk_nope", "x")
+      .catch((e: unknown) => e);
+    expect((missing as ApiClientError).code).toBe("NOT_FOUND");
+
+    const failed = await services("error")
+      .auth.renamePasskey("pk_01HZY0000000000000000001", "x")
+      .catch((e: unknown) => e);
+    expect((failed as ApiClientError).code).toBe("INTERNAL");
   });
 
   it("resetMockStore で store の変更が巻き戻る", async () => {
