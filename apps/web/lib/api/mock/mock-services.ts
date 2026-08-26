@@ -12,6 +12,7 @@ import {
   deriveDisplayStatus,
   isDopaminNameservers,
   type PasskeySummary,
+  passkeyNameSchema,
   splitDomainName,
   uniquenessLabel,
 } from "@dopamin/shared";
@@ -403,6 +404,28 @@ export function createMockServices(
           fail("CONFLICT", "最後のパスキーは削除できません。");
         }
         store.passkeys = store.passkeys.filter((p) => p.id !== id);
+      },
+      async renamePasskey(id, name) {
+        await wait();
+        if (isError) {
+          fail("INTERNAL", "パスキーの名前を変更できませんでした。");
+        }
+        // API と同じ制約（passkeyNameSchema）で弾き、trim 済みの値を保存する
+        const parsed = passkeyNameSchema.safeParse(name);
+        if (!parsed.success) {
+          fail(
+            "VALIDATION_ERROR",
+            "パスキーの名前は 1〜32 文字で入力してください。",
+          );
+        }
+        const store = getMockStore();
+        const current = store.passkeys.find((p) => p.id === id);
+        if (current === undefined) {
+          fail("NOT_FOUND", "パスキーが見つかりません。");
+        }
+        const renamed: PasskeySummary = { ...current, name: parsed.data };
+        store.passkeys = store.passkeys.map((p) => (p.id === id ? renamed : p));
+        return renamed;
       },
     },
 

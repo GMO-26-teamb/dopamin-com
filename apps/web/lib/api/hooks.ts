@@ -156,6 +156,21 @@ export function useDeletePasskey(): Mutation<void, string> {
   });
 }
 
+export function useRenamePasskey(): Mutation<
+  PasskeySummary,
+  { id: string; name: string }
+> {
+  const services = useServices();
+  const queryClient = useQueryClient();
+  const keys = useQueryKeys();
+  return useMutation({
+    mutationFn: ({ id, name }) => services.auth.renamePasskey(id, name),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.passkeys() });
+    },
+  });
+}
+
 // ---- ドメイン（FR-02 / 03 / 06〜12） ----
 
 export function useDomains(): Query<DomainSummary[]> {

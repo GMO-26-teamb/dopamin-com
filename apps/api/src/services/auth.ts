@@ -14,6 +14,7 @@ import {
   verifyRegistrationResponse,
 } from "@simplewebauthn/server";
 import { and, eq, lt } from "drizzle-orm";
+import { passkeyNameFromAaguid } from "../lib/aaguid";
 import { env } from "../lib/env";
 import { ApiException } from "../lib/errors";
 import { createSession } from "./session";
@@ -24,10 +25,6 @@ const CHALLENGE_TTL_MS = 5 * 60 * 1000; // 5 分（§12.4）
 function userIdToHandle(userId: string): Uint8Array<ArrayBuffer> {
   // 新しい ArrayBuffer にコピーして返す（TS の Uint8Array<ArrayBufferLike> と区別されるため）
   return new Uint8Array(new TextEncoder().encode(userId));
-}
-
-function defaultPasskeyName(deviceType: string | undefined): string {
-  return deviceType === "multiDevice" ? "同期パスキー" : "このデバイス";
 }
 
 /**
@@ -184,7 +181,7 @@ export async function verifyRegistration(
       deviceType: info.credentialDeviceType,
       backedUp: info.credentialBackedUp,
       aaguid: info.aaguid,
-      name: defaultPasskeyName(info.credentialDeviceType),
+      name: passkeyNameFromAaguid(info.aaguid, info.credentialDeviceType),
     });
     return createSession(tx, user.id, userAgent);
   });
@@ -380,7 +377,7 @@ export async function verifyAddPasskey(
       deviceType: info.credentialDeviceType,
       backedUp: info.credentialBackedUp,
       aaguid: info.aaguid,
-      name: defaultPasskeyName(info.credentialDeviceType),
+      name: passkeyNameFromAaguid(info.aaguid, info.credentialDeviceType),
     })
     .returning();
   const row = rows[0];
@@ -425,6 +422,34 @@ export async function deletePasskey(
         eq(schema.passkeyCredentials.userId, userId),
       ),
     );
+}
+
+/**
+ * パスキーの表示名を変更する（FR-01 spec §3.4、PATCH /auth/passkeys/:id）。
+ * 所有者一致を WHERE に含めて UPDATE し、0 行なら「他人のもの」も「存在しない」も同じ 404 にする
+ * （所有の有無を漏らさない）。name は zod（passkeyNameSchema）で trim 済みの値を受け取る。
+ */
+export async function renamePasskey(
+  db: Db,
+  userId: string,
+  credentialId: string,
+  name: string,
+): Promise<PasskeySummary> {
+  const rows = await db
+    .update(schema.passkeyCredentials)
+    .set({ name })
+    .where(
+      and(
+        eq(schema.passkeyCredentials.id, credentialId),
+        eq(schema.passkeyCredentials.userId, userId),
+      ),
+    )
+    .returning();
+  const row = rows[0];
+  if (!row) {
+    throw new ApiException("NOT_FOUND", "パスキーが見つかりません。");
+  }
+  return toPasskeySummary(row);
 }
 
 function toPasskeySummary(row: {

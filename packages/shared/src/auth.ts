@@ -43,6 +43,14 @@ export const passkeySummarySchema = z.object({
   lastUsedAt: z.string().nullable(),
 });
 
+// パスキーの表示名: 表示名と同じ 1〜32 文字（FR-01 spec §3.4）。前後の空白は除去し、空白のみは拒否する
+export const passkeyNameSchema = z.string().trim().min(1).max(32);
+
+// PATCH /auth/passkeys/:id
+export const passkeyRenameRequestSchema = z.object({
+  name: passkeyNameSchema,
+});
+
 /**
  * `GET /auth/me` のレスポンス（FR-01 / FR-16 / FR-17）。
  *
@@ -71,3 +79,4 @@ export type RegisterOptionsRequest = z.infer<
   typeof registerOptionsRequestSchema
 >;
 export type PasskeyVerifyRequest = z.infer<typeof passkeyVerifyRequestSchema>;
+export type PasskeyRenameRequest = z.infer<typeof passkeyRenameRequestSchema>;
