@@ -133,7 +133,6 @@ export default function DashboardPage() {
     error: sync.error,
     failures: sync.data?.failures ?? [],
     domains: list,
-    now,
   });
   const banner =
     notice !== null && syncOutcome !== dismissed && !domains.isError

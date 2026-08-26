@@ -1,8 +1,6 @@
 import type { RegistryId } from "@dopamin/shared";
 import type { ApiClientError } from "@/lib/api/errors";
 import type { DomainSummary, SyncFailure } from "@/lib/api/types";
-import { latestSyncedAt } from "./auto-sync";
-import { formatRelativeTime } from "./format";
 import { REGISTRY_LABEL } from "./registry-label";
 
 /**
@@ -24,7 +22,6 @@ export interface SyncNoticeInput {
   failures: readonly SyncFailure[];
   /** 現在表示している一覧。落ちた相手を特定する最後の手がかりに使う。 */
   domains: readonly DomainSummary[];
-  now: Date;
 }
 
 /**
@@ -52,23 +49,6 @@ function downRegistries(input: SyncNoticeInput): RegistryId[] {
   ];
 }
 
-/**
- * Banner に出す「最終同期」。
- *
- * 失敗した行が分かるならその中で**もっとも古い**時刻を使う。一覧全体の最新値を使うと、
- * 同じ同期で成功した行に引きずられて「3分前」になり、42 分前で止まっている
- * カードの実態と食い違う。失敗行を特定できないとき（ハード失敗）だけ全体の最新値に落とす。
- */
-function staleSince(input: SyncNoticeInput): string | null {
-  const failed = new Set(input.failures.map((failure) => failure.name));
-  const syncedAt = input.domains
-    .filter((domain) => failed.has(domain.name))
-    .map((domain) => domain.syncedAt);
-  return syncedAt.length === 0
-    ? latestSyncedAt(input.domains)
-    : syncedAt.reduce((oldest, at) => (at < oldest ? at : oldest));
-}
-
 /** 「Kitaqsign が応答しません」の主語。特定できなければ総称にする。 */
 function subjectOf(registries: readonly RegistryId[]): string {
   if (registries.length >= 2) {
@@ -91,6 +71,10 @@ function titleFor(registries: readonly RegistryId[]): string {
  * 部分失敗（`failures`）とリクエストごとの失敗（`error`）の両方をここで扱う。
  * 部分失敗のときだけ「n 件が最新化できませんでした」を添えて、
  * 一覧の一部だけが古いことを明示する。
+ *
+ * 「最終同期 n 分前」は Banner に書かない。S-13 では stale なカード自身が
+ * 「最終同期 n 分前」を持ち、ヘッダーメタも一覧全体の最終同期を出すので、
+ * Banner にもう 1 つ別の基準の時刻を並べると値が食い違って見える。
  */
 export function syncNotice(input: SyncNoticeInput): SyncNotice | null {
   const failureCount = input.failures.length;
@@ -98,16 +82,11 @@ export function syncNotice(input: SyncNoticeInput): SyncNotice | null {
     return null;
   }
 
-  const syncedAt = staleSince(input);
-  const since =
-    syncedAt === null
-      ? ""
-      : `最終同期 ${formatRelativeTime(syncedAt, input.now)}。`;
   const partial =
     failureCount === 0 ? "" : `${failureCount} 件が最新化できませんでした。`;
 
   return {
     title: titleFor(downRegistries(input)),
-    body: `${since}${partial}参照系は自動で 2 回再試行しました。しばらくして「最新化」を押してください。`,
+    body: `${partial}参照系は自動で 2 回再試行しました。しばらくして「最新化」を押してください。`,
   };
 }

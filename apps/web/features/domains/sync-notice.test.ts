@@ -8,8 +8,6 @@ import { syncNotice } from "./sync-notice";
  * 落ちた相手を名指しできるかどうかで見出しが変わる点をここで固定する。
  */
 
-const NOW = new Date("2026-08-26T10:00:00.000Z");
-
 function domain(overrides: Partial<DomainSummary> = {}): DomainSummary {
   return {
     name: "example.com",
@@ -49,7 +47,6 @@ function notice(input: {
     error: input.error ?? null,
     failures: input.failures ?? [],
     domains: input.domains ?? [domain()],
-    now: NOW,
   });
 }
 
@@ -64,15 +61,15 @@ describe("syncNotice", () => {
     expect(result?.title).toBe(
       "Kitaqnic が応答しません — 一覧はキャッシュを表示しています",
     );
-    expect(result?.body).toContain("最終同期 42分前。");
-    expect(result?.body).toContain("1 件が最新化できませんでした。");
+    expect(result?.body).toBe(
+      "1 件が最新化できませんでした。参照系は自動で 2 回再試行しました。しばらくして「最新化」を押してください。",
+    );
   });
 
-  it("最終同期は失敗した行の中でもっとも古い時刻を使う（成功行に引きずられない）", () => {
+  it("最終同期の時刻は Banner に書かない（カードとヘッダーが持つ）", () => {
     const result = notice({
       failures: [failure({ name: "old.xyz" })],
       domains: [
-        // 同じ同期で成功した行。こちらは たった今 だが Banner の基準にはしない
         domain({ name: "fresh.com", syncedAt: "2026-08-26T09:59:30.000Z" }),
         domain({
           name: "old.xyz",
@@ -83,7 +80,7 @@ describe("syncNotice", () => {
       ],
     });
 
-    expect(result?.body).toContain("最終同期 2時間前。");
+    expect(result?.body).not.toContain("最終同期");
   });
 
   it("両レジストリが落ちたら総称にし、和文の前に半角スペースを入れない", () => {
@@ -131,13 +128,14 @@ describe("syncNotice", () => {
     expect(result?.title).toBe(
       "Kitaqsign が応答しません — 一覧はキャッシュを表示しています",
     );
-    expect(result?.body).not.toContain("件が最新化できませんでした");
+    expect(result?.body).toBe(
+      "参照系は自動で 2 回再試行しました。しばらくして「最新化」を押してください。",
+    );
   });
 
-  it("一覧が空なら最終同期を書かない", () => {
+  it("一覧が空でも件数だけは出す", () => {
     const result = notice({ failures: [failure()], domains: [] });
 
-    expect(result?.body).not.toContain("最終同期");
     expect(result?.body).toContain("1 件が最新化できませんでした。");
   });
 });
