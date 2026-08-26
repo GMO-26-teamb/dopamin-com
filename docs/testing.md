@@ -15,6 +15,38 @@ pnpm check         # lint + typecheck + test（PR 前に必須）
 - 契約テスト（`packages/registry/src/envelope.test.ts` 等）は
   `docs/registry/fixtures/*.json` の fixture を読み込んで検証する。
   レジストリの仕様変更通知を受けたら fixture を更新して回帰を検出する（requirements.md §11.5）。
+- DB を使うテスト（`apps/api`）は **pglite**（インメモリ Postgres 17、`@electric-sql/pglite`）を使う。
+  外部の Postgres や `DATABASE_URL` は不要で、`pnpm test` だけでローカル・CI とも動く。
+  - `apps/api/test/helpers/db.ts` の `createTestDb()` が `packages/db/drizzle/meta/_journal.json` の順に
+    `packages/db/drizzle/*.sql` を適用したテスト DB を返す。`resetTestDb(db)` で全テーブルを空にできる。
+  - `apps/api/src/lib/db.ts` の `setDbForTesting(db)` で API に注入する（`setRegistrySetForTesting` と同じ流儀）。
+  - `apps/api/test/helpers/session.ts` の `createTestSession(db)` が `users` + `sessions` を作り、
+    リクエストの `cookie` ヘッダに入れる文字列（`dopamin_session=<id>`）を返す
+    （同ファイルの `installTestSession` は DB を立てずにセッション解決だけを差し替える軽量な seam。
+    ルートの中身だけを見たいときはそちらを使う）。
+  - 書き方（`apps/api/test/routes/auth.test.ts` 参照）:
+
+    ```ts
+    let db: Db;
+    let closeDb: () => Promise<void>;
+    beforeAll(async () => {
+      process.env.DATABASE_URL = "postgres://unused:unused@localhost:1/unused"; // env() 用ダミー
+      process.env.WEBAUTHN_RP_ID = "localhost";
+      process.env.WEBAUTHN_ORIGIN = "http://localhost:3000";
+      ({ db, close: closeDb } = await createTestDb());
+      setDbForTesting(db);
+    }, 30_000); // pglite の起動に 1〜2 秒かかる
+    afterAll(async () => {
+      setDbForTesting(null);
+      await closeDb();
+    });
+    beforeEach(() => resetTestDb(db));
+    ```
+
+  - pglite の注意: `gen_random_uuid()` はそのまま使える（pgcrypto 不要）。`bytea` は `Uint8Array` で返る
+    （postgres.js は `Buffer`）。`bigint` は安全な範囲なら `number`。pgvector が必要になったら
+    `@electric-sql/pglite/vector` を `PGlite.create({ extensions: { vector } })` で有効化する。
+  - SimpleWebAuthn の `verify*` は `vi.mock("@simplewebauthn/server", …)` で差し替える（契約テストは DB 更新を検証する）。
 
 パッケージ単位で実行する場合:
 
