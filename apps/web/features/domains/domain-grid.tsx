@@ -19,10 +19,7 @@ const STAGGER_S = 0.04;
 const STAGGER_CAP = 12;
 
 export interface DomainGridProps
-  extends Pick<
-    DomainCardProps,
-    "now" | "onRenew" | "onRestore" | "onEdit" | "syncing"
-  > {
+  extends Pick<DomainCardProps, "now" | "onRenew" | "onRestore" | "onEdit"> {
   domains: readonly DomainSummary[];
   className?: string;
 }
@@ -44,7 +41,6 @@ export function DomainGrid({
   onRenew,
   onRestore,
   onEdit,
-  syncing,
   className,
 }: DomainGridProps) {
   const reduced = useReducedMotion();
@@ -73,7 +69,6 @@ export function DomainGrid({
             {...(onRenew ? { onRenew } : {})}
             {...(onRestore ? { onRestore } : {})}
             {...(onEdit ? { onEdit } : {})}
-            {...(syncing === undefined ? {} : { syncing })}
           />
         </motion.li>
       ))}

@@ -123,7 +123,7 @@ export default function DashboardPage() {
       />
     );
   } else {
-    content = <DomainGrid domains={list} now={now} syncing={refreshing} />;
+    content = <DomainGrid domains={list} now={now} />;
   }
 
   // 部分失敗（200 + failures）とリクエストごとの失敗（error）の両方をここで拾う。

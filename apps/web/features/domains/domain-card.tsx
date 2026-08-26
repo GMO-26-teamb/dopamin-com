@@ -298,26 +298,12 @@ const STALE_REASON =
   "同期に失敗しています。「最新化」で最新の状態にしてから操作してください。";
 
 /**
- * S-12: 背後の最新化が走っている間の更新系。
- * まだ同期結果が返っていない = このカードが stale になるか分からないので、
- * 確定するまで押させない（stale は応答単位で、一覧の初期表示では常に false）。
- */
-const SYNCING_REASON = "最新化中です。完了までお待ちください。";
-
-/**
  * 主操作を実行できない理由（AC-07-1）。null なら実行できる。
  * 参照系（詳細 / 状態を確認）は stale でも塞がない。
  */
-function blockedReason(
-  domain: DomainSummary,
-  kind: ActionKind,
-  syncing: boolean,
-): string | null {
+function blockedReason(domain: DomainSummary, kind: ActionKind): string | null {
   if (kind === "link") {
     return null;
-  }
-  if (syncing) {
-    return SYNCING_REASON;
   }
   if (domain.stale) {
     return STALE_REASON;
@@ -344,8 +330,6 @@ export interface DomainCardProps {
   onRestore?: (domain: DomainSummary) => void;
   /** D-02 情報修正 / NS 設定。未指定なら詳細画面へ遷移する */
   onEdit?: (domain: DomainSummary) => void;
-  /** 背後の最新化が進行中。確定するまで更新系を押させない（S-12） */
-  syncing?: boolean;
   className?: string;
 }
 
@@ -355,7 +339,6 @@ export function DomainCard({
   onRenew,
   onRestore,
   onEdit,
-  syncing = false,
   className,
 }: DomainCardProps) {
   const titleId = useId();
@@ -370,7 +353,7 @@ export function DomainCard({
   > = { renew: onRenew, restore: onRestore, edit: onEdit };
   const onPrimary =
     view.primary.kind === "link" ? undefined : handlers[view.primary.kind];
-  const reason = blockedReason(domain, view.primary.kind, syncing);
+  const reason = blockedReason(domain, view.primary.kind);
   const trailingIcon = view.primary.trailingIcon ? <ArrowRight /> : undefined;
 
   // 実行できないときは常に Disabled（S-13 / AC-07-1）。
