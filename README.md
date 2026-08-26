@@ -51,3 +51,8 @@ URL の `?mock=<scenario>` で状態を切り替える（`apps/web/lib/api/mock/
    - `VERCEL_TOKEN` — Vercel のアクセストークン
    - `VERCEL_ORG_ID` — チーム/個人の ID（`vercel link` 後の `.vercel/project.json` の `orgId`）
    - `VERCEL_PROJECT_ID_WEB` / `VERCEL_PROJECT_ID_API` — 各プロジェクトの `projectId`
+   - `DIRECT_DATABASE_URL` — マイグレーション用の接続文字列。Supabase の **Supavisor session mode（ポート 5432）** を使う（`postgresql://postgres.<project-ref>:<password>@aws-<n>-<region>.pooler.supabase.com:5432/postgres`）。直結ホスト（`db.<project-ref>.supabase.co`）は IPv6 のみで Actions ランナーから届かない
+
+   `DIRECT_DATABASE_URL` は DB のパスワードを含むので、リポジトリ Secrets ではなく `production` environment の Secrets に置くことを推奨する（全ジョブが `environment: production` を指定しているため、どちらに置いても `secrets.DIRECT_DATABASE_URL` で解決される）。
+
+デプロイは `migrate`（`pnpm --filter @dopamin/db migrate`）→ `api` → `web` の順に走り、マイグレーションが失敗した場合はデプロイしない。
