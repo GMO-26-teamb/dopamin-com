@@ -77,6 +77,30 @@ export function toDomainUniqueness(r: UniquenessResult): DomainUniqueness {
   };
 }
 
+/**
+ * `POST /domains/check` の結果 1 件（§10.4）。
+ * `uniqueness` は空きのときだけ意味を持つが、レジストリ障害で `availability: "error"` に
+ * なった行でもスコアは返す（AC-05-2: スコア算出はレジストリ通信と独立している）。
+ * 候補生成（FR-04）の応答も同じ形を再利用する。
+ */
+export const domainCheckResultSchema = z.object({
+  name: domainNameSchema,
+  /** 未対応 TLD で引けなかった場合は null。 */
+  registry: registryIdSchema.nullable(),
+  availability: domainAvailabilitySchema,
+  /** レジストリが返した「空きでない理由」。 */
+  reason: z.string().optional(),
+  uniqueness: domainUniquenessSchema.nullable(),
+  error: z.object({ code: errorCodeSchema, message: z.string() }).optional(),
+});
+export type DomainCheckResult = z.infer<typeof domainCheckResultSchema>;
+
+/** `POST /domains/check` の応答（FR-03。部分失敗を許容するので行ごとに error を持つ）。 */
+export const domainCheckResponseSchema = z.object({
+  results: z.array(domainCheckResultSchema),
+});
+export type DomainCheckResponse = z.infer<typeof domainCheckResponseSchema>;
+
 /** `POST /domains` の入力（FR-06）。 */
 export const domainCreateRequestSchema = z.object({
   name: domainNameSchema,

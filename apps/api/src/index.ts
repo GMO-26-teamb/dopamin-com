@@ -3,6 +3,7 @@ import { errorHandler, notFoundHandler } from "./middleware/error-handler";
 import { originCheck } from "./middleware/origin-check";
 import { requestContext } from "./middleware/request-context";
 import { requestId } from "./middleware/request-id";
+import { ai } from "./routes/ai";
 import { auth } from "./routes/auth";
 import { domains } from "./routes/domains";
 import { health } from "./routes/health";
@@ -24,7 +25,8 @@ const app = new Hono<AppEnv>()
   .route("/settings", settings)
   .route("/transfers", transfers)
   .route("/registry", registry)
-  .route("/logs", logs);
+  .route("/logs", logs)
+  .route("/ai", ai);
 
 app.onError(errorHandler);
 app.notFound(notFoundHandler);
