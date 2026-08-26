@@ -19,6 +19,7 @@ import {
 import { useMemo } from "react";
 import type { ApiClientError } from "./errors";
 import { type QueryScope, useQueryScope, useServices } from "./provider";
+import { ALLOW_UNAUTHORIZED_META } from "./query-meta";
 import type { CandidateService, DomainUpdateInput } from "./services";
 import type {
   AiLog,
@@ -75,12 +76,23 @@ type Mutation<TData, TVariables = void> = UseMutationResult<
 
 // ---- 設定・ユーザー（FR-01 / 16 / 17） ----
 
-export function useMe(): Query<Me> {
+export interface UseMeOptions {
+  /**
+   * 「ログイン済みか確かめるだけ」の用途（S-00 / S-02 の `SignedInRedirect`）。
+   * 401 は未ログインの正常系なので `/login?reason=expired` への誘導（query-client.tsx）を抑止する。
+   * queryKey は通常の `useMe()` と同じ（`meta` は最後にマウントした observer のものが使われるが、
+   * S-00 / S-02 と `(app)` 配下は同時に描画されない）。
+   */
+  probe?: boolean;
+}
+
+export function useMe(options: UseMeOptions = {}): Query<Me> {
   const services = useServices();
   const keys = useQueryKeys();
   return useQuery({
     queryKey: keys.me(),
     queryFn: () => services.settings.me(),
+    ...(options.probe ? { meta: ALLOW_UNAUTHORIZED_META } : {}),
   });
 }
 

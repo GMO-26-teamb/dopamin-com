@@ -24,6 +24,7 @@ import { safeNextPath } from "@/features/auth/next-path";
 import { ApiClientError } from "./errors";
 import { API_MODE } from "./mode";
 import { ServicesProvider } from "./provider";
+import { allowsUnauthorized } from "./query-meta";
 import type { Services } from "./services";
 
 const MAX_QUERY_RETRIES = 2;
@@ -89,7 +90,15 @@ export function createQueryClient(
   };
 
   return new QueryClient({
-    queryCache: new QueryCache({ onError }),
+    queryCache: new QueryCache({
+      onError: (error, query) => {
+        // 未ログインの確認だけが目的のクエリ（useMe({ probe: true })）は 401 を正常系として扱う
+        if (allowsUnauthorized(query.meta)) {
+          return;
+        }
+        onError(error);
+      },
+    }),
     mutationCache: new MutationCache({ onError }),
     defaultOptions: {
       queries: {
