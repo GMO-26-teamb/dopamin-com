@@ -152,19 +152,6 @@ export async function logout(): Promise<void> {
   await request("POST", "/api/v1/auth/logout", okResponseSchema, {});
 }
 
-export async function fetchMe(): Promise<AuthUser | null> {
-  try {
-    const { user } = await request(
-      "GET",
-      "/api/v1/auth/me",
-      userResponseSchema,
-    );
-    return user;
-  } catch {
-    return null;
-  }
-}
-
 export async function fetchPasskeys(): Promise<PasskeySummary[]> {
   const { passkeys } = await request(
     "GET",

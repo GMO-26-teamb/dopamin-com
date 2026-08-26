@@ -13,7 +13,7 @@ import {
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
 } from "@simplewebauthn/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, lt } from "drizzle-orm";
 import { passkeyNameFromAaguid } from "../lib/aaguid";
 import { env } from "../lib/env";
 import { ApiException } from "../lib/errors";
@@ -55,6 +55,16 @@ async function consumeChallenge(
   return row;
 }
 
+/**
+ * 期限切れチャレンジを opportunistic に掃除する（FR-01 spec §7）。
+ * cron は持たず、options 発行のたびに expires_at < now() の行を消す。
+ */
+async function deleteExpiredChallenges(db: Db): Promise<void> {
+  await db
+    .delete(schema.webauthnChallenges)
+    .where(lt(schema.webauthnChallenges.expiresAt, new Date()));
+}
+
 async function insertChallenge(
   db: Db,
   values: {
@@ -64,6 +74,7 @@ async function insertChallenge(
     displayName?: string;
   },
 ): Promise<string> {
+  await deleteExpiredChallenges(db);
   const rows = await db
     .insert(schema.webauthnChallenges)
     .values({

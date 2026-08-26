@@ -1,4 +1,5 @@
 import { type Db, schema } from "@dopamin/db";
+import { authUserSchema } from "@dopamin/shared";
 import { verifyRegistrationResponse } from "@simplewebauthn/server";
 import {
   afterAll,
@@ -9,9 +10,17 @@ import {
   it,
   vi,
 } from "vitest";
+import { z } from "zod";
 import app from "../../src/index";
 import { setDbForTesting } from "../../src/lib/db";
 import { createTestDb, resetTestDb } from "../helpers/db";
+
+// API 応答は as キャストではなく zod で形を検証してから使う（CLAUDE.md）
+const optionsResponseSchema = z.object({
+  challengeId: z.uuid(),
+  options: z.object({ challenge: z.string().min(1) }),
+});
+const verifyResponseSchema = z.object({ user: authUserSchema });
 
 /**
  * FR-01 契約テスト（docs/specs/passkey-auth.md §9）。
@@ -97,10 +106,9 @@ describe("POST /auth/passkey/register/{options,verify}（FR-01 spec §3.1 サイ
       json({ displayName: "たくたく" }),
     );
     expect(optionsRes.status).toBe(200);
-    const { challengeId, options } = (await optionsRes.json()) as {
-      challengeId: string;
-      options: { challenge: string };
-    };
+    const { challengeId, options } = optionsResponseSchema.parse(
+      await optionsRes.json(),
+    );
     // options 発行時点では users はまだ作られず、challenge だけが保存される
     expect(await db.$count(schema.users)).toBe(0);
     expect(await db.$count(schema.webauthnChallenges)).toBe(1);
@@ -115,9 +123,7 @@ describe("POST /auth/passkey/register/{options,verify}（FR-01 spec §3.1 サイ
       json({ challengeId, response: fakeWebauthnResponse("cred-signup") }),
     );
     expect(verifyRes.status).toBe(200);
-    const body = (await verifyRes.json()) as {
-      user: { id: string; displayName: string };
-    };
+    const body = verifyResponseSchema.parse(await verifyRes.json());
     expect(body.user.displayName).toBe("たくたく");
 
     // SimpleWebAuthn には保存した challenge と環境変数の Origin / RP ID が渡る（spec §5）
