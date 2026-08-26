@@ -6,7 +6,7 @@ import { createTestDb, resetTestDb } from "./db";
 import { createTestSession } from "./session";
 
 let db: Db;
-let closeDb: () => Promise<void>;
+let closeDb: (() => Promise<void>) | undefined;
 
 beforeAll(async () => {
   // env() は遅延評価。DB は注入するので DATABASE_URL はダミーでよい
@@ -19,7 +19,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   setDbForTesting(null);
-  await closeDb();
+  // beforeAll が timeout した場合は未代入。ここで TypeError を出すと本来の原因を隠すので省略可能にする
+  await closeDb?.();
 });
 
 // 各ケースを空の DB から始める（sessions の行数検証を実行順に依存させない）

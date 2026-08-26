@@ -14,7 +14,7 @@ import { createTestSession } from "../helpers/session";
  */
 
 let db: Db;
-let close: () => Promise<void>;
+let close: (() => Promise<void>) | undefined;
 let alice: Awaited<ReturnType<typeof createTestSession>>;
 let bob: Awaited<ReturnType<typeof createTestSession>>;
 
@@ -57,7 +57,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   setDbForTesting(null);
-  await close();
+  // beforeAll が timeout した場合は未代入。ここで TypeError を出すと本来の原因を隠すので省略可能にする
+  await close?.();
 });
 
 async function patch(

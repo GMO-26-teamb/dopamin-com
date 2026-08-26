@@ -17,10 +17,30 @@ import { defineConfig, devices } from "@playwright/test";
 
 const isCi = Boolean(process.env.CI);
 
-/** ローカルは docker の postgres:17（docs/testing.md §3）。CI は services: postgres を env で渡す */
-const DATABASE_URL =
-  process.env.DATABASE_URL ??
-  "postgres://postgres:postgres@localhost:54329/postgres";
+/**
+ * api に渡す DB 接続先（docs/testing.md §3）。
+ * - CI: `.github/workflows/ci.yml` の e2e ジョブが `services: postgres` を `DATABASE_URL` で渡す（必須）。
+ * - ローカル: `E2E_DATABASE_URL`（未設定なら docker の postgres:17 / 54329）。
+ *   シェルの `DATABASE_URL` は `pnpm dev` 用に Supabase を指していることがあるので、e2e の
+ *   signup / パスキー追加・削除が共有 DB に書き込まないよう **読まない**。
+ */
+function resolveDatabaseUrl(): string {
+  if (isCi) {
+    const url = process.env.DATABASE_URL;
+    if (!url) {
+      throw new Error(
+        "CI では DATABASE_URL が必須です（ci.yml の e2e ジョブが services: postgres を渡す）",
+      );
+    }
+    return url;
+  }
+  return (
+    process.env.E2E_DATABASE_URL ??
+    "postgres://postgres:postgres@localhost:54329/postgres"
+  );
+}
+
+const DATABASE_URL = resolveDatabaseUrl();
 
 const WEB_ORIGIN = "http://localhost:3000";
 const API_ORIGIN = "http://localhost:8787";

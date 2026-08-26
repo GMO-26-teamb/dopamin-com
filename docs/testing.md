@@ -28,7 +28,7 @@ pnpm check         # lint + typecheck + test（PR 前に必須）
 
     ```ts
     let db: Db;
-    let closeDb: () => Promise<void>;
+    let closeDb: (() => Promise<void>) | undefined;
     beforeAll(async () => {
       process.env.DATABASE_URL = "postgres://unused:unused@localhost:1/unused"; // env() 用ダミー
       process.env.WEBAUTHN_RP_ID = "localhost";
@@ -38,7 +38,7 @@ pnpm check         # lint + typecheck + test（PR 前に必須）
     }, 30_000); // pglite の起動に 1〜2 秒かかる
     afterAll(async () => {
       setDbForTesting(null);
-      await closeDb();
+      await closeDb?.(); // beforeAll が timeout した場合に TypeError で本来の原因を隠さない
     });
     beforeEach(() => resetTestDb(db));
     ```
@@ -139,8 +139,9 @@ pnpm --filter @dopamin/web e2e --ui         # Playwright UI
 - web（:3000）だけは既存プロセスを再利用する（`next build` を省くため）。`pnpm dev` の web（mock モード）を掴むと
   最初のテスト（AC-01-3 のリダイレクト）が失敗する。e2e が起動した web は次回の実行で再利用されるので、
   2 回目以降は `next build` を待たずに済む（web のコードを変えたら :3000 を止めて再ビルドさせる）。
-- DB の接続先は環境変数 `DATABASE_URL`（未設定なら上の docker の 54329）。表示名は毎回ユニークにしているので、
-  同じ DB で繰り返し実行できる。
+- DB の接続先はローカルでは環境変数 `E2E_DATABASE_URL`（未設定なら上の docker の 54329）。シェルの `DATABASE_URL`
+  （`pnpm dev` 用に Supabase を指していることがある）は**読まない**。CI だけは `DATABASE_URL`（`services: postgres`）を
+  必須として読む。表示名は毎回ユニークにしているので、同じ DB で繰り返し実行できる。
 - `next build` は `next/font/google` のフォント取得でネットワークを使う。
 - CI は `.github/workflows/ci.yml` の `e2e` ジョブ（`services: postgres`）。Playwright の step に `continue-on-error: true` を
   付けて必須にはしていない（check run は緑のまま）。失敗時は Summary に `::warning::` が出て、`playwright-report`
