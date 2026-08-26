@@ -15,12 +15,18 @@ import { z } from "zod";
  * 表示に必要な値は最後の `info` の正規化結果（{@link DomainRecord.info}）から取り出す。
  */
 export interface DomainRecord {
+  /**
+   * `domains.id`。DB から読んだ行にだけ入る（write-through の入力として組み立てた
+   * レコードには無い）。`transfers.domain_id`（§9.1）の紐付けに使う。
+   */
+  id?: string;
   userId: string;
   name: string;
   registry: DomainInfo["registry"];
   /**
    * 所有権（§9.1 `ownership`）。移管 OUT 完了を検知した行は `transferred_out` になり、
-   * 表示のみ・全操作不可になる（AC-12-5）。遷移させるのは移管サービス側（#56 / #57 / #58）。
+   * 表示のみ・全操作不可になる（AC-12-5）。遷移させるのは `markDomainTransferredOut`
+   * （Poll 消化・移管 OUT の承認・`info` の clID 検知の 3 経路）。
    */
   ownership: Ownership;
   /** 最後に取得した `info` の正規化結果。 */
@@ -79,6 +85,7 @@ export function toDomainRecord(row: DomainRow): DomainRecord {
   const parsed = storedInfoSchema.safeParse(row.rawInfo);
   const info = parsed.success ? parsed.data : fallbackInfo(row);
   return {
+    id: row.id,
     userId: row.userId,
     name: row.name,
     registry: info.registry,

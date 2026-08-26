@@ -246,6 +246,7 @@ describe("往復（record → values → row → record）", () => {
       registryRef: null,
       transferredOutAt: null,
     } as Partial<DomainRow>);
-    expect(toDomainRecord(stored)).toEqual(original);
+    // 読み直した行には DB 採番の id が付く（`transfers.domain_id` の紐付けに使う）
+    expect(toDomainRecord(stored)).toEqual({ ...original, id: stored.id });
   });
 });

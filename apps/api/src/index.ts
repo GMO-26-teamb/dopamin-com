@@ -6,6 +6,7 @@ import { requestId } from "./middleware/request-id";
 import { auth } from "./routes/auth";
 import { domains } from "./routes/domains";
 import { health } from "./routes/health";
+import { registry } from "./routes/registry";
 import { settings } from "./routes/settings";
 import { transfers } from "./routes/transfers";
 import type { AppEnv } from "./types";
@@ -19,6 +20,7 @@ const app = new Hono<AppEnv>()
   .route("/health", health)
   .route("/auth", auth)
   .route("/domains", domains)
+  .route("/registry", registry)
   .route("/settings", settings)
   .route("/transfers", transfers);
 

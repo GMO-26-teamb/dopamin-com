@@ -29,6 +29,12 @@ export interface DomainStore {
    *   推定を根拠に他人の保有行を奪わない。呼び出し側はログに残して取り込みを諦める。
    */
   claimOwned(record: DomainRecord): Promise<string | null>;
+  /**
+   * 移管 OUT 完了の反映（FR-12 / §6.5 / AC-12-5）。保有中の行を
+   * `ownership = 'transferred_out'` + `transferred_out_at` に遷移させ、保有一覧から外す。
+   * 行は履歴として残すので削除はしない。既に遷移済み（保有行が無い）なら false。
+   */
+  markTransferredOut(name: string, at: Date): Promise<boolean>;
   remove(name: string): Promise<void>;
 }
 
@@ -103,6 +109,21 @@ export function createDbDomainStore(db: Db): DomainStore {
       return row?.id ?? null;
     },
 
+    async markTransferredOut(name, at) {
+      // 部分一意インデックス（保有中のみ一意）から外れるので、同名の再取得・再移管 IN が通る
+      const rows = await db
+        .update(schema.domains)
+        .set({ ownership: "transferred_out", transferredOutAt: at })
+        .where(
+          and(
+            eq(schema.domains.name, name),
+            eq(schema.domains.ownership, "owned"),
+          ),
+        )
+        .returning({ id: schema.domains.id });
+      return rows.length > 0;
+    },
+
     async remove(name) {
       // 移管 OUT 済みの履歴行は残す（§6.5）。消すのは保有中の行だけ。
       await db
@@ -145,6 +166,16 @@ export function createInMemoryDomainStore(
       const id = idByName.get(record.name) ?? randomUUID();
       idByName.set(record.name, id);
       return Promise.resolve(id);
+    },
+    // `transferred_out_at` は DomainRecord に持たない列なので、in-memory 版は
+    // ownership だけを倒す（一覧から外れることの検証には十分）
+    markTransferredOut: (name) => {
+      const existing = byName.get(name);
+      if (existing?.ownership !== "owned") {
+        return Promise.resolve(false);
+      }
+      byName.set(name, { ...existing, ownership: "transferred_out" });
+      return Promise.resolve(true);
     },
     remove: (name) => {
       byName.delete(name);

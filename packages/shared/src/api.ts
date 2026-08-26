@@ -12,7 +12,7 @@ import {
   type TransferResult,
   transferStatusSchema,
 } from "./registry";
-import { transferDirectionSchema } from "./transfers";
+import { pollConsumeSummarySchema, transferDirectionSchema } from "./transfers";
 
 /**
  * 統一エラー（docs/requirements.md §10.3）の定義は `./errors.ts` が正（issue #30）。
@@ -167,8 +167,10 @@ export const domainSummarySchema = z.object({
   /** true = 直近の同期に失敗し DB キャッシュを表示している（AC-07-2）。 */
   stale: z.boolean(),
   /**
-   * 進行中の移管のバッジ。移管 IN は `domains` 行を持たないため（§6.5）ここには出ず、
-   * 出るのは移管 OUT（Poll で `transfers(out)` を作る #58）だけ。その生産者が入るまで常に null。
+   * 進行中の移管のバッジ。移管 IN は `domains` 行を持たないため（§6.5）ここに出るのは
+   * 移管 OUT だけ。行の生産者（Poll 消化）は入ったが、一覧クエリが `transfers` を
+   * 結合していないため API は当面つねに null を返す（受信した申請は `GET /transfers`
+   * の `outbound` で見る）。
    */
   transfer: domainTransferBadgeSchema.nullable(),
 });
@@ -187,9 +189,13 @@ export const domainSyncFailureSchema = z.object({
   message: z.string(),
 });
 
-/** `POST /domains/sync` のレスポンス（FR-02）。失敗した行は stale: true で返る。 */
+/**
+ * `POST /domains/sync` のレスポンス（FR-02 / FR-12）。失敗した行は stale: true で返る。
+ * `poll` は同時に消化した非同期通知の件数（§10.1「同時に Poll も消化する」）。
+ */
 export const domainSyncResponseSchema = z.object({
   domains: z.array(domainSummarySchema),
   failures: z.array(domainSyncFailureSchema),
+  poll: pollConsumeSummarySchema,
 });
 export type DomainSyncResponse = z.infer<typeof domainSyncResponseSchema>;

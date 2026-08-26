@@ -15,6 +15,7 @@ import {
   type UpdateInput,
 } from "@dopamin/shared";
 import { Hono } from "hono";
+import { getDb } from "../lib/db";
 import { ApiException } from "../lib/errors";
 import { reconcileOnTimeout } from "../lib/reconcile";
 import { adapterForDomain, getRegistrySet } from "../lib/registries";
@@ -24,11 +25,11 @@ import {
   listDomainSummaries,
   removeDomain,
   requireOwnedDomain,
-  syncDomains,
   toDomainSummary,
   upsertDomainFromInfo,
 } from "../services/domain.service";
 import type { DomainRecord } from "../services/domain-store";
+import { syncDomains } from "../services/sync.service";
 import type { AuthedEnv } from "../types";
 
 /** check 結果の 1 件分（§10.4）。uniqueness は FR-05 実装時に埋める（現状は常に null）。 */
@@ -135,10 +136,12 @@ export const domains = new Hono<AuthedEnv>()
     return c.json({ domains: list });
   })
 
-  /** FR-02: 全保有ドメインを info で再同期する。1 件の失敗では全体を落とさない。 */
+  /**
+   * FR-02 / FR-12: 全保有ドメインを info で再同期し、同時に Poll を消化する（§10.1）。
+   * 1 件の失敗では全体を落とさない（失敗した行は stale: true）。
+   */
   .post("/sync", async (c) => {
-    const result = await syncDomains(c.get("user").id);
-    return c.json(result);
+    return c.json(await syncDomains(getDb(), c.get("user").id));
   })
 
   /** FR-03: ドメイン検索・空き確認。部分失敗を許容する（AC-03-2）。 */

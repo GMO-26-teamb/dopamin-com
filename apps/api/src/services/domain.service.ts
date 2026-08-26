@@ -7,7 +7,6 @@ import type {
 } from "@dopamin/shared";
 import { splitDomainName } from "@dopamin/shared";
 import { ApiException } from "../lib/errors";
-import { adapterForDomain } from "../lib/registries";
 import { registryErrorMessage } from "../lib/registry-message";
 import { type DomainRecord, getDomainStore } from "./domain-store";
 
@@ -24,7 +23,8 @@ export async function upsertDomainFromInfo(
     userId,
     name: info.name,
     registry: info.registry,
-    // `info` が返るのは保有中の行だけ。移管 OUT の検知は #57 / #58 が別経路で行う
+    // `info` が返るのは保有中の行だけ。移管 OUT の検知は Poll / 承認操作が別経路で行い、
+    // そこから `markDomainTransferredOut` で倒す（§6.5）
     ownership: "owned",
     info,
     syncedAt,
@@ -52,6 +52,18 @@ export async function claimDomainFromInfo(
     info,
     syncedAt,
   });
+}
+
+/**
+ * FR-12 移管 OUT 完了の反映（§6.5 / AC-12-5）。保有行を `transferred_out` に遷移させ、
+ * 保有一覧（FR-02）から外す。行は履歴として残すので削除はしない。
+ * 既に遷移済み・保有行が無い場合は false（Poll の再送でも二重に倒さない）。
+ */
+export async function markDomainTransferredOut(
+  name: string,
+  at: Date = new Date(),
+): Promise<boolean> {
+  return getDomainStore().markTransferredOut(name, at);
 }
 
 /** 保有ドメインを DB から削除する（レジストリから即時消滅した場合）。 */
@@ -122,11 +134,11 @@ export async function listDomainSummaries(
 }
 
 /**
- * 同期の失敗を一覧用の項目に変換する。
+ * 同期の失敗を一覧用の項目に変換する（`POST /domains/sync`。`sync.service.ts` が使う）。
  * レジストリ由来は正規化コードとユーザー向け文言、TLD 表の変更などで
  * アダプタを引けなかった場合（ApiException）はそのコードをそのまま残す。
  */
-function toSyncFailure(
+export function toSyncFailure(
   name: string,
   err: unknown,
 ): DomainSyncResponse["failures"][number] {
@@ -143,37 +155,9 @@ function toSyncFailure(
   return { name, code: "INTERNAL", message: "同期に失敗しました。" };
 }
 
-/**
- * FR-02: 全保有ドメインを `info` で再同期する。
- *
- * 1 件の失敗で全体を落とさず、失敗した行はキャッシュを `stale: true` で返す（AC-03-2 と同じ方針）。
- *
- * 【未実装・意図的な制約】
- * - Poll の消化（§10.1「同時に Poll も消化する」）は、アダプタに `poll` / `ackMessage` が
- *   入る #44 と Poll サービス #58 で足す。
- * - AC-02-4（移管 OUT 完了後に保有一覧から消える）は満たしていない。`ownership` 列（#33）は
- *   入ったが、それを `transferred_out` に遷移させる移管の永続化（#56 / #57）と Poll 消化（#58）が
- *   無いため、この関数は保有／非保有を判定できない。
- *   `info` が NOT_FOUND を返しても **行は消さない**（失敗一覧にコードを載せるだけ）。
- *   非スポンサーからの `info` の応答が未確定（要確認 §21.2 #12）な段階で行を消すと、
- *   一時的な誤判定でユーザーのドメインが一覧から消える方が実害が大きいため。
- */
-export async function syncDomains(userId: string): Promise<DomainSyncResponse> {
-  const records = await getDomainStore().list(userId);
-  const failures: DomainSyncResponse["failures"] = [];
-
-  const domains = await Promise.all(
-    records.map(async (record): Promise<DomainSummary> => {
-      try {
-        const info = await adapterForDomain(record.name).info(record.name);
-        const updated = await upsertDomainFromInfo(userId, info);
-        return toDomainSummary(updated, false);
-      } catch (err) {
-        failures.push(toSyncFailure(record.name, err));
-        return toDomainSummary(record, true);
-      }
-    }),
-  );
-
-  return { domains, failures };
+/** FR-02: ユーザーの保有行（`ownership = owned`）を返す。同期の対象一覧。 */
+export async function listOwnedDomainRecords(
+  userId: string,
+): Promise<DomainRecord[]> {
+  return getDomainStore().list(userId);
 }

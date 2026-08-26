@@ -1141,6 +1141,7 @@ describe("POST /api/v1/domains/sync の境界", () => {
     expect(domainSyncResponseSchema.parse(await res.json())).toEqual({
       domains: [],
       failures: [],
+      poll: { processed: 0, failed: 0 },
     });
   });
 

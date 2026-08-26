@@ -30,9 +30,14 @@
   未対応 TLD の 400 `VALIDATION_ERROR`（`adapterForDomain`）が所有権より先に返る。
   `/transfers*` は `requireOwnedDomain` を使わない（#56）: 移管 IN は申請時点で `domains` 行が
   無い（§6.5）ため、ドメイン基準で見ると AC-12-1 の申請直後がすべて 404 になる。
-  代わりに `GET /transfers/:id` が `transfers.user_id` を見る `requireOwnedTransfer`
-  （`apps/api/src/services/transfer.service.ts`）で 404 / 403 を返し分け、
-  `GET /transfers` は `user_id` で行を絞る。`POST /transfers` は認証のみ。
+  代わりに `GET /transfers/:id` と `POST /transfers/:id/{approve,reject,cancel}` が
+  `transfers.user_id` を見る `requireOwnedTransfer`（`apps/api/src/services/transfer.service.ts`）で
+  404 / 403 を返し分け、`GET /transfers` は `user_id` で行を絞る。`POST /transfers` は認証のみ。
+  `POST /registry/poll` も認証必須だが、消化する通知はレジストラ単位なのでユーザーでは絞らない
+  （反映先の行は通知のドメイン名から引く。上記 §3-16）。
+- Poll 消化の定期実行（cron 等）。消化はユーザーのリクエスト起点（`GET /transfers` /
+  `POST /domains/sync` / `POST /registry/poll`）だけで、誰も画面を開かない間は通知が溜まる。
+  発表デモの範囲では十分だが、放置すると FIFO が伸びる。
 - DB キャッシュ（FR-02 一覧・`domains` テーブル保存）、操作ログの永続化（FR-15）、
   独自性スコア（FR-05。check レスポンスの `uniqueness` は常に `null` のプレースホルダ）。
 
@@ -41,6 +46,7 @@
 | メソッド | パス | 実装 | 備考 |
 |---|---|---|---|
 | GET | `/health` | ✅ | 各レジストリの `hello` 疎通結果 + レイテンシを返す |
+| POST | `/domains/sync` | ✅ | 保有ドメインを `info` で再同期し、**同時に Poll も消化する**（§10.1）。部分失敗は 200 + `failures[]`。`info` の clID が自レジストラでなければ `transferred_out` に倒して応答から外す（AC-02-4）。`pendingTransfer` を検知したら `transfers(out, pending)` を作る（Poll を取りこぼしても受信申請を拾えるようにする）。応答に `poll: { processed, failed }` を足した |
 | POST | `/domains/check` | ✅ | `{sld, tlds[]}` or `{names[]}`。レジストリ単位で並列、部分失敗許容（AC-03-2） |
 | POST | `/domains` | ✅ | check 再実行 → contact 作成 → create → info（AC-06 系）。authInfo はサーバー生成 |
 | GET | `/domains/:name` | ✅ | `info` で最新化して DB キャッシュに write-through。レジストリに繋がらない（`REGISTRY_TIMEOUT` / `REGISTRY_UNAVAILABLE` / `REGISTRY_SPEC_MISMATCH`）ときは DB キャッシュを `stale: true` + `syncedAt` 付きで返す（AC-07-2、#129）。`NOT_FOUND` や拒否応答はそのまま返す |
@@ -50,8 +56,12 @@
 | POST | `/domains/:name/restore` | ✅ | `redemptionPeriod` 中のみ（AC-11-2） |
 | POST | `/domains/:name/auth-code` | ✅ | `rotate-auth-info` を実行（取得のたびに authInfo が変わる）。再発行という副作用があるため GET ではなく POST（§10.2 の Origin 検証を通すため） |
 | POST | `/transfers` | ✅ | `{name, authCode}` → transfer request → 202。受理を `transfers(direction=in, status=pending, requested_at, act_by_at, raw)` に記録し、`domains` 行は作らない（AC-12-1）。同じユーザー・同じドメインの pending 行があれば作り直さず更新する。応答は正規化 `TransferResult` から `raw` を除いた DTO（`transferResponseSchema`。ADR-0002）で、**一覧の `id` は返さない**（web が `id` にドメイン名を入れているフォールバックの解消は #57） |
-| GET | `/transfers` | ✅ | ユーザーの `transfers` 行を `{ inbound, outbound, history }` で返す（`transfersListResponseSchema`）。`inbound` は進行中の移管 IN（`pending` と、承認済みで取り込み待ち = `domain_id` が null の `approved`）、`outbound` は受信した OUT 申請、`history` はそれ以外。表示のたびに進行中の IN を `transferQuery` で照合し、承認を検知したら取り込む。**Poll の消化（§10.1）は #58**。したがって `direction=out` の行は当面できず `outbound` は常に空 |
+| GET | `/transfers` | ✅ | ユーザーの `transfers` 行を `{ inbound, outbound, history }` で返す（`transfersListResponseSchema`）。`inbound` は進行中の移管 IN（`pending` と、承認済みで取り込み待ち = `domain_id` が null の `approved`）、`outbound` は受信した OUT 申請、`history` はそれ以外。**表示のたびにまず Poll を消化し**（§10.1。落ちても一覧は返す）、そのあと進行中の IN を `transferQuery` で照合して承認を検知したら取り込む |
 | GET | `/transfers/:id` | ✅ | uuid（`transferIdParamSchema`）。一覧と同じ照合を 1 行だけ行う。非 uuid は 400、他人の行は 403、無ければ 404。取り込みの再試行に時間制限を掛けない点だけ一覧と違う（下記 §3-13） |
+| POST | `/transfers/:id/approve` | ✅ | 受信した移管申請の承認（`direction = out` かつ `status = pending` の自行のみ）。`transferApprove` → `transfers` を `approved` + `completed_at`、`domains` を `ownership = transferred_out` + `transferred_out_at` に遷移（AC-12-4 / AC-12-5）。応答は `GET /transfers/:id` と同じ 1 件の要約 |
+| POST | `/transfers/:id/reject` | ✅ | 受信した移管申請の拒否（同上の条件）。`transferReject` → `transfers` を `rejected`。保有は動かない |
+| POST | `/transfers/:id/cancel` | ✅ | 自分が出した申請の取消（`direction = in` かつ `status = pending`、P1）。`transferCancel` → `transfers` を `cancelled` |
+| POST | `/registry/poll` | ✅ | 全レジストリの Poll を消化して `transfers` / `domains` に反映する明示トリガー（デモ・検証用）。応答は `{ poll: { processed, failed } }`。通知はレジストラ単位なので、消化されるのはログインユーザーの分だけではない |
 
 本 spec のルート（`/domains*` `/transfers*`）はすべて `requireSession` 必須（Cookie `dopamin_session`。requirements §10.1 の「認証: 要」に対応）。
 統合テストは `apps/api/test/helpers/session.ts` の `installTestSession()` + `SESSION_COOKIE_HEADER`（DB 不要の seam）
@@ -169,6 +179,38 @@
     レジストリ受理後の DB 書き込み失敗はレジストリ操作の成否に影響させず、
     `transfer_row_write_failed` を error ログに出して 202 を返す（§6.5 の write-through）。
 
+15. **Poll は「反映 → ack」を未 ack が無くなるまで繰り返す**（#58、`apps/api/src/services/poll.service.ts`）。
+    `GET /messages` は最古の未 ack を 1 件返す FIFO で、ack するまで同じ通知が返る。
+    消化点は `GET /transfers` / `POST /domains/sync` / `POST /registry/poll` の 3 つで、
+    前 2 つは失敗しても本体の応答を返す（`consumePollSafely`）。
+    1 リクエストあたりの上限はレジストリごと 50 件（`poll_budget_exhausted` を warn に出し、残りは次回）。
+    **反映に失敗した通知は ack しない**: 反映できていない通知を消すと移管の事実が永久に失われるため、
+    そのレジストリのキューはそこで止め（`poll_apply_failed`）、次回の消化で同じ通知から再開する。
+    レジストリ間は並列・レジストリ内は直列で、1 つが落ちても他は消化を続ける。
+16. **通知の宛先ユーザーはドメイン名から引く**（#58）。Poll はレジストラ単位で届き、
+    通知にユーザーの情報は無い。`transfer_request` は `domains` の保有行から `user_id` を、
+    完了通知（`transfer_approved` / `rejected` / `cancelled`）は同じドメインの `pending` 行から引く。
+    向き（in / out）は `requestingRegistrarId` / `actingRegistrarId` と自レジストラ ID の比較
+    （ADR-0002 決定 3）で決め、レジストラ ID を返さないレジストリでは「残っている pending 行の向き」に倒す。
+    **どのユーザーにも紐付かない通知と未知種別（`unknown`）は ack して先へ進む**
+    （`poll_message_unattributed` / `poll_message_unknown` を warn に出す）。1 件の孤児で
+    以降の通知が全部読めなくなる方が実害が大きい。生の通知内容は `operation_logs`（`command = poll`）に残る。
+17. **同じ通知の二度目は `UNIQUE(registry, registry_message_id)` で弾く**（#58）。
+    ack に失敗すると同じ通知が再び返るため、反映前に通知 ID で既存行を引いて何もせず ack だけやり直す。
+    申請の通知は行の作成時に、完了の通知は行を閉じるときに通知 ID を刻む。
+    `info` の `pendingTransfer` から先に作られた「通知 ID を持たない `pending` の OUT 行」があれば、
+    新規作成せずその行に通知 ID を刻む（registry-api.md v0.1 時点の宿題への回答）。
+18. **移管 IN の承認が Poll と `info`（上記 13）の両方から来ても取り込みは 1 回**（#58）。
+    一覧の照合が先に承認を検知して取り込み済みなら、あとから届く `transfer_approved` は
+    `pending` 行が無いので何もしない（`poll_message_already_settled`）。
+    このとき **`transferred_out` に倒してはいけない**（保有行は既に自分のもの）ので、
+    向きが `in` と分かる通知は OUT の完了として扱わない。
+19. **承認 / 拒否 / 取消のタイムアウトも `transferQuery` で照合する**（#57、上記 12 と同じ方針）。
+    3 つとも成功すれば `pendingTransfer` が消えるので、照合で `pending` 以外が返れば反映済みとみなす。
+    確認できなければ元の 504 を返す。`transfers` を閉じたあとの `domains` 遷移
+    （`transferred_out`）が失敗した場合は 500 を返す: レジストリ側は既に手放しているので、
+    握りつぶすと「レジストリでは他社のもの・アプリでは自分のもの」という不整合が残る。
+
 ## 4. テスト観点
 
 - unit / contract: `docs/testing.md` §1（fixture は `docs/registry/fixtures/`）。
@@ -190,21 +232,28 @@
   1 リクエストで照合する行は 20 件が上限で、超過分は `transfer_reconcile_truncated` を出して DB の値のまま返す。
 - `transfers` に「同じユーザー・同じドメインで pending の行は 1 件」という DB 制約は付けていない
   （重複防止はアプリ側の SELECT → INSERT / UPDATE。レジストリも `pendingTransfer` 中の再申請を 2304 で弾く）。
-  Poll 由来の行（#58）を入れるときに、`registry_message_id` が NULL の pending 行を
-  `(registry, domain_name, direction)` で先に探して更新する突合ルールとあわせて、
-  部分一意インデックスの要否を再検討する。
+  Poll 由来の行（#58）は `UNIQUE(registry, registry_message_id)` で冪等になり、通知 ID を持たない
+  `pending` の OUT 行は `(registry, domain_name, direction)` で突合して通知 ID を刻む（上記 §3-17）。
+  実運用で重複が出るようなら部分一意インデックスの追加を再検討する。
 - `POST /domains/check` の 1 リクエストあたりの件数上限がレジストリ側で不明（API 側は 20 件に制限）。
-- コンタクト更新（FR-09 の一部）と移管の承認 / 拒否（受け側・P2）は未実装。
+- コンタクト更新（FR-09 の一部）は未実装。移管 IN の取り込み後にコンタクトを自ユーザーの
+  プロファイルへ差し替える処理（FR-12 /【要確認: §21.2 #14】）も未実装で、取り込んだドメインは
+  相手レジストラ発行のコンタクト ID を参照したままになる。
 - ~~`RegistryAdapter` の `poll` / `ackMessage`~~: 実装済み（#44）。§11.1 のメソッドは
-  kitaq / mock ともすべて揃った。アダプタの承認 / 拒否 / 取消と Poll 消化を叩く API ルート
-  （`POST /transfers/:id/{approve,reject,cancel}` / `POST /registry/poll`）は
-  移管の永続化（#56）とセットで #57 / #58。
+  kitaq / mock ともすべて揃った。
+- ~~アダプタの承認 / 拒否 / 取消と Poll 消化を叩く API ルート~~ → 解消（#57 / #58）:
+  `POST /transfers/:id/{approve,reject,cancel}` と `POST /registry/poll` を実装し、
+  `GET /transfers` / `POST /domains/sync` も Poll を消化するようになった（上記 §3-15〜19）。
 - Poll の契約テスト fixture は `poll.kitaqsign.json` / `poll.kitaqnic.json` / `poll-empty.json`（#44）。
   `msgType` / `payload` と transfer fixture の `status` は実応答が未取得のため暫定値
   （`docs/registry/fixtures/README.md`）。
 - Poll 通知の `msgType` の値と `payload` の中身は未確定【要確認: requirements.md §21.2 #13】。
-- `apps/web` の `TransferService.request` は移管一覧が無かった名残で `Transfer.id` にドメイン名を
-  入れている（`apps/web/lib/api/http/http-services.ts`）。`POST /transfers/:id/{approve,reject,cancel}`
-  を繋ぐ #57 で本物の uuid に寄せる（そのままだと `:id` が非 uuid で 400 になる）。
-- `domainSummarySchema.transfer`（移管バッジ）は当面つねに null。移管 IN は `domains` 行を
-  持たない（§6.5）ため、ここに出るのは Poll で `transfers(out)` を作る #58 以降。
+- **web の HTTP 実装が未接続**（#57 / #58 は `apps/api` のみ）。`TransferService` の
+  `list` / `refresh` / `approve` / `reject` / `cancel` は `notImplemented` のままで、
+  `request` は移管一覧が無かった名残で `Transfer.id` にドメイン名を入れている
+  （`apps/web/lib/api/http/http-services.ts`）。API のルートは揃ったので、繋ぐときに
+  `GET /transfers` の `id`（uuid）へ寄せる（そのままだと `:id` が非 uuid で 400 になる）。
+- `domainSummarySchema.transfer`（移管バッジ）は依然つねに null。#58 で `transfers(out)` の
+  生産者は入ったが、`toDomainSummary` は `domains` の行しか見ないため、バッジを出すには
+  一覧クエリに `transfers` の pending 行を結合する必要がある（詳細画面の「移管申請を受信」を
+  API から出す作業とセットで別タスク）。それまで受信した申請は `GET /transfers` の `outbound` で見る。

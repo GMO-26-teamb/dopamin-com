@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.1.14（2026-08-26） |
+| 版 | v0.1.15（2026-08-26） |
 | プロダクト | ドパ民.com / dopamin.com — Z世代向けドメイン管理プラットフォーム（疑似レジストラ） |
 | チーム | チームドパ民（Team B）: 佐々木 琢登・星 はるか・上原 拓也 |
 | 位置づけ | GMO Internet Internship in kitaQ Webアプリケーションコース（2026/08/24–28）成果物 |
@@ -1403,5 +1403,6 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | v0.1.10 | 2026-08-26 | §16.2: `deploy.yml` に `migrate` ジョブ（`pnpm --filter @dopamin/db migrate`）を追加し、**migrate → api → web** の 3 ジョブ構成に変更。マイグレーション適用の【要確認】を解消し、drizzle の適用判定（`drizzle.__drizzle_migrations` の最新 `created_at` より新しい journal エントリのみ）と手動適用を避ける運用を明記。§16.3 / §17: `DIRECT_DATABASE_URL` を Supavisor session mode（5432）に変更（直結ホストは IPv6 のみで GitHub Actions から到達できないため）。INFRA-01 |
 | v0.1.11 | 2026-08-26 | §16.2: Vercel Hobby の「commit author = チーム所有者」制約で他メンバー author のデプロイが `BLOCKED` になり固着する問題への対策として、`deploy.yml` の `api` / `web` ジョブでチェックアウト上の author を所有者に書き換えてから deploy する運用（`--meta originalSha` で元 SHA を保持、`timeout-minutes: 10`）を明記 |
 | v0.1.13 | 2026-08-26 | §16.2: `deploy.yml` から `migrate` ジョブを削除し、**api → web** の 2 ジョブ構成に戻した（v0.1.10 で入れた自動適用を撤回）。`DIRECT_DATABASE_URL` に直結ホストが登録されたままで `migrate` が必ず失敗し、`needs` で `api` / `web` が `skipped` になって本番デプロイが全面停止したため、発表までの復旧速度を優先して DB 適用とデプロイを切り離した。マイグレーションは **main にマージしてからローカルで `pnpm db:migrate`** を当てる運用に戻し、二重適用の罠・スキーマ変更を含む PR の注意点・自動適用に戻す手順を §16.2 に明記。§16.3 / §17: `DIRECT_DATABASE_URL` は CI で使わなくなり、ローカル用途では直結 URL でよいことを明記。GitHub Secrets 一覧から削除。#150 |
+| v0.1.15 | 2026-08-26 | §6.5 / §10.1: FR-12 の移管操作と Poll 消化を実装（#57 / #58）。`POST /transfers/:id/{approve,reject,cancel}`（承認 / 拒否は `direction = out` の pending、取消は `in` の pending。それ以外は 409 `OPERATION_NOT_ALLOWED`）と `POST /registry/poll` を追加し、`GET /transfers` / `POST /domains/sync` も表示・最新化のたびに Poll を消化する（未 ack を残さない）。**反映に失敗した通知は ack しない**（消すと移管の事実が失われるため、FIFO はそこで止めて次回再開）が、**どのユーザーにも紐付かない通知と未知種別は ack して先へ進む**。通知の宛先は通知のドメイン名から `domains` / `transfers` を引いて決め、二度目は `UNIQUE(registry, registry_message_id)` で弾く。承認（自分の approve / サーバ自動承認）を検知した移管 OUT は `domains.ownership = transferred_out` に遷移し保有一覧から消える（AC-02-4 / AC-12-5）。`POST /domains/sync` の応答に `poll: { processed, failed }` を追加。設計は `docs/specs/registry-api.md` §3-15〜19 |
 | v0.1.14 | 2026-08-26 | §11.1: `poll` / `ackMessage` の実装（#44）と mock の移管シミュレーション（#45）を実装に合わせて確定。Poll のエンドポイント差はアダプタで吸収し（応答の形は両レジストリ同一）、`msgType` が未知の通知は捨てず `'unknown'` に倒す。mock は相手レジストラ保有ドメインの seed・レジストラ別 Poll キュー・役割チェック（approve / reject は対応側、cancel は申請側、更新系は現スポンサー）を持ち、**自動承認は `setTimeout` ではなく `info` / `transferQuery` / `poll` 時の遅延評価**で確定させる（Vercel Functions でタイマーが生き残らないため）。`transferRequest` は自レジストラ保有のドメインには出せない（暫定 2304、§21.2 #15） |
 | v0.1.12 | 2026-08-26 | §11.1: 正規化型を実装に合わせて確定。`TransferResult.status` に `'none'`（`transferQuery` の「移管中でない」）を追加し、`registrarId` 語彙・`reDate` / `acDate` のレジストリ差・`raw` の扱いを明記。`DomainInfo.sponsoringRegistrarId` は両 OpenAPI に clID が無いため当面 null（§6.5 / §9.1 に追随）。`PollMessage` の未確定点を `msgType` / `payload` に限定（§21.2 #13）。判断は ADR-0002 |

@@ -1,10 +1,12 @@
 import { type RegistryAdapter, RegistryError } from "@dopamin/registry";
 import {
   type TransferResult,
+  type TransferSummary,
   toTransferResponse,
   transferCreateRequestSchema,
   transferIdParamSchema,
 } from "@dopamin/shared";
+import type { Context } from "hono";
 import { Hono } from "hono";
 import { getDb } from "../lib/db";
 import { ApiException } from "../lib/errors";
@@ -13,11 +15,14 @@ import { reconcileOnTimeout } from "../lib/reconcile";
 import { adapterForDomain } from "../lib/registries";
 import { jsonValidator } from "../lib/validator";
 import { requireSession } from "../middleware/session";
+import { consumePollSafely } from "../services/poll.service";
 import {
+  actOnTransfer,
   listUserTransferRows,
   reconcileTransfers,
   recordInboundTransferRequest,
   requireOwnedTransfer,
+  type TransferAction,
   toTransfersListResponse,
 } from "../services/transfer.service";
 import { toTransferSummary } from "../services/transfer-row";
@@ -61,6 +66,35 @@ async function recordRequest(
       }),
     );
   }
+}
+
+/** `:id` は uuid（`transfers.id`）。非 uuid は 400（ドメイン名を渡す旧経路との切り分け）。 */
+function transferId(c: Context<AuthedEnv>): string {
+  const parsed = transferIdParamSchema.safeParse(c.req.param("id"));
+  if (!parsed.success) {
+    throw new ApiException("VALIDATION_ERROR", "移管 ID の形式が不正です。");
+  }
+  return parsed.data;
+}
+
+/**
+ * 承認 / 拒否 / 取消の共通処理（§10.1）。応答は `GET /transfers/:id` と同じ 1 件の要約にして、
+ * 画面が続けて一覧を引き直さなくても更新後の状態を反映できるようにする。
+ *
+ * `c.json` はハンドラ側に残す: Hono RPC（`hc<AppType>`）はハンドラの戻り値から
+ * 応答の型を推論するので、ここで `Response` に丸めると web 側の型が失われる。
+ */
+async function act(
+  c: Context<AuthedEnv>,
+  action: TransferAction,
+): Promise<TransferSummary> {
+  const row = await actOnTransfer(
+    getDb(),
+    c.get("user").id,
+    transferId(c),
+    action,
+  );
+  return toTransferSummary(row);
 }
 
 export const transfers = new Hono<AuthedEnv>()
@@ -108,14 +142,18 @@ export const transfers = new Hono<AuthedEnv>()
   })
 
   /**
-   * FR-12 / AC-12-3: 移管一覧。DB の全行を返し、進行中の移管 IN だけレジストリと照合する。
-   * 承認を検知した行は `info` を取り込んで `domains` 行を作り、`domain_id` を紐付ける（§6.5）。
+   * FR-12 / AC-12-3 / AC-12-4: 移管一覧。
    *
-   * §10.1 の「表示時に Poll も消化する」はアダプタの `poll` / `ackMessage`（#44）と
-   * Poll サービス（#58）が入ってから足す。そのため `direction = out` の行は当面できない。
+   * 表示のたびに Poll を消化してから（§10.1）DB の全行を返し、進行中の移管 IN だけ
+   * レジストリと照合する。承認を検知した行は `info` を取り込んで `domains` 行を作り、
+   * `domain_id` を紐付ける（§6.5）。受信した移管申請（`direction = out`）は Poll が作る。
+   *
+   * Poll を先に消化するのは、通知で確定した行を同じ応答に載せるため。
+   * Poll が落ちても一覧は返す（`consumePollSafely`）。
    */
   .get("/", async (c) => {
     const db = getDb();
+    await consumePollSafely(db);
     const rows = await listUserTransferRows(db, c.get("user").id);
     return c.json(toTransfersListResponse(await reconcileTransfers(db, rows)));
   })
@@ -125,14 +163,32 @@ export const transfers = new Hono<AuthedEnv>()
    * ユーザーが明示的に叩く導線なので、取り込みの再試行には時間制限を掛けない。
    */
   .get("/:id", async (c) => {
-    const parsed = transferIdParamSchema.safeParse(c.req.param("id"));
-    if (!parsed.success) {
-      throw new ApiException("VALIDATION_ERROR", "移管 ID の形式が不正です。");
-    }
     const db = getDb();
-    const row = await requireOwnedTransfer(db, c.get("user").id, parsed.data);
+    const row = await requireOwnedTransfer(db, c.get("user").id, transferId(c));
     const [reconciled] = await reconcileTransfers(db, [row], {
       forceImportRetry: true,
     });
     return c.json({ transfer: toTransferSummary(reconciled ?? row) });
-  });
+  })
+
+  /**
+   * FR-12 / AC-12-4: 受信した移管申請を承認する（`direction = out` の pending のみ）。
+   * 承認するとドメインは相手レジストラへ移り、`domains` 行は `transferred_out` になって
+   * 保有一覧から消える（AC-12-5）。
+   */
+  .post("/:id/approve", async (c) =>
+    c.json({ transfer: await act(c, "approve") }),
+  )
+
+  /** FR-12 / AC-12-4: 受信した移管申請を拒否する（`direction = out` の pending のみ）。 */
+  .post("/:id/reject", async (c) =>
+    c.json({ transfer: await act(c, "reject") }),
+  )
+
+  /**
+   * FR-12: 自分が出した移管申請を承認前に取り消す（`direction = in` の pending のみ、P1）。
+   * レジストリが承認済みなら `transferCancel` が拒否されるので、こちらでは判定しない。
+   */
+  .post("/:id/cancel", async (c) =>
+    c.json({ transfer: await act(c, "cancel") }),
+  );

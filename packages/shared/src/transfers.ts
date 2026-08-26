@@ -68,7 +68,8 @@ export type TransferSummary = z.infer<typeof transferSummarySchema>;
  *
  * - `inbound`: 進行中の移管 IN。`pending` に加え、承認済みで取り込み待ち
  *   （`approved` かつ `domainId` が null）の行も進行中として扱う。
- * - `outbound`: 受信した移管 OUT の申請（`pending`）。生産者は Poll（#58）なので本 API では当面空。
+ * - `outbound`: 受信した移管 OUT の申請（`pending`）。生産者は Poll の消化と
+ *   `POST /domains/sync` の `pendingTransfer` 検知。
  * - `history`: 完了・拒否・取消。
  */
 export const transfersListResponseSchema = z.object({
@@ -104,3 +105,24 @@ export function transferBucket(
   }
   return transfer.direction === "in" ? "inbound" : "outbound";
 }
+
+/**
+ * Poll 消化（§10.1 / FR-12）の結果。`POST /registry/poll` と `POST /domains/sync` が返す。
+ *
+ * 通知は「最古の未 ack を 1 件返す FIFO」なので、1 件の反映に失敗するとそのレジストリの
+ * キューはそこで止まる（ack しないため次回も同じ通知が返る）。件数だけを返し、
+ * どのドメインの通知だったかは載せない（生の通知内容は画面に流さない。FR-18 / NFR-03）。
+ */
+export const pollConsumeSummarySchema = z.object({
+  /** 反映して ack まで完了した通知の件数。 */
+  processed: z.number().int().nonnegative(),
+  /** 反映に失敗して ack しなかった通知の件数（そのレジストリのキューはそこで止まる）。 */
+  failed: z.number().int().nonnegative(),
+});
+export type PollConsumeSummary = z.infer<typeof pollConsumeSummarySchema>;
+
+/** `POST /registry/poll` のレスポンス（デモ・検証用の明示トリガー。§10.1）。 */
+export const registryPollResponseSchema = z.object({
+  poll: pollConsumeSummarySchema,
+});
+export type RegistryPollResponse = z.infer<typeof registryPollResponseSchema>;
