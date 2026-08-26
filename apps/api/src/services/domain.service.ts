@@ -157,17 +157,28 @@ function toSyncFailure(
  * 対象は `ownership = 'owned'` の行だけ（`DomainStore.list` が絞る）。移管 OUT 済みの行は
  * 自レジストラがスポンサーではなく `info` の応答を信頼できないので、再同期しない。
  *
+ * 移管の検知（`pendingTransfer` / スポンサー変更）は `onSynced` フックに切り出してある。
+ * Poll 消化（#58）と同じサービスから差し込むためで、こうしないと
+ * domain.service ↔ transfer.service が循環参照になる。
+ *
  * 【未実装・意図的な制約】
- * - Poll の消化（§10.1「同時に Poll も消化する」）は Poll サービス #58 で足す。
- * - AC-02-4（移管 OUT 完了後に保有一覧から消える）はこの関数だけでは満たせない。
- *   `transferred_out` への遷移は移管の承認（#57 の `POST /transfers/:id/approve`）と
- *   Poll 消化（#58）が担い、この関数は遷移済みの行を対象から外すところまでを受け持つ。
- *   相手側で完了した移管をこの関数が検知する経路（`sponsoringRegistrarId` 比較）は #58。
  * - `info` が NOT_FOUND を返しても **行は消さない**（失敗一覧にコードを載せるだけ）。
  *   非スポンサーからの `info` の応答が未確定（要確認 §21.2 #12）な段階で行を消すと、
  *   一時的な誤判定でユーザーのドメインが一覧から消える方が実害が大きいため。
  */
-export async function syncDomains(userId: string): Promise<DomainSyncResponse> {
+export interface SyncDomainsOptions {
+  /**
+   * `info` が取れた行ごとに呼ばれるフック（移管の検知を差し込む口）。
+   * 例外は同期本体に伝播させない: 付随処理の失敗で一覧が壊れる方が実害が大きいので、
+   * 呼び出し側が握りつぶす前提で使う。
+   */
+  onSynced?: (record: DomainRecord, info: DomainInfo) => Promise<void>;
+}
+
+export async function syncDomains(
+  userId: string,
+  options: SyncDomainsOptions = {},
+): Promise<DomainSyncResponse> {
   const records = await getDomainStore().list(userId);
   const failures: DomainSyncResponse["failures"] = [];
 
@@ -176,6 +187,7 @@ export async function syncDomains(userId: string): Promise<DomainSyncResponse> {
       try {
         const info = await adapterForDomain(record.name).info(record.name);
         const updated = await upsertDomainFromInfo(userId, info);
+        await options.onSynced?.(updated, info);
         return toDomainSummary(updated, false);
       } catch (err) {
         failures.push(toSyncFailure(record.name, err));
@@ -184,5 +196,13 @@ export async function syncDomains(userId: string): Promise<DomainSyncResponse> {
     }),
   );
 
-  return { domains, failures };
+  // 直前の onSynced で移管 OUT に倒れた行を一覧から落とす（AC-02-4）。
+  // 上のループは倒す前の要約を作っているので、ここで読み直す
+  const stillOwned = new Set(
+    (await getDomainStore().list(userId)).map((r) => r.name),
+  );
+  return {
+    domains: domains.filter((d) => stillOwned.has(d.name)),
+    failures,
+  };
 }

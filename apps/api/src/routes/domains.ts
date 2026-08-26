@@ -29,11 +29,11 @@ import {
   listDomainSummaries,
   removeDomain,
   requireOwnedDomain,
-  syncDomains,
   toDomainSummary,
   upsertDomainFromInfo,
 } from "../services/domain.service";
 import type { DomainRecord } from "../services/domain-store";
+import { syncDomainsAndConsumePoll } from "../services/poll.service";
 import type { AuthedEnv } from "../types";
 
 /** check 結果の 1 件分（§10.4）。uniqueness は available のときのみ付く（§10.4 の例に準拠）。 */
@@ -163,10 +163,12 @@ export const domains = new Hono<AuthedEnv>()
     return c.json({ domains: list });
   })
 
-  /** FR-02: 全保有ドメインを info で再同期する。1 件の失敗では全体を落とさない。 */
+  /**
+   * FR-02 / FR-12 / AC-02-4: 全保有ドメインを info で再同期し、Poll も消化する（§10.1）。
+   * 1 件の失敗では全体を落とさない。
+   */
   .post("/sync", async (c) => {
-    const result = await syncDomains(c.get("user").id);
-    return c.json(result);
+    return c.json(await syncDomainsAndConsumePoll(c.get("user").id));
   })
 
   /** FR-03: ドメイン検索・空き確認。部分失敗を許容する（AC-03-2）。 */

@@ -150,7 +150,7 @@ export function createInMemoryDomainStore(
     // transferred_out_at を持たせていないため（一覧・詳細の判定に使わない）
     markTransferredOut: (name) => {
       const existing = byName.get(name);
-      if (!existing || existing.ownership !== "owned") {
+      if (existing?.ownership !== "owned") {
         return Promise.resolve(null);
       }
       const updated: DomainRecord = {

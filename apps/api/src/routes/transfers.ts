@@ -9,6 +9,7 @@ import { reconcileOnTimeout } from "../lib/reconcile";
 import { adapterForDomain } from "../lib/registries";
 import { jsonValidator } from "../lib/validator";
 import { requireSession } from "../middleware/session";
+import { consumePoll } from "../services/poll.service";
 import {
   actOnTransfer,
   getTransfer,
@@ -67,6 +68,10 @@ export const transfers = new Hono<AuthedEnv>()
    * 進行中の行を `transferQuery` で照会して DB に反映し、IN / OUT / 履歴に分けて返す。
    */
   .get("/", async (c) => {
+    // §10.1「表示時に Poll を消化」。承認 / 拒否 / 取消を区別できるのは Poll だけ
+    // （ADR-0002 決定 1）なので、行を読む前に消化して DB を最新にする。
+    // 失敗はまとめて返るだけで例外にはならないため、レジストリが落ちていても一覧は返る
+    await consumePoll();
     return c.json(await listTransfers(c.get("user").id));
   })
 

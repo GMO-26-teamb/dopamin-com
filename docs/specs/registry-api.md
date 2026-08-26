@@ -39,6 +39,7 @@
 | GET | `/health` | ✅ | 各レジストリの `hello` 疎通結果 + レイテンシを返す |
 | POST | `/domains/check` | ✅ | `{sld, tlds[]}` or `{names[]}`。レジストリ単位で並列、部分失敗許容（AC-03-2） |
 | POST | `/domains` | ✅ | check 再実行 → contact 作成 → create → info（AC-06 系）。authInfo はサーバー生成 |
+| POST | `/domains/sync` | ✅ | Poll を消化してから保有ドメイン（`ownership = 'owned'` のみ）を `info` で再同期する（#58）。`info` の `pendingTransfer` から受信中の申請を拾って `transfers(out)` を作り、`sponsoringRegistrarId` が自レジストラと違えば `transferred_out` に倒す（clID が取れるまで後者は効かない。【要確認 §21.2 #12】）。応答は `domainSyncWithPollResponseSchema`（`domains` / `failures` + `pollProcessed`）。順序が Poll → 同期なのは、先に消化しないと移管 OUT 済みの行がこの応答の保有一覧に残ってしまうため（AC-02-4） |
 | GET | `/domains/:name` | ✅ | `info` で最新化して DB キャッシュに write-through。レジストリに繋がらない（`REGISTRY_TIMEOUT` / `REGISTRY_UNAVAILABLE` / `REGISTRY_SPEC_MISMATCH`）ときは DB キャッシュを `stale: true` + `syncedAt` 付きで返す（AC-07-2、#129）。`NOT_FOUND` や拒否応答はそのまま返す。**`ownership = 'transferred_out'` の行はレジストリに問い合わせずキャッシュを返す**（#57。自レジストラが非スポンサーで `info` を信頼できず、`upsertDomainFromInfo` が常に `owned` で書くため部分一意インデックスをすり抜けて保有行が復活する） |
 | POST | `/domains/:name/renew` | ✅ | `{period}`。curExpDate は API 側で `info` から取得。10 年上限ガード（AC-08-2） |
 | PATCH | `/domains/:name` | ✅ | `{nameservers?（全量指定→差分変換）, clientStatuses?{add,remove}}`。コンタクト変更は未対応 |
@@ -51,6 +52,7 @@
 | POST | `/transfers/:id/approve` | ✅ | 受信した OUT 申請を承認（`direction = out` かつ `status = pending` のみ、他は 409）。成功後 `domains.ownership = 'transferred_out'` にして保有一覧から外す（AC-12-5）。行は履歴として残す |
 | POST | `/transfers/:id/reject` | ✅ | 受信した OUT 申請を拒否。保有は動かない（AC-12-4） |
 | POST | `/transfers/:id/cancel` | ✅ | 自分の IN 申請を承認前に取消（`direction = in` のみ）。`domains` 行は元々無いので保有は動かない |
+| POST | `/registry/poll` | ✅ | 全レジストリの Poll を未 ack が無くなるまで消化し `transfers` / `domains` に反映する（デモ・検証用の明示トリガー）。応答は `pollConsumeResultSchema`（`processed` / `created` / `settled` / `skipped` / `failures`）。キューはレジストラ単位でユーザーに分かれないため、反映先のユーザーは `domains` / `transfers` の行から引く |
 
 本 spec のルート（`/domains*` `/transfers*`）はすべて `requireSession` 必須（Cookie `dopamin_session`。requirements §10.1 の「認証: 要」に対応）。
 統合テストは `apps/api/test/helpers/session.ts` の `installTestSession()` + `SESSION_COOKIE_HEADER`（DB 不要の seam）
@@ -156,9 +158,12 @@
   申請時刻以降に動いていれば承認**という判定だけを行い（拒否・取消では trDate が動かないので偽陽性が無い）、
   拒否・取消の確定は Poll 消化（#58）に委ねて行を `pending` のまま残す。
 - `POST /domains/check` の 1 リクエストあたりの件数上限がレジストリ側で不明（API 側は 20 件に制限）。
-- コンタクト更新（FR-09 の一部）は未実装。移管の承認 / 拒否 / 取消は実装済み（#57）。
-  受信申請から `transfers(out)` 行を作る経路は Poll 消化（#58）が入るまで無く、
-  それまでは `recordOutboundTransferRequest()` をテストから直接呼んで前提を作る。
+- コンタクト更新（FR-09 の一部）は未実装。移管の承認 / 拒否 / 取消（#57）と
+  Poll 消化（#58）は実装済み。
+- Poll 消化の失敗時は **ack しない**（`services/poll.service.ts`）。FIFO なのでキューは
+  その 1 件で止まるが、ack して通知を失うと移管の状態を復元する手段が無くなるため。
+  失敗は応答の `failures` と operation_logs（FR-15）に残り、次の消化で再試行される。
+  1 回の消化で処理する上限は 50 件（異常時に関数の実行時間を使い切らないための保険）。
 - ~~`RegistryAdapter` の `poll` / `ackMessage`~~: 実装済み（#44）。§11.1 のメソッドは
   kitaq / mock ともすべて揃った。アダプタの承認 / 拒否 / 取消と Poll 消化を叩く API ルート
   （`POST /transfers/:id/{approve,reject,cancel}` / `POST /registry/poll`）は

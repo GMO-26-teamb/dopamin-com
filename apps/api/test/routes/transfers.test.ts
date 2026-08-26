@@ -3,6 +3,7 @@ import {
   type ApiErrorBody,
   apiErrorBodySchema,
   type ClientStatus,
+  pollConsumeResultSchema,
   type TransferSummary,
   type TransfersListResponse,
   transfersListResponseSchema,
@@ -142,22 +143,25 @@ async function createDomainWithAuthCode(name: string): Promise<string> {
 
 /**
  * 移管 OUT の前提を作る（AC-12-4）: 自分の保有ドメインに相手レジストラからの申請を
- * 受信させ、`transfers(direction = out, status = pending)` を記録して ID を返す。
- *
- * Poll 消化（#58）が入るまで受信申請から行を作る経路が無いので、
- * ここでは Poll と同じサービス関数（`recordOutboundTransferRequest`）を直接呼ぶ。
+ * 受信させ、Poll を消化して `transfers(direction = out, status = pending)` を作る。
+ * 本番と同じ経路（Poll 通知 → `transfers` 行）を通す。
  */
 async function receiveOutboundRequest(name: string): Promise<string> {
   await sendJson("/domains", { name, period: 1 });
-  const result = kitaqsign.simulateInboundTransferRequest(name);
-  const domain = await domainStore.find(name);
-  const record = await recordOutboundTransferRequest(
-    TEST_USER.id,
-    kitaqsign,
-    result,
-    { domainId: domain?.id ?? null },
-  );
-  return record.id;
+  kitaqsign.simulateInboundTransferRequest(name);
+
+  const res = await api("/registry/poll", { method: "POST" });
+  expect(res.status).toBe(200);
+  expect(pollConsumeResultSchema.parse(await res.json())).toMatchObject({
+    created: 1,
+    failures: [],
+  });
+
+  const row = await transferStore.findPending(name, "out");
+  if (!row) {
+    throw new Error(`Poll 消化後に ${name} の OUT 行が作られていない`);
+  }
+  return row.id;
 }
 
 describe("POST /api/v1/transfers（FR-12 移管 IN）", () => {
@@ -331,31 +335,51 @@ describe("GET /api/v1/transfers（FR-12 移管一覧）", () => {
     expect(await listDomainNames()).toEqual(["gain.com"]);
   });
 
-  it("相手が拒否した場合は Poll 消化（#58）まで pending のまま残る", async () => {
+  it("AC-12-2: 相手が拒否すると Poll 消化で rejected として履歴に残る", async () => {
     const authCode = seedForeignDomain("nope.com");
     expect(
       (await sendJson("/transfers", { name: "nope.com", authCode })).status,
     ).toBe(202);
     kitaqsign.simulateCounterpartReject("nope.com");
 
-    // transferQuery は info の pendingTransfer からの導出なので拒否と取消を区別できない
+    // transferQuery（info の pendingTransfer 導出）では拒否と取消を区別できない。
+    // 区別できるのは Poll だけで、一覧の表示時に消化する（§10.1）
     const list = await listTransfers();
-    expect(list.inbound).toHaveLength(1);
-    expect(list.inbound[0]?.status).toBe("pending");
+    expect(list.inbound).toEqual([]);
+    expect(list.history).toHaveLength(1);
+    expect(list.history[0]).toMatchObject({
+      domainName: "nope.com",
+      direction: "in",
+      status: "rejected",
+    });
+    // 拒否なのでドメインは取り込まれない
     expect(await listDomainNames()).toEqual([]);
+    expect(list.history[0]?.domainId).toBeNull();
   });
 
-  it("NFR-04: 死んだ pending 行が他ユーザーの保有ドメインを奪わない", async () => {
-    // 1. 自分が申請 → 相手が拒否。Poll 消化（#58）が入るまで行は pending のまま残る
+  it("NFR-04: 取り残された pending 行が他ユーザーの保有ドメインを奪わない", async () => {
+    // 自分の申請が確定しないまま残っている状態（通知の取りこぼし・レジストリ障害など）。
+    // 行を直接置いて「Poll でも transferQuery でも決着していない pending」を作る
     const authCode = seedForeignDomain("steal.com");
-    expect(
-      (await sendJson("/transfers", { name: "steal.com", authCode })).status,
-    ).toBe(202);
-    kitaqsign.simulateCounterpartReject("steal.com");
-    expect((await listTransfers()).inbound).toHaveLength(1);
+    const requestedAt = new Date();
+    await transferStore.create({
+      userId: TEST_USER.id,
+      domainId: null,
+      domainName: "steal.com",
+      registry: "kitaqsign",
+      direction: "in",
+      status: "pending",
+      registryStatus: "pending",
+      counterpartRegistrarId: "MOCK-FOREIGN",
+      registryMessageId: null,
+      requestedAt,
+      actByAt: new Date(requestedAt.getTime() + 20 * 60 * 1000),
+      completedAt: null,
+      raw: null,
+    });
 
-    // 2. その後、同じドメインが別ユーザーのものとして正規に移管 IN される
-    //    （trDate が自分の申請の窓の内側で動くので、trDate だけでは区別が付かない）
+    // その後、同じドメインが別ユーザーのものとして正規に移管 IN される。
+    // trDate は自分の申請の窓の内側で動くので、trDate だけでは自分の申請と区別が付かない
     await kitaqsign.transferRequest("steal.com", authCode);
     kitaqsign.simulateCounterpartApprove("steal.com");
     await domainStore.upsert({
@@ -367,12 +391,16 @@ describe("GET /api/v1/transfers（FR-12 移管一覧）", () => {
       syncedAt: new Date(),
     });
 
-    // 3. 自分が一覧を開き直しても、他ユーザーの保有行は奪われない
-    const list = await listTransfers();
-    expect(list.history).toEqual([]);
-    expect(list.inbound).toHaveLength(1);
+    // 一覧を開き直しても、他ユーザーの保有行は奪われない
+    await listTransfers();
     expect(await listDomainNames()).toEqual([]);
-    expect((await domainStore.find("steal.com"))?.userId).toBe(OTHER_USER.id);
+    const domain = await domainStore.find("steal.com");
+    expect(domain?.userId).toBe(OTHER_USER.id);
+    expect(domain?.ownership).toBe("owned");
+    // 取り込みは見送られるので domain_id は紐付かない
+    const rows = await transferStore.list(TEST_USER.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.domainId).toBeNull();
   });
 
   it("他ユーザーの移管行は一覧に出ない（NFR-04）", async () => {

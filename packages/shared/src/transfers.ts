@@ -80,3 +80,25 @@ export type TransfersListResponse = z.infer<typeof transfersListResponseSchema>;
  * `transfers.id` は uuid（§9.1）。ドメイン名を渡す旧パスとの取り違えを型で弾く。
  */
 export const transferIdParamSchema = z.uuid();
+
+/**
+ * Poll 消化の結果（`POST /registry/poll` の応答 / `POST /domains/sync` の内訳。§10.1）。
+ *
+ * Poll はレジストラ単位のキューでユーザーごとに分かれないため、件数も全体の値。
+ * 反映先のユーザーは `domains` / `transfers` の行から引く（FR-12）。
+ */
+export const pollConsumeResultSchema = z.object({
+  /** ack まで完了した通知の件数。 */
+  processed: z.number().int().nonnegative(),
+  /** 新しく作った `transfers` 行の件数（受信した移管申請）。 */
+  created: z.number().int().nonnegative(),
+  /** 確定（approved / rejected / cancelled）させた `transfers` 行の件数。 */
+  settled: z.number().int().nonnegative(),
+  /** 対応づけられず ack だけした通知の件数（未知種別・対象不明）。 */
+  skipped: z.number().int().nonnegative(),
+  /** レジストリ単位の失敗（1 つが落ちても他は消化する）。 */
+  failures: z.array(
+    z.object({ registry: registryIdSchema, message: z.string() }),
+  ),
+});
+export type PollConsumeResult = z.infer<typeof pollConsumeResultSchema>;

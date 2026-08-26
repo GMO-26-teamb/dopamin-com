@@ -12,6 +12,7 @@ import {
   type TransferResult,
   transferStatusSchema,
 } from "./registry";
+import { pollConsumeResultSchema } from "./transfers";
 import { type UniquenessResult, uniquenessLabel } from "./uniqueness";
 
 /**
@@ -229,3 +230,15 @@ export const domainSyncResponseSchema = z.object({
   failures: z.array(domainSyncFailureSchema),
 });
 export type DomainSyncResponse = z.infer<typeof domainSyncResponseSchema>;
+
+/**
+ * `POST /domains/sync` の実レスポンス（FR-02 / FR-12。§10.1）。
+ * 同期に加えて Poll も消化する（AC-02-4）ので、その内訳を足して返す。
+ * 既存の利用側が `domains` / `failures` だけを読めるよう、拡張として重ねている。
+ */
+export const domainSyncWithPollResponseSchema = domainSyncResponseSchema.extend(
+  { pollProcessed: pollConsumeResultSchema },
+);
+export type DomainSyncWithPollResponse = z.infer<
+  typeof domainSyncWithPollResponseSchema
+>;

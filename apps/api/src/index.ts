@@ -6,6 +6,7 @@ import { requestId } from "./middleware/request-id";
 import { auth } from "./routes/auth";
 import { domains } from "./routes/domains";
 import { health } from "./routes/health";
+import { registry } from "./routes/registry";
 import { settings } from "./routes/settings";
 import { transfers } from "./routes/transfers";
 import type { AppEnv } from "./types";
@@ -20,7 +21,8 @@ const app = new Hono<AppEnv>()
   .route("/auth", auth)
   .route("/domains", domains)
   .route("/settings", settings)
-  .route("/transfers", transfers);
+  .route("/transfers", transfers)
+  .route("/registry", registry);
 
 app.onError(errorHandler);
 app.notFound(notFoundHandler);

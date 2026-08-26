@@ -372,6 +372,9 @@ export async function listTransfers(
   userId: string,
   now: Date = new Date(),
 ): Promise<TransfersListResponse> {
+  // §10.1 の「表示時に Poll を消化」はルート側で `consumePoll()` を先に呼んで満たす。
+  // ここから呼ぶと poll.service ↔ transfer.service が循環参照になるため
+  // （Poll 消化は transfers 行の書き込みにこのサービスを使う）。
   const records = await getTransferStore().list(userId);
   const refreshed = await Promise.all(
     records.map((record) =>
