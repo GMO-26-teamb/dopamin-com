@@ -1,8 +1,8 @@
 import { type Db, schema } from "@dopamin/db";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import app from "../../src/index";
 import { setDbForTesting } from "../../src/lib/db";
-import { createTestDb } from "./db";
+import { createTestDb, resetTestDb } from "./db";
 import { createTestSession } from "./session";
 
 let db: Db;
@@ -21,6 +21,9 @@ afterAll(async () => {
   setDbForTesting(null);
   await closeDb();
 });
+
+// 各ケースを空の DB から始める（sessions の行数検証を実行順に依存させない）
+beforeEach(() => resetTestDb(db));
 
 describe("createTestSession", () => {
   it("users と sessions を 1 行ずつ作り、cookie は dopamin_session=<sessionId>", async () => {
