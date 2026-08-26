@@ -10,14 +10,21 @@ import {
   domainUpdateRequestSchema,
   transferCreateRequestSchema,
 } from "./api";
+import { apiErrorSchema, ERROR_CODES, errorCodeSchema } from "./errors";
 
-describe("apiErrorCodeSchema（§10.3）", () => {
+describe("apiErrorCodeSchema（§10.3。errors.ts の別名）", () => {
+  it("API_ERROR_CODES / apiErrorCodeSchema / apiErrorBodySchema は errors.ts と同一オブジェクト", () => {
+    expect(API_ERROR_CODES).toBe(ERROR_CODES);
+    expect(apiErrorCodeSchema).toBe(errorCodeSchema);
+    expect(apiErrorBodySchema).toBe(apiErrorSchema);
+  });
+
   it.each(API_ERROR_CODES)("%s を受理する", (code) => {
     expect(apiErrorCodeSchema.safeParse(code).success).toBe(true);
   });
 
-  it("13 種類のエラーコードを定義する（§10.3 のテーブルと一致）", () => {
-    expect(API_ERROR_CODES).toHaveLength(13);
+  it("17 種類のエラーコードを定義する（§10.3 の 13 種 + FR-01 の 4 種）", () => {
+    expect(API_ERROR_CODES).toHaveLength(17);
   });
 
   it("未知のコードは拒否する", () => {
