@@ -63,6 +63,11 @@ export interface TransferStore {
   list(userId: string): Promise<TransferRecord[]>;
   findById(id: string): Promise<TransferRecord | null>;
   /**
+   * ユーザーの進行中（pending）の行だけを返す。
+   * 一覧・詳細の移管バッジ（`domainSummarySchema.transfer`）を組み立てるのに使う。
+   */
+  listPending(userId: string): Promise<TransferRecord[]>;
+  /**
    * ドメイン名 + 向きで進行中（pending）の行を 1 件引く。
    * Poll / `info` からの検知が既存行の更新か新規作成かを決めるのに使う。
    * 同じ組み合わせの pending 行は 1 件だけという前提で、複数あれば新しい方を返す。
@@ -143,6 +148,20 @@ export function createDbTransferStore(db: Db): TransferStore {
       return row ? toTransferRecord(row) : null;
     },
 
+    async listPending(userId) {
+      const rows = await db
+        .select()
+        .from(schema.transfers)
+        .where(
+          and(
+            eq(schema.transfers.userId, userId),
+            eq(schema.transfers.status, "pending"),
+          ),
+        )
+        .orderBy(desc(schema.transfers.createdAt));
+      return rows.map(toTransferRecord);
+    },
+
     async findPending(domainName, direction) {
       const rows = await db
         .select()
@@ -219,6 +238,12 @@ export function createInMemoryTransferStore(
           ),
       ),
     findById: (id) => Promise.resolve(byId.get(id) ?? null),
+    listPending: (userId) =>
+      Promise.resolve(
+        [...byId.values()]
+          .filter((r) => r.userId === userId && r.status === "pending")
+          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()),
+      ),
     findPending: (domainName, direction) =>
       Promise.resolve(
         [...byId.values()]

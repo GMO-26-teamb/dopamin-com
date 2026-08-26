@@ -10,6 +10,7 @@ import { ApiException } from "../lib/errors";
 import { adapterForDomain } from "../lib/registries";
 import { registryErrorMessage } from "../lib/registry-message";
 import { type DomainRecord, getDomainStore } from "./domain-store";
+import { getTransferStore, type TransferRecord } from "./transfer-store";
 
 /**
  * 保有ドメインの write-through（docs/requirements.md §6.5）。
@@ -91,14 +92,33 @@ export async function requireOwnedDomain(
 }
 
 /**
+ * 進行中の移管 → 一覧・詳細の移管バッジ（§10.4 `transfer`）。
+ * `actByAt` はサーバ自動承認の期限で、レジストリが `acDate` を返さない場合は
+ * 申請 + 20 分が入っている（§9.2 / `recordInboundTransferRequest`）。
+ */
+function toTransferBadge(
+  transfer: TransferRecord | undefined,
+): DomainSummary["transfer"] {
+  if (transfer === undefined || transfer.actByAt === null) {
+    return null;
+  }
+  return {
+    direction: transfer.direction,
+    actByAt: transfer.actByAt.toISOString(),
+  };
+}
+
+/**
  * DB の行を一覧・詳細用の要約に写像する（FR-02）。
  *
  * `rgpUntil` は両レジストリの `info` が猶予期限を返さないため常に null
- * （§11.4 の目安日数からの算出は UI 側の責務）。`transfer` は移管一覧（FR-12）が入るまで null。
+ * （§11.4 の目安日数からの算出は UI 側の責務）。
+ * `transfer` は進行中の移管があれば入る（FR-12 / AC-07-3）。
  */
 export function toDomainSummary(
   record: DomainRecord,
   stale: boolean,
+  transfer?: TransferRecord,
 ): DomainSummary {
   const { sld, tld } = splitDomainName(record.name);
   const { info } = record;
@@ -115,16 +135,38 @@ export function toDomainSummary(
     rgpUntil: null,
     syncedAt: record.syncedAt.toISOString(),
     stale,
-    transfer: null,
+    transfer: toTransferBadge(transfer),
   };
+}
+
+/**
+ * ユーザーの進行中の移管をドメイン名で引ける形にする。
+ * 同じドメインに pending が複数ある状態は本来起きないので、新しい方を採る。
+ */
+export async function pendingTransfersByDomain(
+  userId: string,
+): Promise<Map<string, TransferRecord>> {
+  const pending = await getTransferStore().listPending(userId);
+  const byName = new Map<string, TransferRecord>();
+  for (const transfer of pending) {
+    if (!byName.has(transfer.domainName)) {
+      byName.set(transfer.domainName, transfer);
+    }
+  }
+  return byName;
 }
 
 /** FR-02: 保有ドメイン一覧（DB キャッシュを読むだけ。レジストリには問い合わせない）。 */
 export async function listDomainSummaries(
   userId: string,
 ): Promise<DomainSummary[]> {
-  const records = await getDomainStore().list(userId);
-  return records.map((record) => toDomainSummary(record, false));
+  const [records, transfers] = await Promise.all([
+    getDomainStore().list(userId),
+    pendingTransfersByDomain(userId),
+  ]);
+  return records.map((record) =>
+    toDomainSummary(record, false, transfers.get(record.name)),
+  );
 }
 
 /**
@@ -182,27 +224,32 @@ export async function syncDomains(
   const records = await getDomainStore().list(userId);
   const failures: DomainSyncResponse["failures"] = [];
 
-  const domains = await Promise.all(
-    records.map(async (record): Promise<DomainSummary> => {
+  await Promise.all(
+    records.map(async (record) => {
       try {
         const info = await adapterForDomain(record.name).info(record.name);
         const updated = await upsertDomainFromInfo(userId, info);
         await options.onSynced?.(updated, info);
-        return toDomainSummary(updated, false);
       } catch (err) {
         failures.push(toSyncFailure(record.name, err));
-        return toDomainSummary(record, true);
       }
     }),
   );
 
-  // 直前の onSynced で移管 OUT に倒れた行を一覧から落とす（AC-02-4）。
-  // 上のループは倒す前の要約を作っているので、ここで読み直す
-  const stillOwned = new Set(
-    (await getDomainStore().list(userId)).map((r) => r.name),
+  // 同期と onSynced（移管の検知）が終わってから読み直す。
+  // 移管 OUT に倒れた行はここで一覧から外れる（AC-02-4）。
+  // 失敗した行は DB キャッシュのまま残るので stale: true で返す
+  const [stillOwned, transfers] = await Promise.all([
+    getDomainStore().list(userId),
+    pendingTransfersByDomain(userId),
+  ]);
+  const failedNames = new Set(failures.map((f) => f.name));
+  const domains = stillOwned.map((record) =>
+    toDomainSummary(
+      record,
+      failedNames.has(record.name),
+      transfers.get(record.name),
+    ),
   );
-  return {
-    domains: domains.filter((d) => stillOwned.has(d.name)),
-    failures,
-  };
+  return { domains, failures };
 }

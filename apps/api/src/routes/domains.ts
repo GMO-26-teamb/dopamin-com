@@ -3,6 +3,7 @@ import { type RegistryAdapter, RegistryError } from "@dopamin/registry";
 import {
   type ApiErrorCode,
   type DomainAvailability,
+  type DomainDetailResponse,
   type DomainInfo,
   type DomainUniqueness,
   domainCheckRequestSchema,
@@ -23,10 +24,12 @@ import { Hono } from "hono";
 import { ApiException } from "../lib/errors";
 import { reconcileOnTimeout } from "../lib/reconcile";
 import { adapterForDomain, getRegistrySet } from "../lib/registries";
+import { registryErrorMessage } from "../lib/registry-message";
 import { jsonValidator } from "../lib/validator";
 import { requireSession } from "../middleware/session";
 import {
   listDomainSummaries,
+  pendingTransfersByDomain,
   removeDomain,
   requireOwnedDomain,
   toDomainSummary,
@@ -34,6 +37,7 @@ import {
 } from "../services/domain.service";
 import type { DomainRecord } from "../services/domain-store";
 import { syncDomainsAndConsumePoll } from "../services/poll.service";
+import type { TransferRecord } from "../services/transfer-store";
 import type { AuthedEnv } from "../types";
 
 /** check 結果の 1 件分（§10.4）。uniqueness は available のときのみ付く（§10.4 の例に準拠）。 */
@@ -141,16 +145,34 @@ function isTransportFailure(err: RegistryError): boolean {
 }
 
 /**
- * 詳細レスポンス（FR-07）。`domain` は正規化済み `info`、`summary` は一覧と同じ要約。
- * `stale = true` はレジストリに繋がらず DB キャッシュを返したことを示す（AC-07-2）。
+ * 詳細レスポンス（FR-07。契約は `domainDetailResponseSchema`）。
+ * `domain` は正規化済み `info`、`summary` は一覧と同じ要約。
+ * `stale = true` はレジストリに繋がらず DB キャッシュを返したことを示し（AC-07-2）、
+ * `error` にその理由が入る。
  */
-function detailResponse(record: DomainRecord, stale: boolean) {
+function detailResponse(
+  record: DomainRecord,
+  stale: boolean,
+  options: {
+    transfer?: TransferRecord;
+    error?: DomainDetailResponse["error"];
+  } = {},
+): DomainDetailResponse {
   return {
     domain: record.info,
-    summary: toDomainSummary(record, stale),
+    summary: toDomainSummary(record, stale, options.transfer),
     stale,
     syncedAt: record.syncedAt.toISOString(),
+    ...(options.error ? { error: options.error } : {}),
   };
+}
+
+/** 詳細で返す移管バッジ用に、そのドメインの進行中の移管を引く（FR-12 / AC-07-3）。 */
+async function pendingTransferFor(
+  userId: string,
+  name: string,
+): Promise<TransferRecord | undefined> {
+  return (await pendingTransfersByDomain(userId)).get(name);
 }
 
 export const domains = new Hono<AuthedEnv>()
@@ -306,18 +328,20 @@ export const domains = new Hono<AuthedEnv>()
     const adapter = adapterForDomain(name);
     const cached = await requireOwnedDomain(userId, name);
 
+    const transfer = await pendingTransferFor(userId, name);
+
     // AC-12-5: 移管 OUT 済みの行はレジストリに問い合わせない。
     // 自レジストラがスポンサーではないので `info` の応答を信頼できず（【要確認 §21.2 #12】）、
     // さらに `upsertDomainFromInfo` は常に `ownership = 'owned'` で書くため、
     // 部分一意インデックス（保有中の行のみ）をすり抜けて保有行が復活してしまう。
     if (cached.ownership !== "owned") {
-      return c.json(detailResponse(cached, false));
+      return c.json(detailResponse(cached, false, { transfer }));
     }
 
     try {
       const info = await adapter.info(name);
       const record = await upsertDomainFromInfo(userId, info);
-      return c.json(detailResponse(record, false));
+      return c.json(detailResponse(record, false, { transfer }));
     } catch (err) {
       if (!(err instanceof RegistryError) || !isTransportFailure(err)) {
         throw err;
@@ -333,7 +357,12 @@ export const domains = new Hono<AuthedEnv>()
           code: err.code,
         }),
       );
-      return c.json(detailResponse(cached, true));
+      return c.json(
+        detailResponse(cached, true, {
+          transfer,
+          error: { code: err.code, message: registryErrorMessage(err) },
+        }),
+      );
     }
   })
 

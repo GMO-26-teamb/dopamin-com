@@ -9,6 +9,7 @@ import {
   type ApiErrorBody,
   apiErrorBodySchema,
   type DomainUniqueness,
+  domainDetailResponseSchema,
   domainListResponseSchema,
   domainSyncResponseSchema,
   domainUniquenessSchema,
@@ -29,6 +30,10 @@ import {
   type DomainStore,
   setDomainStoreForTesting,
 } from "../../src/services/domain-store";
+import {
+  createInMemoryTransferStore,
+  setTransferStoreForTesting,
+} from "../../src/services/transfer-store";
 import {
   clearTestSession,
   installTestSession,
@@ -87,6 +92,8 @@ beforeEach(() => {
   // DB を立てずに所有権チェック・write-through を検証する（#40 のテスト DB が入るまでの seam）
   store = createInMemoryDomainStore();
   setDomainStoreForTesting(store);
+  // 一覧・詳細は移管バッジ（§10.4 `transfer`）のために transfers も読む（#53）
+  setTransferStoreForTesting(createInMemoryTransferStore());
   installTestSession();
   setRegistrySetForTesting(
     createRegistrySet({
@@ -101,6 +108,7 @@ beforeEach(() => {
 afterEach(() => {
   setRegistrySetForTesting(null);
   setDomainStoreForTesting(null);
+  setTransferStoreForTesting(null);
   clearTestSession();
   vi.restoreAllMocks();
 });
@@ -1021,14 +1029,24 @@ describe("AC-07-2: info 失敗時のキャッシュフォールバック", () =>
 
     const res = await api("/domains/cache.xyz");
     expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      domain: { name: string };
-      stale: boolean;
-      syncedAt: string;
-    };
+    // 応答の形は packages/shared の契約に合わせる（#53）
+    const body = domainDetailResponseSchema.parse(await res.json());
     expect(body.domain.name).toBe("cache.xyz");
     expect(body.stale).toBe(true);
     expect(body.syncedAt).toBeTruthy();
+    // AC-07-2: 「なぜ最新でないか」を画面が出せるように理由を添える
+    expect(body.error).toEqual({
+      code: "REGISTRY_UNAVAILABLE",
+      message: expect.stringContaining("接続できません"),
+    });
+  });
+
+  it("繋がったときは error を付けない", async () => {
+    await createDomain("fresh.xyz");
+    const res = await api("/domains/fresh.xyz");
+    const body = domainDetailResponseSchema.parse(await res.json());
+    expect(body.stale).toBe(false);
+    expect(body.error).toBeUndefined();
   });
 
   it("NOT_FOUND はキャッシュに退避せずそのまま返す", async () => {

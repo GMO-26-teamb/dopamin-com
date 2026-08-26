@@ -10,7 +10,7 @@ import {
   apiErrorCodeSchema,
   domainAvailabilitySchema,
   domainListResponseSchema,
-  domainSummarySchema,
+  type domainSummarySchema,
   domainSyncResponseSchema,
   domainUniquenessSchema,
   registryIdSchema,
@@ -58,39 +58,19 @@ export async function unwrap<T>(
   return parsed.data;
 }
 
-/** `RegistryAdapter.info` の正規化結果（packages/shared の `DomainInfo`）。 */
-export const domainInfoSchema = z.object({
-  name: z.string(),
-  registry: registryIdSchema,
-  statuses: z.array(z.string()),
-  registrant: z.string(),
-  contacts: z.record(z.string(), z.string()),
-  nameservers: z.array(z.string()),
-  registeredAt: z.string(),
-  updatedAt: z.string().nullable(),
-  expiresAt: z.string().nullable(),
-  lastTransferAt: z.string().nullable(),
-  rgpStatuses: z.array(z.string()),
-});
-export type DomainInfoResponse = z.infer<typeof domainInfoSchema>;
-
+export type {
+  DomainDetailResponse as DomainEnvelope,
+  DomainInfoResponse,
+} from "@dopamin/shared";
 /**
- * 詳細・更新系の応答（`{ domain, summary, stale, syncedAt }`）。
- * `summary` は一覧（`GET /domains`）と同じ要約で、所有権・同期時刻・stale はここから取る。
+ * 詳細・更新系・廃止の応答スキーマ。すべて packages/shared が SSOT（#53）。
+ * ここで別に定義すると API とワイヤ形式が二重定義になるため re-export に寄せる。
  */
-export const domainEnvelopeSchema = z.object({
-  domain: domainInfoSchema,
-  summary: domainSummarySchema,
-  stale: z.boolean(),
-  syncedAt: z.string(),
-});
-export type DomainEnvelope = z.infer<typeof domainEnvelopeSchema>;
-
-/** 廃止（`DELETE /domains/:name`）。即時削除なら domain / summary とも null。 */
-export const nullableDomainEnvelopeSchema = z.object({
-  domain: domainInfoSchema.nullable(),
-  summary: domainSummarySchema.nullable(),
-});
+export {
+  domainDeleteResponseSchema as nullableDomainEnvelopeSchema,
+  domainDetailResponseSchema as domainEnvelopeSchema,
+  domainInfoSchema,
+} from "@dopamin/shared";
 
 /** 一覧・同期（FR-02）。スキーマは packages/shared が SSOT。 */
 export const domainListSchema = domainListResponseSchema;

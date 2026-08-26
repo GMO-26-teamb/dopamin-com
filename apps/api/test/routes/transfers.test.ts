@@ -699,6 +699,54 @@ describe("POST /api/v1/transfers/:id/approve・reject（FR-12 移管 OUT）", ()
   });
 });
 
+describe("移管バッジ（§10.4 `transfer`。FR-12 / AC-07-3）", () => {
+  it("受信中の移管がある保有ドメインは一覧・詳細に out のバッジが付く", async () => {
+    const id = await receiveOutboundRequest("badge.com");
+    const pending = await transferStore.findById(id);
+
+    const list = await api("/domains");
+    const { domains } = (await list.json()) as {
+      domains: { name: string; transfer: unknown }[];
+    };
+    expect(domains[0]).toMatchObject({
+      name: "badge.com",
+      transfer: {
+        direction: "out",
+        actByAt: pending?.actByAt?.toISOString(),
+      },
+    });
+
+    const detail = await api("/domains/badge.com");
+    const body = (await detail.json()) as { summary: { transfer: unknown } };
+    expect(body.summary.transfer).toMatchObject({ direction: "out" });
+  });
+
+  it("移管が確定するとバッジは消える", async () => {
+    const id = await receiveOutboundRequest("badge-done.com");
+    expect(
+      (await api(`/transfers/${id}/reject`, { method: "POST" })).status,
+    ).toBe(200);
+
+    const list = await api("/domains");
+    const { domains } = (await list.json()) as {
+      domains: { name: string; transfer: unknown }[];
+    };
+    expect(domains[0]).toMatchObject({
+      name: "badge-done.com",
+      transfer: null,
+    });
+  });
+
+  it("移管中でないドメインのバッジは null", async () => {
+    await createDomainWithAuthCode("plain.com");
+    const list = await api("/domains");
+    const { domains } = (await list.json()) as {
+      domains: { transfer: unknown }[];
+    };
+    expect(domains[0]?.transfer).toBeNull();
+  });
+});
+
 describe("recordOutboundTransferRequest（受信申請の記録。#58 の Poll 消化が使う）", () => {
   it("domains 行の ID を紐付け、outbound に pending として出る", async () => {
     await sendJson("/domains", { name: "linked.com", period: 1 });

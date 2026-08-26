@@ -5,6 +5,7 @@ export * from "./constants";
 export * from "./dates";
 export * from "./display-status";
 export * from "./domain-name";
+export * from "./domains";
 export * from "./errors";
 export * from "./health";
 export * from "./logs";
