@@ -1,4 +1,5 @@
 // Drizzle スキーマ（docs/requirements.md §9）。テーブルごとにファイルを分け、ここから re-export する。
+export * from "./ai-logs";
 export * from "./contacts";
 export * from "./domains";
 export * from "./operation-logs";

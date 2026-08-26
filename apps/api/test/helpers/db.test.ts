@@ -6,6 +6,7 @@ import { createTestDb, resetTestDb } from "./db";
 
 /** packages/db/drizzle の全マイグレーション（journal 順）が作るテーブル */
 const EXPECTED_TABLES = [
+  "ai_logs",
   "contacts",
   "domains",
   "operation_logs",
