@@ -51,6 +51,32 @@ jobs:
             echo "::error title=DIRECT_DATABASE_URL 未設定::production environment の Secrets に DIRECT_DATABASE_URL（Supavisor session mode, 5432）を登録してください（README / docs/requirements.md §17）"
             exit 1
           fi
+
+          # drizzle-kit は接続失敗の理由を出さずに exit 1 するため、先に接続先を検査して
+          # 原因の分かるエラーを出す。パスワードは表示しない（ホストとポートのみ）。
+          # 認証情報は最後の @ までを落とす（パスワードに @ が含まれていても取り違えない）
+          hostport=$(printf '%s' "$DIRECT_DATABASE_URL" | sed -E 's#^[a-z+]+://.*@##; s#[/?].*$##')
+          host=${hostport%%:*}
+          port=${hostport##*:}
+          [ "$port" = "$host" ] && port=5432
+          echo "接続先: $host:$port"
+
+          case "$host" in
+            db.*.supabase.co)
+              echo "::error title=DIRECT_DATABASE_URL が直結ホスト::$host は IPv6 のみで公開されており、IPv4 のみの GitHub Actions ランナーからは到達できません。Supavisor session mode（postgresql://postgres.<project-ref>:<password>@aws-<n>-<region>.pooler.supabase.com:5432/postgres）に差し替えてください（docs/requirements.md §16.3）"
+              exit 1
+              ;;
+          esac
+
+          if ! getent hosts "$host" >/dev/null; then
+            echo "::error title=DB ホストを解決できない::$host の名前解決に失敗しました。DIRECT_DATABASE_URL のホスト名を確認してください"
+            exit 1
+          fi
+          if ! timeout 10 bash -c "cat < /dev/null > /dev/tcp/$host/$port" 2>/dev/null; then
+            echo "::error title=DB に接続できない::$host:$port へ TCP 接続できません（IPv6 専用ホスト・ファイアウォール・ポート番号の誤りが典型）。docs/requirements.md §16.3 を参照してください"
+            exit 1
+          fi
+
           pnpm --filter @dopamin/db migrate
 
   api:

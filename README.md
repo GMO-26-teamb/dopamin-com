@@ -56,3 +56,5 @@ URL の `?mock=<scenario>` で状態を切り替える（`apps/web/lib/api/mock/
    `DIRECT_DATABASE_URL` は DB のパスワードを含むので、リポジトリ Secrets ではなく `production` environment の Secrets に置くことを推奨する（全ジョブが `environment: production` を指定しているため、どちらに置いても `secrets.DIRECT_DATABASE_URL` で解決される）。
 
 デプロイは `migrate`（`pnpm --filter @dopamin/db migrate`）→ `api` → `web` の順に走り、マイグレーションが失敗した場合はデプロイしない。
+
+`migrate` ジョブは `drizzle-kit migrate` の前に接続先ホスト/ポート（パスワードは伏せる）をログに出し、直結ホスト・名前解決失敗・TCP 到達不可を検出したら理由付きで落とす。`drizzle-kit` は接続に失敗しても理由を出さずに終了するため、原因の切り分けはこのプリフライトのログを見る。
