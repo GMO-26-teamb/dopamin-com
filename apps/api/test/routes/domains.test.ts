@@ -459,6 +459,52 @@ describe("POST /api/v1/domains/:name/renew（FR-08 更新）", () => {
   });
 });
 
+describe("MOCK_REGISTRY_FAIL_MODE=timeout_after_write（#49 / AC-18-2）", () => {
+  it("create がタイムアウトしても info で照合して 201 を返す", async () => {
+    // 先に 1 件作ってコンタクトを用意しておく（#72 の再利用）。
+    // contact:create 自体は照合できない更新系なので、そこで落ちると
+    // create の照合まで到達しない
+    await createDomain("first.com");
+    kitaqsign.setFailMode("timeout_after_write");
+
+    const res = await sendJson("/domains", { name: "reconciled.com" });
+    // 更新系はタイムアウトしたが、参照系（info）で存在を確認できるので成功に確定する
+    expect(res.status).toBe(201);
+    const { domain } = (await res.json()) as DomainPayload;
+    expect(domain?.name).toBe("reconciled.com");
+
+    // 保有一覧にも入る（write-through が走っている）
+    kitaqsign.setFailMode("none");
+    const list = await api("/domains");
+    const body = domainListResponseSchema.parse(await list.json());
+    expect(body.domains.map((d) => d.name)).toEqual([
+      "first.com",
+      "reconciled.com",
+    ]);
+  });
+
+  it("コンタクト未作成の初回 create は contact:create の 504 で止まる", async () => {
+    // contact:create は `info` で照合できない（作成した ID を引く手段が無い）ため
+    // reconcileOnTimeout の対象外。偽の成功にせず 504 を返す
+    kitaqsign.setFailMode("timeout_after_write");
+    const res = await sendJson("/domains", { name: "nocontact.com" });
+    expect(res.status).toBe(504);
+    expect((await parseError(res)).error.code).toBe("REGISTRY_TIMEOUT");
+  });
+
+  it("照合できない更新系（auth-code）は 504 のまま", async () => {
+    await createDomain("noconfirm.com");
+    kitaqsign.setFailMode("timeout_after_write");
+
+    // rotate-auth-info は info で照合できない（authInfo が resData に含まれない）
+    const res = await api("/domains/noconfirm.com/auth-code", {
+      method: "POST",
+    });
+    expect(res.status).toBe(504);
+    expect((await parseError(res)).error.code).toBe("REGISTRY_TIMEOUT");
+  });
+});
+
 describe("FR-06 / FR-09: コンタクトの再利用（#72）", () => {
   const PROFILE = {
     name: "Hanako Test",

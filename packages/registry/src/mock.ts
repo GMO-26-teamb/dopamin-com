@@ -36,7 +36,14 @@ export type MockFailMode =
   | "timeout"
   | "5xx"
   | "reject"
-  | "spec_mismatch";
+  | "spec_mismatch"
+  /**
+   * 更新系だけを「レジストリには届いたが応答がタイムアウトした」状態にする（#49。§11.6 (d)）。
+   * `timeout` はコマンドの手前で落ちるので状態が変わらず、`info` も失敗するため、
+   * AC-18-2（タイムアウト後に参照系で結果を照合する）を手元で再現できない。
+   * こちらは**状態を変えてから** `REGISTRY_TIMEOUT` を投げ、参照系は通す。
+   */
+  | "timeout_after_write";
 
 function addYears(iso: string, years: number): string {
   const date = new Date(iso);
@@ -77,6 +84,20 @@ const POLL_TYPE_BY_OUTCOME: Record<TransferOutcome, PollMessageType> = {
   rejected: "transfer_rejected",
   cancelled: "transfer_cancelled",
 };
+
+/**
+ * 状態を変えない参照系コマンド（`failMode=timeout_after_write` の対象外）。
+ * ここに無いものは「更新系」とみなす（コマンドが増えたときに素通りさせないため、
+ * 除外リストではなく参照系の列挙にしている）。
+ */
+const READ_COMMANDS: ReadonlySet<OperationCommand> = new Set([
+  "hello",
+  "check",
+  "info",
+  "transfer_query",
+  "poll",
+  "host_info",
+]);
 
 /** 移管が確定したときの結果（`pending` / `none` を除いた `TransferStatus`）。 */
 type TransferOutcome = "approved" | "rejected" | "cancelled";
@@ -240,9 +261,10 @@ export class MockRegistryAdapter implements RegistryAdapter {
     command: OperationCommand,
     domainName: string | null,
     request: unknown,
-    fn: () => Promise<T>,
+    run: () => Promise<T>,
     toResponse: (result: T) => unknown = (result) => result,
   ): Promise<T> {
+    const fn = () => this.withPostWriteTimeout(command, run);
     if (this.store) {
       await this.hydrate();
       // 参照系（check / info / hello / poll の空振り）は状態を変えないので書き戻さない。
@@ -258,6 +280,33 @@ export class MockRegistryAdapter implements RegistryAdapter {
       }
     }
     return this.record(command, domainName, request, fn, toResponse);
+  }
+
+  /**
+   * `failMode=timeout_after_write`（§11.6 (d) / AC-18-2）。
+   *
+   * 更新系は**状態を変えてから**タイムアウトさせる。「レジストリには届いたが応答が
+   * 返ってこなかった」状況の再現で、`reconcileOnTimeout` が参照系で結果を照合して
+   * 成功に確定できることを手元で確認するために要る（`failMode=timeout` は
+   * コマンドの手前で落ちるので状態が変わらず、照合先の `info` も失敗する）。
+   * 参照系は素通しする（照合ができないと再現の意味が無い）。
+   */
+  private async withPostWriteTimeout<T>(
+    command: OperationCommand,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    const result = await run();
+    if (
+      this.failMode === "timeout_after_write" &&
+      !READ_COMMANDS.has(command)
+    ) {
+      throw new RegistryError({
+        code: "REGISTRY_TIMEOUT",
+        registry: this.id,
+        message: `${command}: モックレジストリが応答を返しませんでした（failMode=timeout_after_write。コマンドは反映済み）`,
+      });
+    }
+    return result;
   }
 
   private async record<T>(
@@ -366,6 +415,7 @@ export class MockRegistryAdapter implements RegistryAdapter {
           registry: this.id,
           message: `${command}: モックレジストリの応答が仕様と一致しません（failMode=spec_mismatch）`,
         });
+      // timeout_after_write はコマンドの手前では落とさない（実行後に throw する）
       default:
         return;
     }

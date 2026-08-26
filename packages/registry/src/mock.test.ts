@@ -841,3 +841,89 @@ describe("観測フック（FR-15: 公開メソッド 1 回 = 1 レコード）"
     await expect(adapter.hello()).resolves.toMatchObject({ registry: "mock" });
   });
 });
+
+describe("failMode=timeout_after_write（§11.6 (d) / AC-18-2。#49）", () => {
+  function adapter(): MockRegistryAdapter {
+    return new MockRegistryAdapter({ failMode: "timeout_after_write" });
+  }
+
+  it("更新系は状態を変えてからタイムアウトする（届いていたことを info で照合できる）", async () => {
+    const mock = adapter();
+
+    await expect(
+      mock.create({ name: "written.com", periodYears: 1, authInfo: "s3cret" }),
+    ).rejects.toMatchObject({ code: "REGISTRY_TIMEOUT" });
+
+    // failMode=timeout と違い、参照系は通るしドメインは実際に作られている
+    const info = await mock.info("written.com");
+    expect(info.name).toBe("written.com");
+  });
+
+  it("参照系はそのまま通る（照合できないと再現の意味が無い）", async () => {
+    const mock = adapter();
+    await expect(mock.hello()).resolves.toMatchObject({ registry: "mock" });
+    await expect(mock.check(["free.com"])).resolves.toEqual([
+      { name: "free.com", available: true },
+    ]);
+    await expect(mock.poll()).resolves.toBeNull();
+  });
+
+  it("renew / update / delete も反映してからタイムアウトする", async () => {
+    const mock = new MockRegistryAdapter();
+    const created = await mock.create({
+      name: "flow.com",
+      periodYears: 1,
+      authInfo: "s3cret",
+    });
+    mock.setFailMode("timeout_after_write");
+
+    await expect(
+      mock.renew("flow.com", {
+        periodYears: 1,
+        currentExpiresAt: created.expiresAt ?? "",
+      }),
+    ).rejects.toMatchObject({ code: "REGISTRY_TIMEOUT" });
+    // 期限は延びている（AC-18-2 の照合条件）
+    const renewed = await mock.info("flow.com");
+    expect(new Date(String(renewed.expiresAt)).getTime()).toBeGreaterThan(
+      new Date(String(created.expiresAt)).getTime(),
+    );
+
+    await expect(
+      mock.update("flow.com", { addNameservers: ["ns1.flow.com"] }),
+    ).rejects.toMatchObject({ code: "REGISTRY_TIMEOUT" });
+    expect((await mock.info("flow.com")).nameservers).toEqual(["ns1.flow.com"]);
+
+    await expect(mock.delete("flow.com")).rejects.toMatchObject({
+      code: "REGISTRY_TIMEOUT",
+    });
+    expect((await mock.info("flow.com")).rgpStatuses).toContain(
+      "redemptionPeriod",
+    );
+  });
+
+  it("移管申請も受理してからタイムアウトする", async () => {
+    const mock = new MockRegistryAdapter();
+    mock.seedForeignDomain("move.com", "auth-move");
+    mock.setFailMode("timeout_after_write");
+
+    await expect(
+      mock.transferRequest("move.com", "auth-move"),
+    ).rejects.toMatchObject({ code: "REGISTRY_TIMEOUT" });
+
+    // transferQuery（参照系）で受理済みを確認できる
+    expect((await mock.transferQuery("move.com")).status).toBe("pending");
+  });
+
+  it("failMode=timeout は手前で落ちるので状態が変わらない（対比）", async () => {
+    const mock = new MockRegistryAdapter({ failMode: "timeout" });
+    await expect(
+      mock.create({ name: "lost.com", periodYears: 1, authInfo: "s3cret" }),
+    ).rejects.toMatchObject({ code: "REGISTRY_TIMEOUT" });
+
+    mock.setFailMode("none");
+    await expect(mock.info("lost.com")).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+  });
+});

@@ -40,7 +40,15 @@ const booleanFlag = z
 const apiEnvSchema = z.object({
   REGISTRY_MODE: z.enum(["real", "mock"]).default("mock"),
   MOCK_REGISTRY_FAIL_MODE: z
-    .enum(["none", "timeout", "5xx", "reject", "spec_mismatch"])
+    .enum([
+      "none",
+      "timeout",
+      "5xx",
+      "reject",
+      "spec_mismatch",
+      // 更新系だけを「届いたが応答が返らない」状態にする（#49。AC-18-2 の手元再現）
+      "timeout_after_write",
+    ])
     .default("none"),
   KITAQSIGN_BASE_URL: optionalString,
   KITAQSIGN_GATE_USER: optionalString,
