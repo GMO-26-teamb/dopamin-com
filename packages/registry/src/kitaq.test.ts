@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RegistryError } from "./errors";
 import type { KitaqAdapterConfig } from "./http";
 import { createKitaqAdapter } from "./kitaq";
+import type { RegistryCallRecord } from "./observer";
 
 /**
  * KitaqRegistryAdapter の契約テスト。fetch をスタブし、fixture
@@ -333,5 +334,65 @@ describe("authCode（rotate-auth-info）", () => {
       );
     expect(err).toBeInstanceOf(RegistryError);
     expect((err as RegistryError).code).toBe("REGISTRY_SPEC_MISMATCH");
+  });
+});
+
+describe("観測フック（FR-15: 1 HTTP 呼び出し = 1 レコード）", () => {
+  it("create はネームサーバ指定時、補助コマンド含む独立レコードを発行する（v0.1.7 / AC-15-1）", async () => {
+    const records: RegistryCallRecord[] = [];
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            result: { code: 2303, message: "Object does not exist" },
+            trID: { clTRID: "dp-test", svTRID: "KQSGN-TEST-1" },
+          },
+          404,
+        ),
+      ) // host:info（未作成）
+      .mockResolvedValueOnce(jsonResponse(envelope())) // host:create
+      .mockResolvedValueOnce(jsonResponse(envelope())) // contact:create
+      .mockResolvedValueOnce(
+        jsonResponse(
+          envelope({
+            domain: "example.com",
+            crDate: "2026-08-25T00:00:00Z",
+            exDate: "2027-08-25T00:00:00Z",
+          }),
+        ),
+      ) // create
+      .mockResolvedValueOnce(jsonResponse(loadFixture("domain-info.json"))); // info
+
+    await createKitaqAdapter({
+      ...CONFIG,
+      onCall: (record) => {
+        records.push(record);
+      },
+    }).create({
+      name: "example.com",
+      periodYears: 1,
+      authInfo: "secret-auth",
+      nameservers: ["ns1.example.net"],
+    });
+
+    // host_info の NOT_FOUND（自動作成の前提確認）もエラーレコードとして独立に残る
+    expect(records.map((r) => [r.command, r.status])).toEqual([
+      ["host_info", "error"],
+      ["host_create", "success"],
+      ["contact_create", "success"],
+      ["create", "success"],
+      ["info", "success"],
+    ]);
+    // 補助コマンドも起点となったドメインに紐づく
+    expect(new Set(records.map((r) => r.domainName))).toEqual(
+      new Set(["example.com"]),
+    );
+    // record.request には送信ボディが未マスクで入る（マスクは保存側の責務）
+    const createRecord = records.find((r) => r.command === "create");
+    expect(createRecord?.request).toMatchObject({
+      method: "POST",
+      path: "/domains",
+      body: { authInfo: "secret-auth" },
+    });
   });
 });

@@ -8,6 +8,7 @@ export * from "./domain-name";
 export * from "./errors";
 export * from "./health";
 export * from "./logs";
+export * from "./masking";
 export * from "./operation-log";
 export * from "./operations";
 export * from "./registry";

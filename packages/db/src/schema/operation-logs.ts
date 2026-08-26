@@ -19,14 +19,18 @@ export const operationLogs = pgTable(
   "operation_logs",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    // ミドルウェアが採番する x-request-id（§10.2）
+    // Poll 由来などシステム起点の呼び出し（/health の hello 等）は NULL（§9.1）。
+    // 退会（users 削除）でも通信ログは恒久保存するため SET NULL にする。
+    userId: uuid("user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    // X-Cl-TRID に送った値（clTRID）と一致させる（§9.1）
     requestId: text("request_id"),
+    // レジストリ採番の svTRID（障害調査・他チームとの突合キー）
+    svTrid: text("sv_trid"),
     // kitaqsign / kitaqnic / mock
     registry: text("registry").notNull(),
-    // check / info / create / renew / update / delete / restore / transfer / transferQuery / authCode
+    // packages/shared の OPERATION_COMMANDS（主 15 種 + 補助 4 種）が正（§9.1）
     command: text("command").notNull(),
     domainName: text("domain_name"),
     // success / error / timeout / spec_mismatch

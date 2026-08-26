@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler";
 import { originCheck } from "./middleware/origin-check";
+import { requestContext } from "./middleware/request-context";
 import { requestId } from "./middleware/request-id";
 import { auth } from "./routes/auth";
 import { domains } from "./routes/domains";
@@ -12,6 +13,7 @@ import type { AppEnv } from "./types";
 const app = new Hono<AppEnv>()
   .basePath("/api/v1")
   .use(requestId)
+  .use(requestContext)
   .use(originCheck)
   .route("/health", health)
   .route("/auth", auth)

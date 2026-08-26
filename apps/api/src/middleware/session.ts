@@ -4,6 +4,7 @@ import { createMiddleware } from "hono/factory";
 import { SESSION_COOKIE, setSessionCookie } from "../lib/cookies";
 import { getDb } from "../lib/db";
 import { ApiException } from "../lib/errors";
+import { setContextUserId } from "../lib/operation-log-context";
 import { extendSessionIfNeeded, getSessionWithUser } from "../services/session";
 
 export type AuthVariables = {
@@ -68,6 +69,8 @@ export const requireSession = createMiddleware<{ Variables: AuthVariables }>(
     }
     c.set("user", resolved.user);
     c.set("sessionId", resolved.sessionId);
+    // 操作ログ（FR-15）の user_id 用にリクエストコンテキストへも補完する
+    setContextUserId(resolved.user.id);
     await next();
   },
 );

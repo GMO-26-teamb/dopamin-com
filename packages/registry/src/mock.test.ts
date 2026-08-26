@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { RegistryError } from "./errors";
 import { MockRegistryAdapter } from "./mock";
+import type { RegistryCallRecord } from "./observer";
 
 async function expectRegistryError(
   promise: Promise<unknown>,
@@ -174,5 +175,77 @@ describe("MockRegistryAdapter: エラーシミュレーション（§11.6）", (
     await expectRegistryError(mock.hello(), "REGISTRY_TIMEOUT");
     mock.setFailMode("none");
     await expect(mock.hello()).resolves.toMatchObject({ registry: "mock" });
+  });
+});
+
+describe("観測フック（FR-15: 公開メソッド 1 回 = 1 レコード）", () => {
+  it("成功・失敗を問わず 1 レコード発行し、AuthCode は authInfo キーで記録する", async () => {
+    const records: RegistryCallRecord[] = [];
+    const adapter = new MockRegistryAdapter({
+      onCall: (record) => {
+        records.push(record);
+      },
+    });
+
+    await adapter.create({
+      name: "example.com",
+      periodYears: 1,
+      authInfo: "secret-auth",
+    });
+    const authInfo = await adapter.authCode("example.com");
+    await expect(adapter.info("no-such.com")).rejects.toThrow();
+
+    expect(records.map((r) => [r.command, r.status])).toEqual([
+      ["create", "success"],
+      ["auth_info", "success"],
+      ["info", "error"],
+    ]);
+    // mock は HTTP 往復が無いので svTrid は null、clTrid は既定採番
+    expect(records[0]?.svTrid).toBeNull();
+    expect(records[0]?.clTrid).toMatch(/^mock-/);
+    // 応答の AuthCode はマスク対象キー（authInfo）で包まれる
+    expect(records[1]?.response).toEqual({ authInfo });
+    expect(records[2]).toMatchObject({
+      errorCode: "NOT_FOUND",
+      registryCode: "2303",
+      domainName: "no-such.com",
+    });
+  });
+
+  it("failMode=timeout のレコードは status timeout（AC-15-1）", async () => {
+    const records: RegistryCallRecord[] = [];
+    const adapter = new MockRegistryAdapter({
+      failMode: "timeout",
+      onCall: (record) => {
+        records.push(record);
+      },
+    });
+    await expect(adapter.check(["example.com"])).rejects.toThrow();
+    expect(records[0]).toMatchObject({
+      command: "check",
+      status: "timeout",
+      errorCode: "REGISTRY_TIMEOUT",
+    });
+  });
+
+  it("makeClTrid 注入時はその値を clTrid に使う", async () => {
+    const records: RegistryCallRecord[] = [];
+    const adapter = new MockRegistryAdapter({
+      onCall: (record) => {
+        records.push(record);
+      },
+      makeClTrid: () => "req_abc-1",
+    });
+    await adapter.hello();
+    expect(records[0]?.clTrid).toBe("req_abc-1");
+  });
+
+  it("observer が throw しても操作は成功する", async () => {
+    const adapter = new MockRegistryAdapter({
+      onCall: () => {
+        throw new Error("observer down");
+      },
+    });
+    await expect(adapter.hello()).resolves.toMatchObject({ registry: "mock" });
   });
 });

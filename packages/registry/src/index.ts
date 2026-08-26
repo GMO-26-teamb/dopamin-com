@@ -25,6 +25,11 @@ export type { KitaqAdapterConfig } from "./http";
 export { createKitaqAdapter } from "./kitaq";
 export type { MockFailMode } from "./mock";
 export { MockRegistryAdapter } from "./mock";
+export type {
+  ClTridFactory,
+  RegistryCallObserver,
+  RegistryCallRecord,
+} from "./observer";
 export {
   REGISTRY_TLDS,
   registryIdForDomain,
