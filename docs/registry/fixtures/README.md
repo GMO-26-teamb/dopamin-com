@@ -20,4 +20,20 @@
 - `transfer-request.kitaqsign.json`: kitaqsign は両方持たない（`requestedAt` / `actByAt` は undefined）
 - 新有効期限に相当する `exDate` はどちらの transfer 応答にも無い
 
-Poll（`PollResponse` / `PollMessageDto`）の fixture は poll / ackMessage の実装（#44）で追加する。
+`poll.*.json` の `message.msgType` と `payload` も暫定値。両 OpenAPI の `PollMessageDto` は
+`msgType: string` / `payload: object`（`additionalProperties`）としか宣言しておらず、enum も
+example も description も無い（requirements.md §21.2 #13）。fixture は `payload` が
+`DomainTransferResponse` と同じ形で届く想定を置いているだけなので、契約テストは
+「未知の `msgType` でも通知を落とさない」ことを確かめる側に寄せ、この暫定値には依存させないこと。
+
+- `poll.kitaqsign.json`: `msgType` から動詞が読めない例（`domain:transfer`）。
+  移管通知だと分かった上で `payload.status` にフォールバックし `transfer_request` に正規化される
+  （移管と判断できない通知では `status` を見ない。`docs/specs/registry-api.md` §3-12）
+- `poll.kitaqnic.json`: `msgType` だけで決まる例（`transferApproved`）。kitaqnic なので
+  `payload` に `reDate` / `acDate` がある
+- `poll-empty.json`: 未読なし（`resData.count = 0` / `message` 無し）。アダプタは `null` を返す
+
+**Poll の応答の形は両レジストリで完全に同一**で、違うのはエンドポイントだけ
+（kitaqsign は `GET /messages/poll` + `POST /messages/{id}/ack`、kitaqnic は
+`GET /messages` + `DELETE /messages/{id}`）。fixture をレジストリ別に分けているのは
+`msgType` の揺れの両パターンを残すためで、スキーマの差ではない。

@@ -1,5 +1,9 @@
 import { createRegistrySet, MockRegistryAdapter } from "@dopamin/registry";
-import { type ApiErrorBody, apiErrorBodySchema } from "@dopamin/shared";
+import {
+  type ApiErrorBody,
+  apiErrorBodySchema,
+  type ClientStatus,
+} from "@dopamin/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../../src/index";
 import { setRegistrySetForTesting } from "../../src/lib/registries";
@@ -29,14 +33,15 @@ interface TransferPayload {
   };
 }
 
+/** 移管 IN のシード（`seedForeignDomain`）を呼ぶために実体を持っておく。 */
+let kitaqsign: MockRegistryAdapter;
+
 beforeEach(() => {
+  kitaqsign = new MockRegistryAdapter({ id: "kitaqsign" });
   setRegistrySetForTesting(
     createRegistrySet({
       mode: "real",
-      adapters: [
-        new MockRegistryAdapter({ id: "kitaqsign" }),
-        new MockRegistryAdapter({ id: "kitaqnic" }),
-      ],
+      adapters: [kitaqsign, new MockRegistryAdapter({ id: "kitaqnic" })],
     }),
   );
   setDomainStoreForTesting(createInMemoryDomainStore());
@@ -75,7 +80,21 @@ async function parseError(res: Response): Promise<ApiErrorBody> {
   return apiErrorBodySchema.parse(await res.json());
 }
 
-/** ドメインを登録し、移管に使える現在の AuthCode を返す。 */
+/**
+ * 移管 IN の前提を作る: **相手レジストラ保有**のドメインを投入し、AuthCode を返す。
+ * 自レジストラ保有のドメインには移管申請できない（§11.1 mock / FR-12）ので、
+ * IN 側のシナリオはすべてここから始める。
+ */
+function seedForeignDomain(
+  name: string,
+  options?: { clientStatuses?: readonly ClientStatus[] },
+): string {
+  const authCode = `foreign-auth-${name}`;
+  kitaqsign.seedForeignDomain(name, authCode, options);
+  return authCode;
+}
+
+/** 自分が保有するドメインを登録し、移管 OUT 用の現在の AuthCode を返す。 */
 async function createDomainWithAuthCode(name: string): Promise<string> {
   const created = await sendJson("/domains", { name, period: 1 });
   expect(created.status).toBe(201);
@@ -87,7 +106,7 @@ async function createDomainWithAuthCode(name: string): Promise<string> {
 
 describe("POST /api/v1/transfers（FR-12 移管 IN）", () => {
   it("AC-12-1: 正しい AuthCode で申請が受理され pendingTransfer になる", async () => {
-    const authCode = await createDomainWithAuthCode("move.com");
+    const authCode = seedForeignDomain("move.com");
 
     const res = await sendJson("/transfers", { name: "move.com", authCode });
     expect(res.status).toBe(202);
@@ -112,15 +131,16 @@ describe("POST /api/v1/transfers（FR-12 移管 IN）", () => {
     expect(queried.transfer.status).toBe("pending");
     expect(queried.transfer.requestingRegistrarId).toBe("MOCK-REGISTRAR");
 
-    const info = await api("/domains/move.com");
-    const { domain } = (await info.json()) as {
-      domain: { statuses: string[] };
-    };
-    expect(domain.statuses).toContain("pendingTransfer");
+    // レジストリ側も pendingTransfer になっている。ただし `domains` 行はこの時点では
+    // 作らないので（FR-12 / 保有一覧に出さない）、GET /domains/:name では見えない
+    expect((await kitaqsign.info("move.com")).statuses).toContain(
+      "pendingTransfer",
+    );
+    expect((await api("/domains/move.com")).status).toBe(404);
   });
 
   it("AC-12-2: 誤った AuthCode は 422 REGISTRY_REJECTED に変換される", async () => {
-    await createDomainWithAuthCode("wrong.com");
+    seedForeignDomain("wrong.com");
     const res = await sendJson("/transfers", {
       name: "wrong.com",
       authCode: "wrong-auth-code",
@@ -139,13 +159,19 @@ describe("POST /api/v1/transfers（FR-12 移管 IN）", () => {
   });
 
   it("clientTransferProhibited 中の申請は 409 OPERATION_NOT_ALLOWED", async () => {
-    const authCode = await createDomainWithAuthCode("lock.com");
-    await sendJson(
-      "/domains/lock.com",
-      { clientStatuses: { add: ["clientTransferProhibited"] } },
-      "PATCH",
-    );
+    // ロックを掛けているのは現スポンサー（相手レジストラ）側
+    const authCode = seedForeignDomain("lock.com", {
+      clientStatuses: ["clientTransferProhibited"],
+    });
     const res = await sendJson("/transfers", { name: "lock.com", authCode });
+    expect(res.status).toBe(409);
+    expect((await parseError(res)).error.code).toBe("OPERATION_NOT_ALLOWED");
+  });
+
+  it("自レジストラ保有のドメインへの申請は 409 OPERATION_NOT_ALLOWED", async () => {
+    // 自分がスポンサーのドメインに移管申請しても移管にならない（【要確認: §21.2 #15】）
+    const authCode = await createDomainWithAuthCode("mine.com");
+    const res = await sendJson("/transfers", { name: "mine.com", authCode });
     expect(res.status).toBe(409);
     expect((await parseError(res)).error.code).toBe("OPERATION_NOT_ALLOWED");
   });
@@ -172,7 +198,8 @@ describe("AC-18-2: 移管申請タイムアウト時の info 照合", () => {
     setRegistrySetForTesting(
       createRegistrySet({ mode: "real", adapters: [adapter] }),
     );
-    const authCode = await createDomainWithAuthCode("slowmove.com");
+    const authCode = "foreign-auth-slowmove.com";
+    adapter.seedForeignDomain("slowmove.com", authCode);
 
     adapter.timeoutMode = "after-success";
     const res = await sendJson("/transfers", {
@@ -189,7 +216,8 @@ describe("AC-18-2: 移管申請タイムアウト時の info 照合", () => {
     setRegistrySetForTesting(
       createRegistrySet({ mode: "real", adapters: [adapter] }),
     );
-    const authCode = await createDomainWithAuthCode("lostmove.com");
+    const authCode = "foreign-auth-lostmove.com";
+    adapter.seedForeignDomain("lostmove.com", authCode);
 
     adapter.timeoutMode = "before-reach";
     const res = await sendJson("/transfers", {
@@ -214,7 +242,7 @@ describe("GET /api/v1/transfers/:name（FR-12 状態照会）", () => {
   });
 
   it("FR-18: レジストリの生応答（raw）はクライアントに返さない", async () => {
-    const authCode = await createDomainWithAuthCode("noraw.com");
+    const authCode = seedForeignDomain("noraw.com");
     const created = await sendJson("/transfers", {
       name: "noraw.com",
       authCode,

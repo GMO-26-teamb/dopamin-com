@@ -1,0 +1,18 @@
+{
+  "result": { "code": 1000, "message": "Command completed successfully" },
+  "resData": {
+    "count": 2,
+    "message": {
+      "id": 1042,
+      "msgType": "domain:transfer",
+      "payload": {
+        "domain": "example.com",
+        "status": "pending",
+        "gainingRegistrar": "REG-OTHER",
+        "losingRegistrar": "REG-DOPAMIN"
+      },
+      "qdate": "2026-08-26T10:00:00Z"
+    }
+  },
+  "trID": { "clTRID": "dp-fixture-0008", "svTRID": "KQSGN-20260825-000006" }
+}

@@ -94,6 +94,11 @@ export function getRegistrySet(): RegistrySet {
       kitaqsign: kitaqConfig(env, "kitaqsign"),
       kitaqnic: kitaqConfig(env, "kitaqnic"),
       mockFailMode: env.MOCK_REGISTRY_FAIL_MODE,
+      // mock の移管シミュレーション（§11.1 / §17）。未設定なら mock 既定にフォールバックする
+      ...(env.MOCK_FOREIGN_REGISTRAR_ID
+        ? { mockForeignRegistrarId: env.MOCK_FOREIGN_REGISTRAR_ID }
+        : {}),
+      mockAutoApproveMs: env.MOCK_TRANSFER_AUTO_APPROVE_MS,
       // 操作ログ（FR-15）: 全レジストリ呼び出しを記録する
       onCall: handleRegistryCall,
       makeClTrid: nextClTrid,

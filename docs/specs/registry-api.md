@@ -92,7 +92,34 @@
     `{ op }` を付けて `docs/registry/spec-notes.md`「移管フロー」を更新する。
     正規化ステータスの未知値は「呼んだ操作の結果」に倒す（approve なら `approved`）。
     生値は `registryStatus` に残すので情報は失われない。
-12. **更新系タイムアウト時は再送せず参照系で結果を照合する**（AC-06-2 / AC-18-2）。
+12. **Poll / ack はエンドポイントだけがレジストリで違う**（#44）。kitaqsign は
+    `GET /messages/poll` + `POST /messages/{id}/ack`、kitaqnic は `GET /messages` +
+    `DELETE /messages/{id}`。応答の形（`PollResponse` / `PollMessageDto`）は完全に同一なので
+    正規化は 1 本で済む。`msgType` の値域が未確定【要確認: §21.2 #13】なため、種別は
+    **まず「移管通知か」を判定**する: `msgType` が `transfer` / `trn` を含む（EPP の Poll は
+    `<domain:trnData>` で移管を伝える）か、payload が移管固有のフィールド
+    （`gainingRegistrar` / `losingRegistrar` / `reDate` / `acDate`）を持つか。
+    移管通知だと分かってから動詞（approve / reject / cancel / req）で分岐し、動詞が読めなければ
+    `payload.status` に降り、それでも決まらなければ `'unknown'` に倒す（通知は捨てない）。
+    `status` を先に見ないのは、部分一致の `matchTransferStatus` が無関係な通知の
+    `pendingDelete` / `pendingRestore` を移管として拾ってしまうため。種別は消費側（#58）が
+    `transfers` 行を作る根拠になるので、取りこぼし（`'unknown'` でも `domainName` /
+    `registryStatus` / `raw` は残る）より捏造の方が高くつく。
+    `payload` は `z.unknown()` で受けて後段で緩く読む（想定外の形で Poll ごと落とさないため）。
+    `id` は int64 → string に正規化し、ack で URL に埋める直前に整数表記かを検証する
+    （非整数は `REGISTRY_SPEC_MISMATCH`。ADR-0002 決定 8）。
+13. **mock は相手レジストラを持つ**（#45）。`seedForeignDomain(name, authInfo)` で相手保有の
+    ドメインを投入でき、`transferRequest` は**相手保有のドメインにしか出せない**
+    （自保有への申請は暫定 2304。実レジストリの応答は【要確認: §21.2 #15】）。
+    approve / reject は対応側、cancel は申請側だけが実行でき、役割違いは 2201。
+    更新系（renew / update / delete / restore / rotate-auth-info）は現スポンサーのみ。
+    自動承認は **`setTimeout` を使わず `info` / `transferQuery` / `poll` 時の遅延評価**で確定させる
+    （Vercel Functions ではレスポンス後にタイマーが生き残らないため）。相手側の操作は
+    `simulateInboundTransferRequest` / `simulateCounterpartApprove` / `simulateCounterpartReject`
+    で起こす（レジストリ操作ではないので操作ログは出さない）。Poll 通知は「行為者以外の当事者」に積み、
+    サーバ自動承認だけが双方に届く。設定は `MOCK_FOREIGN_REGISTRAR_ID` /
+    `MOCK_TRANSFER_AUTO_APPROVE_MS`（§17）→ `RegistrySetConfig` 経由でアダプタへ。
+14. **更新系タイムアウト時は再送せず参照系で結果を照合する**（AC-06-2 / AC-18-2）。
     `apps/api/src/lib/reconcile.ts` の `reconcileOnTimeout` が `REGISTRY_TIMEOUT` を捕捉し、
     `info`（transfer は `transferQuery`）で反映を確認できた場合のみ成功として返す
     （create=存在確認 / renew=期限延長 / update=要求変更の全反映 / delete=RGP 入りまたは消滅 /
@@ -115,11 +142,11 @@
 - `GET /transfers/:name` は id 発番前の暫定パス。#56 で要件 §10.1 どおり `GET /transfers/:id` に戻す。
 - `POST /domains/check` の 1 リクエストあたりの件数上限がレジストリ側で不明（API 側は 20 件に制限）。
 - コンタクト更新（FR-09 の一部）と移管の承認 / 拒否（受け側・P2）は未実装。
-- `RegistryAdapter` は §11.1 の `registrarId` / `transferApprove` / `transferReject` /
-  `transferCancel` を実装済み（#43）。残りは `poll` / `ackMessage`（#44）で、
-  `PollMessage` 型は `packages/shared` に用意済みだが生産者はまだ居ない。
-  アダプタの承認 / 拒否 / 取消を叩く API ルート（`POST /transfers/:id/{approve,reject,cancel}`）は
-  移管の永続化（#56）とセットで #57。
-- Poll の契約テスト fixture は未整備（#44 / #48）。transfer fixture の `status` は
-  実応答が未取得のため暫定値（`docs/registry/fixtures/README.md`）。
+- ~~`RegistryAdapter` の `poll` / `ackMessage`~~: 実装済み（#44）。§11.1 のメソッドは
+  kitaq / mock ともすべて揃った。アダプタの承認 / 拒否 / 取消と Poll 消化を叩く API ルート
+  （`POST /transfers/:id/{approve,reject,cancel}` / `POST /registry/poll`）は
+  移管の永続化（#56）とセットで #57 / #58。
+- Poll の契約テスト fixture は `poll.kitaqsign.json` / `poll.kitaqnic.json` / `poll-empty.json`（#44）。
+  `msgType` / `payload` と transfer fixture の `status` は実応答が未取得のため暫定値
+  （`docs/registry/fixtures/README.md`）。
 - Poll 通知の `msgType` の値と `payload` の中身は未確定【要確認: requirements.md §21.2 #13】。
