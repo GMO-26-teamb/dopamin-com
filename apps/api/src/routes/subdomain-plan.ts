@@ -1,10 +1,21 @@
-import { subdomainPlanGenerateRequestSchema } from "@dopamin/shared";
+import {
+  subdomainPlanGenerateRequestSchema,
+  subdomainPlanSaveRequestSchema,
+} from "@dopamin/shared";
 import { Hono } from "hono";
+import { getDb } from "../lib/db";
 import { parseDomainNameParam } from "../lib/params";
 import { jsonValidator } from "../lib/validator";
 import { requireSession } from "../middleware/session";
-import { requireOwnedDomain } from "../services/domain.service";
-import { generateSubdomainPlan } from "../services/subdomain-plan.service";
+import {
+  requireOwnedDomain,
+  requireOwnedDomainId,
+} from "../services/domain.service";
+import {
+  generateSubdomainPlan,
+  getSubdomainPlan,
+  saveSubdomainPlan,
+} from "../services/subdomain-plan.service";
 import type { AuthedEnv } from "../types";
 
 /**
@@ -34,4 +45,26 @@ export const subdomainPlan = new Hono<AuthedEnv>()
       );
       return c.json(response);
     },
-  );
+  )
+
+  /** FR-13 / AC-13-3: 編集した設計を保存する（1 ドメイン 1 件の upsert）。 */
+  .put(
+    "/:name/subdomain-plan",
+    jsonValidator(subdomainPlanSaveRequestSchema),
+    async (c) => {
+      const name = parseDomainNameParam(c.req.param("name"));
+      const { id } = await requireOwnedDomainId(c.get("user").id, name, {
+        forWrite: true,
+      });
+      return c.json(
+        await saveSubdomainPlan(getDb(), name, id, c.req.valid("json")),
+      );
+    },
+  )
+
+  /** FR-13 / AC-13-3・AC-13-6: 保存済みの設計を反映状態つきで返す。 */
+  .get("/:name/subdomain-plan", async (c) => {
+    const name = parseDomainNameParam(c.req.param("name"));
+    const { id } = await requireOwnedDomainId(c.get("user").id, name);
+    return c.json(await getSubdomainPlan(getDb(), name, id));
+  });

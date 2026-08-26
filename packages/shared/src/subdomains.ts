@@ -206,11 +206,13 @@ export type SubdomainPlanProposalResponse = z.infer<
 >;
 
 /**
- * `PUT /domains/:name/subdomain-plan` の入力（ユーザーが編集した設計の保存）。
- * 編集で `www` を外すこともあるため、提案と違い `www` 必須は課さない。
+ * 保存済みの設計本体（§9.1 `subdomain_plans.proposal`）。
+ *
+ * 提案（{@link subdomainProposalSchema}）と違い `www` 必須と 3 件以上は課さない。
+ * ユーザーは編集で `www` を外したり 1 件だけ残したりできるため。
+ * DB から読み戻すときもこのスキーマで検証する（jsonb は素通しなので）。
  */
-export const subdomainPlanSaveRequestSchema = z.object({
-  repoUrl: githubRepoUrlSchema.optional(),
+export const savedSubdomainProposalSchema = z.object({
   policy: z.string().min(1).max(120),
   items: z
     .array(subdomainItemSchema)
@@ -218,6 +220,15 @@ export const subdomainPlanSaveRequestSchema = z.object({
     .max(8)
     .refine(hasUniqueHosts, { message: UNIQUE_HOSTS_MESSAGE }),
 });
+export type SavedSubdomainProposal = z.infer<
+  typeof savedSubdomainProposalSchema
+>;
+
+/** `PUT /domains/:name/subdomain-plan` の入力（ユーザーが編集した設計の保存）。 */
+export const subdomainPlanSaveRequestSchema =
+  savedSubdomainProposalSchema.extend({
+    repoUrl: githubRepoUrlSchema.optional(),
+  });
 export type SubdomainPlanSaveRequest = z.infer<
   typeof subdomainPlanSaveRequestSchema
 >;
@@ -242,6 +253,11 @@ export const subdomainPlanResponseSchema = z.object({
   savedAt: isoDateTimeSchema,
   /** 最後に DNS へ反映した日時。未反映は null（§9.1 `subdomain_plans.applied_at`）。 */
   appliedAt: isoDateTimeSchema.nullable(),
+  /**
+   * 外部 DNS を使う場合のための設定手順テキスト（FR-13「手動設定」。コピー用）。
+   * 内容は設計から一意に決まるので、生成は {@link buildDnsSetupInstructions} が SSOT。
+   */
+  instructions: z.string(),
 });
 export type SubdomainPlanResponse = z.infer<typeof subdomainPlanResponseSchema>;
 
@@ -441,4 +457,50 @@ export function subdomainApplyState(
  */
 export function needsNameserverSwitch(nameservers: readonly string[]): boolean {
   return !isDopaminNameservers(nameservers);
+}
+
+/** 重要度の日本語表記（FR-13 の 必須 / 推奨 / 任意）。 */
+const PRIORITY_LABELS: Record<SubdomainPriority, string> = {
+  required: "必須",
+  recommended: "推奨",
+  optional: "任意",
+};
+
+/** ホスト表記を FQDN に直す（apex の `@` はドメイン自身）。 */
+function toFqdn(host: string, domain: string): string {
+  return hostKey(host) === SUBDOMAIN_APEX_HOST
+    ? domain
+    : `${hostKey(host)}.${domain}`;
+}
+
+/**
+ * 外部 DNS に手で設定するための手順テキストを作る（FR-13「手動設定」）。
+ *
+ * 画面のコピーボタンと API の応答で同じ文言になるよう、生成はここに 1 本化する。
+ * 反映状態（`applyState`）には触れない: 手順は「どう設定するか」であって、
+ * ドパ民の疑似 DNS ゾーンに反映済みかどうかとは別の話だから。
+ */
+export function buildDnsSetupInstructions(
+  domain: string,
+  items: readonly Pick<
+    SubdomainItem,
+    "host" | "purpose" | "recordType" | "target" | "priority"
+  >[],
+  ttl: number = DEFAULT_DNS_TTL,
+): string {
+  const header = [
+    `${domain} のサブドメイン設定手順`,
+    "",
+    "お使いの DNS サービスの管理画面で、次のレコードを追加してください。",
+    `TTL は ${ttl} 秒を想定しています。`,
+    "",
+  ];
+  const body = items.map((item, index) => {
+    const label = PRIORITY_LABELS[item.priority];
+    return [
+      `${index + 1}. ${toFqdn(item.host, domain)}（${label}）— ${item.purpose}`,
+      `   ホスト: ${hostKey(item.host)} / 種別: ${item.recordType} / 値: ${normalizeTarget(item.target)} / TTL: ${ttl}`,
+    ].join("\n");
+  });
+  return [...header, ...body].join("\n");
 }
