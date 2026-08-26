@@ -227,8 +227,11 @@ describe("POST /api/v1/transfers（FR-12 移管 IN）", () => {
       registryCode: "2202",
       retryable: false,
     });
-    // レジストリの生メッセージはユーザー向けメッセージに置き換える（FR-18）
-    expect(text).not.toContain("一致しません");
+    // AC-12-2: 2202 は原因が特定できるので「AuthCode が違う」と伝える（#47）
+    expect(body.error.message).toBe("AuthCode が正しくありません。");
+    // FR-18: レジストリの生メッセージそのものは出さない
+    // （mock は `transfer:request: AuthCode が一致しません` を返す）
+    expect(text).not.toContain("transfer:request");
   });
 
   it("clientTransferProhibited 中の申請は 409 OPERATION_NOT_ALLOWED", async () => {

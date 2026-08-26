@@ -1,4 +1,5 @@
 import type { RegistryError, RegistryErrorCode } from "@dopamin/registry";
+import { userMessageForRegistryCode } from "@dopamin/registry";
 import type { RegistryId } from "@dopamin/shared";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 
@@ -25,8 +26,16 @@ export const REGISTRY_ERROR_HTTP: Record<
 /**
  * RegistryError → ユーザー向けメッセージ（FR-18）。技術詳細（reason 等）は載せない。
  * エラー応答（error-handler）と部分失敗の一覧（`POST /domains/sync`）で同じ文言を使う。
+ *
+ * レジストリの result code から原因まで特定できる場合（AuthCode の間違い・重複申請など）は
+ * そちらを優先する。表は `packages/registry` の `userMessageForRegistryCode` が正で、
+ * ここは「正規化コードだけで決まる既定文言」を持つ（AC-12-2 / §10.3）。
  */
 export function registryErrorMessage(err: RegistryError): string {
+  const specific = userMessageForRegistryCode(err.registryCode, err.command);
+  if (specific !== null) {
+    return specific;
+  }
   const name = REGISTRY_DISPLAY_NAMES[err.registry];
   switch (err.code) {
     case "REGISTRY_TIMEOUT":

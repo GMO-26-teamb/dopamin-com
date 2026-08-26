@@ -18,6 +18,7 @@ export {
   errorCodeForEppResult,
   REGISTRY_ERROR_CODES,
   RegistryError,
+  userMessageForRegistryCode,
 } from "./errors";
 export type { RegistryMode, RegistrySetConfig } from "./factory";
 export { createRegistrySet, RegistrySet } from "./factory";

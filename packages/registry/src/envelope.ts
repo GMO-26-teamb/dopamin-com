@@ -1,4 +1,4 @@
-import type { RegistryId } from "@dopamin/shared";
+import type { OperationCommand, RegistryId } from "@dopamin/shared";
 import { z } from "zod";
 import { errorCodeForEppResult, RegistryError } from "./errors";
 
@@ -31,8 +31,12 @@ export const EPP_SUCCESS_CODES: ReadonlySet<number> = new Set([1000, 1001]);
 
 export interface InterpretInput {
   registry: RegistryId;
-  /** 呼び出したコマンド名（エラーメッセージ用）。 */
-  command: string;
+  /**
+   * 呼び出したコマンドの正準名。エラーメッセージに載せるほか、
+   * result code ごとのユーザー向け文言の出し分け（`userMessageForRegistryCode`）に使うため
+   * `RegistryError.command` へ持ち回る。
+   */
+  command: OperationCommand;
   httpStatus: number;
   /** JSON.parse 済みのレスポンスボディ。parse 失敗時は undefined を渡す。 */
   json: unknown;
@@ -60,6 +64,7 @@ export function interpretEppResponse(input: InterpretInput): InterpretSuccess {
       message: `${command}: レジストリ応答を JSON として解釈できません (HTTP ${httpStatus})`,
       httpStatus,
       reason: input.rawSnippet,
+      command,
     });
   }
 
@@ -73,6 +78,7 @@ export function interpretEppResponse(input: InterpretInput): InterpretSuccess {
       reason: parsed.error.issues
         .map((i) => `${i.path.join(".")}: ${i.message}`)
         .join("; "),
+      command,
     });
   }
 
@@ -89,6 +95,7 @@ export function interpretEppResponse(input: InterpretInput): InterpretSuccess {
       httpStatus,
       // 操作ログ（§9.1）にレジストリ側トレース ID を残せるよう、得られた svTRID を持ち回る
       svTrid: envelope.trID.svTRID,
+      command,
     });
   }
 
@@ -101,6 +108,7 @@ export function interpretEppResponse(input: InterpretInput): InterpretSuccess {
       registryCode: resultCode,
       httpStatus,
       svTrid: envelope.trID.svTRID,
+      command,
     });
   }
 

@@ -243,7 +243,9 @@ export class MockRegistryAdapter implements RegistryAdapter {
           : null,
         latencyMs: Date.now() - startedAt,
       });
-      throw err;
+      // 個々の検証はどのコマンドから呼ばれたかを知らないので、ここで補う。
+      // result code ごとの文言の出し分け（userMessageForRegistryCode）が command を見る
+      throw error === null ? err : error.withCommand(command);
     }
   }
 

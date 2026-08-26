@@ -15,6 +15,7 @@
  */
 
 import type { RegistryId } from "@dopamin/shared";
+import { userMessageForRegistryCode } from "@dopamin/shared";
 import { z } from "zod";
 import type {
   ApiClientError,
@@ -38,17 +39,10 @@ const REGISTRY_LABEL: Record<RegistryId, string> = {
 const GENERIC_REGISTRY_LABEL = "レジストリ";
 
 /**
- * 移管系の registryCode ごとの理由（docs/requirements.md §10.3）。
- * 【要確認: 実際に返るコード、§21.2 #16】が解決したら追随する。
+ * registryCode ごとの理由は `@dopamin/shared` の `userMessageForRegistryCode` が正
+ * （API のエラー応答と同じ表を読む。#47）。
+ * 【要確認: 実際に返るコード、§21.2 #16】が解決したらそちらを差し替える。
  */
-const REGISTRY_REJECT_REASON: Record<string, string> = {
-  "2202": "AuthCode が正しくありません。",
-  "2300": "すでに移管申請中です。",
-  "2301": "すでに移管申請中です。",
-  "2304": "現在のステータスでは移管できません（移管ロックなど）。",
-  "2106": "このドメインは移管の対象外です。",
-  "2303": "このドメインは登録されていません。",
-};
 
 interface CopyTemplate {
   title: string;
@@ -275,9 +269,7 @@ export function toErrorCopy(error: ApiClientError): ErrorCopy {
   switch (error.code) {
     case "REGISTRY_REJECTED": {
       const reason =
-        error.registryCode === undefined
-          ? undefined
-          : REGISTRY_REJECT_REASON[error.registryCode];
+        userMessageForRegistryCode(error.registryCode) ?? undefined;
       // registryCode 由来の理由でも FR-18 の 1 文は落とさない
       const detail =
         reason === undefined

@@ -62,6 +62,14 @@
 `apps/api/src/middleware/error-handler.ts`、EPP result code → 正規化コードの対応は
 `packages/registry/src/errors.ts`（2302→CONFLICT / 2303→NOT_FOUND / 2304→OPERATION_NOT_ALLOWED / 他 2xxx→REGISTRY_REJECTED）。
 
+result code ごとの**ユーザー向け理由文**は `packages/shared/src/registry-codes.ts` の
+`userMessageForRegistryCode(code, command?)` が唯一の定義（#47）。API のエラー応答と
+画面の Error Card（`apps/web/lib/error-messages.ts`）が同じ表を読む。
+`packages/registry` からは re-export するだけで実体を持たない（アダプタ実装が
+`node:crypto` に依存していてブラウザから import できないため。TLD 表と同じ扱い）。
+`2202` / `2304` はコマンドで読み方が変わるので `RegistryError.command`（正準名）を見る。
+画面側は command を持たないので移管文脈の文言に倒す。
+
 ## 3. 設計判断（Swagger 精査で確定した事項）
 
 1. **AuthCode は `rotate-auth-info` でのみ取得可**。`domain:info` の resData に authInfo は

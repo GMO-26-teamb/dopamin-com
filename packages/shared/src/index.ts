@@ -13,6 +13,7 @@ export * from "./operation-log";
 export * from "./operations";
 export * from "./pricing";
 export * from "./registry";
+export * from "./registry-codes";
 export * from "./subdomains";
 export * from "./tlds";
 export * from "./transfers";
