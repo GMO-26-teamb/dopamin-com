@@ -29,6 +29,7 @@
   },
   "devDependencies": {
     "@dopamin/tsconfig": "workspace:*",
+    "@electric-sql/pglite": "0.5.7",
     "@hono/node-server": "^2.1.1",
     "@types/node": "^22",
     "tsup": "^8.5.1",
