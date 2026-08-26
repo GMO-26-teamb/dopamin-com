@@ -35,7 +35,7 @@ function setApiEnv(
 }
 
 let db: Db;
-let close: () => Promise<void>;
+let close: (() => Promise<void>) | undefined;
 
 beforeAll(async () => {
   process.env.DATABASE_URL = "postgres://unused:unused@localhost:1/unused";
@@ -50,7 +50,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   setDbForTesting(null);
-  await close();
+  // beforeAll が timeout した場合は未代入。ここで TypeError を出すと本来の原因を隠すので省略可能にする
+  await close?.();
   setApiEnv({});
 });
 

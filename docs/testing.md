@@ -28,7 +28,7 @@ pnpm check         # lint + typecheck + test（PR 前に必須）
 
     ```ts
     let db: Db;
-    let closeDb: () => Promise<void>;
+    let closeDb: (() => Promise<void>) | undefined;
     beforeAll(async () => {
       process.env.DATABASE_URL = "postgres://unused:unused@localhost:1/unused"; // env() 用ダミー
       process.env.WEBAUTHN_RP_ID = "localhost";
@@ -38,7 +38,7 @@ pnpm check         # lint + typecheck + test（PR 前に必須）
     }, 30_000); // pglite の起動に 1〜2 秒かかる
     afterAll(async () => {
       setDbForTesting(null);
-      await closeDb();
+      await closeDb?.(); // beforeAll が timeout した場合に TypeError で本来の原因を隠さない
     });
     beforeEach(() => resetTestDb(db));
     ```

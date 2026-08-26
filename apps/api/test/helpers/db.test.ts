@@ -22,14 +22,15 @@ const tableRowsSchema = z.object({
 });
 
 let db: Db;
-let closeDb: () => Promise<void>;
+let closeDb: (() => Promise<void>) | undefined;
 
 beforeAll(async () => {
   ({ db, close: closeDb } = await createTestDb());
 }, 30_000);
 
 afterAll(async () => {
-  await closeDb();
+  // beforeAll が timeout した場合は未代入。ここで TypeError を出すと本来の原因を隠すので省略可能にする
+  await closeDb?.();
 });
 
 describe("createTestDb", () => {

@@ -176,7 +176,7 @@ async function seedUserWithPasskey(
 }
 
 let db: Db;
-let closeDb: () => Promise<void>;
+let closeDb: (() => Promise<void>) | undefined;
 
 beforeAll(async () => {
   process.env.DATABASE_URL = "postgres://unused:unused@localhost:1/unused";
@@ -186,7 +186,8 @@ beforeAll(async () => {
 }, 30_000);
 
 afterAll(async () => {
-  await closeDb();
+  // beforeAll が timeout した場合は未代入。ここで TypeError を出すと本来の原因を隠すので省略可能にする
+  await closeDb?.();
 });
 
 beforeEach(async () => {
