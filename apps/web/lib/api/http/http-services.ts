@@ -9,6 +9,7 @@
 import {
   type DomainCheckRequest,
   deriveDisplayStatus,
+  registryIdForDomain,
   splitDomainName,
 } from "@dopamin/shared";
 import {
@@ -21,62 +22,90 @@ import {
   signupWithPasskey,
 } from "../../webauthn";
 import { transferEligibleAt } from "../derive";
-import { notImplemented, toApiClientError } from "../errors";
+import { ApiClientError, notImplemented, toApiClientError } from "../errors";
 import type { Services } from "../services";
-import type { DomainDetail, SearchResult, Transfer } from "../types";
+import type {
+  DomainDetail,
+  DomainSummary,
+  SearchResult,
+  Transfer,
+} from "../types";
 import {
+  type ApiDomainSummary,
   apiClient,
   authCodeSchema,
   checkResponseSchema,
-  type DomainInfoResponse,
+  type DomainEnvelope,
   domainEnvelopeSchema,
+  domainListSchema,
+  domainSyncSchema,
   nullableDomainEnvelopeSchema,
   transferEnvelopeSchema,
   unwrap,
 } from "./client";
 
 /**
- * `DomainInfo` を画面用の `DomainDetail` に写像する。
- *
- * 未取得の情報は API 側が未実装のため暫定値にする:
- * - `transfer.direction`: `info` は pendingTransfer の向きを返さない（移管一覧 API 待ち）
- * - `registrant`: `info` はコンタクト ID しか返さない（コンタクト取得 API 待ち）
- * - `gracePeriods`: `info` は RGP の期限を返さない
- * - `subdomainPlan`: 設計 API 未実装
+ * API の要約（`GET /domains` / 詳細の `summary`）を画面用の `DomainSummary` にする。
+ * 足すのは `displayStatus` だけで、その導出は `packages/shared` が SSOT（fe-ui 設計 §4.1）。
  */
-function toDomainDetail(info: DomainInfoResponse): DomainDetail {
-  const { sld, tld } = splitDomainName(info.name);
-  const ownership = "owned" as const;
-  const transfer = null;
+function toDomainSummaryVm(summary: ApiDomainSummary): DomainSummary {
   return {
-    name: info.name,
-    sld,
-    tld,
-    registry: info.registry,
-    statuses: info.statuses,
-    rgpStatuses: info.rgpStatuses,
-    ownership,
+    ...summary,
     displayStatus: deriveDisplayStatus({
-      statuses: info.statuses,
-      rgpStatuses: info.rgpStatuses,
-      ownership,
-      transfer,
+      statuses: summary.statuses,
+      rgpStatuses: summary.rgpStatuses,
+      ownership: summary.ownership,
+      transfer: summary.transfer,
     }),
-    registeredAt: info.registeredAt,
-    expiresAt: info.expiresAt,
-    rgpUntil: null,
-    syncedAt: new Date().toISOString(),
-    stale: false,
-    transfer,
-    nameservers: info.nameservers,
-    registrant: { name: info.registrant, email: "", migrated: true },
+  };
+}
+
+/**
+ * 詳細応答（`{ domain, summary }`）を画面用の `DomainDetail` に写像する。
+ *
+ * 所有権・同期時刻・stale・移管バッジは `summary`（一覧と同じ要約）から取るので、
+ * 一覧と詳細で表示がずれない。まだ API が返さない値は暫定のままにする:
+ * - `registrant`: `info` はコンタクト ID しか返さない（コンタクト取得 API 待ち）
+ * - `gracePeriods`: `info` は猶予期限を返さない（§11.4 の目安計算は未実装）
+ * - `subdomainPlan`: 設計 API（FR-13）未実装
+ */
+function toDomainDetail({ domain, summary }: DomainEnvelope): DomainDetail {
+  return {
+    ...toDomainSummaryVm(summary),
+    nameservers: domain.nameservers,
+    registrant: { name: domain.registrant, email: "", migrated: true },
     gracePeriods: [],
     transferableFrom: transferEligibleAt(
-      info.registeredAt,
-      info.lastTransferAt,
+      domain.registeredAt,
+      domain.lastTransferAt,
     ),
     subdomainPlan: null,
   };
+}
+
+/**
+ * `POST /domains/sync` の部分失敗を画面用のエラーにする（S-13 / AC-18-1）。
+ *
+ * API は 200 + `failures[]` で部分失敗を返すが、画面は「同期エラーの Banner を出しつつ
+ * キャッシュ表示を続ける」= mutation を reject する契約なので、ここで例外に変換する。
+ * 落ちたレジストリが 1 つに特定できるときだけ `registry` を載せ、見出しを具体名にする。
+ */
+function syncFailureError(
+  failures: readonly { name: string; code: string; message: string }[],
+): ApiClientError {
+  const first = failures[0];
+  const registries = new Set(
+    failures
+      .map((f) => registryIdForDomain(f.name))
+      .filter((id) => id !== null),
+  );
+  const only = registries.size === 1 ? [...registries][0] : undefined;
+  return new ApiClientError({
+    // code は §10.3 の統一コード。zod で検証済みの値がそのまま入る
+    code: (first?.code ?? "INTERNAL") as ApiClientError["code"],
+    message: first?.message ?? "同期に失敗しました。",
+    ...(only === undefined ? {} : { registry: only }),
+  });
 }
 
 /** レジストリの移管ステータス文字列を画面用の状態に寄せる。 */
@@ -155,23 +184,35 @@ export function createHttpServices(): Services {
     },
 
     domains: {
-      /** GET /domains（FR-02、未実装） */
-      list() {
-        return Promise.reject(notImplemented("GET /domains"));
-      },
-
-      /** POST /domains/sync（FR-02、未実装） */
-      sync() {
-        return Promise.reject(notImplemented("POST /domains/sync"));
-      },
-
-      /** GET /domains/:name（FR-07） */
-      async get(name) {
-        const { domain } = await unwrap(
-          apiClient.api.v1.domains[":name"].$get({ param: { name } }),
-          domainEnvelopeSchema,
+      /** GET /domains（FR-02 保有一覧。DB キャッシュを読むだけでレジストリは叩かない） */
+      async list() {
+        const { domains } = await unwrap(
+          apiClient.api.v1.domains.$get(),
+          domainListSchema,
         );
-        return toDomainDetail(domain);
+        return domains.map(toDomainSummaryVm);
+      },
+
+      /** POST /domains/sync（FR-02 最新化。部分失敗は例外に変換する） */
+      async sync() {
+        const { domains, failures } = await unwrap(
+          apiClient.api.v1.domains.sync.$post(),
+          domainSyncSchema,
+        );
+        if (failures.length > 0) {
+          throw syncFailureError(failures);
+        }
+        return domains.map(toDomainSummaryVm);
+      },
+
+      /** GET /domains/:name（FR-07。失敗時は stale なキャッシュが返る・AC-07-2） */
+      async get(name) {
+        return toDomainDetail(
+          await unwrap(
+            apiClient.api.v1.domains[":name"].$get({ param: { name } }),
+            domainEnvelopeSchema,
+          ),
+        );
       },
 
       /** POST /domains/check（FR-03 / 05） */
@@ -203,23 +244,25 @@ export function createHttpServices(): Services {
 
       /** POST /domains（FR-06） */
       async register(input) {
-        const { domain } = await unwrap(
-          apiClient.api.v1.domains.$post({ json: input }),
-          domainEnvelopeSchema,
+        return toDomainDetail(
+          await unwrap(
+            apiClient.api.v1.domains.$post({ json: input }),
+            domainEnvelopeSchema,
+          ),
         );
-        return toDomainDetail(domain);
       },
 
       /** POST /domains/:name/renew（FR-08） */
       async renew(name, input) {
-        const { domain } = await unwrap(
-          apiClient.api.v1.domains[":name"].renew.$post({
-            param: { name },
-            json: input,
-          }),
-          domainEnvelopeSchema,
+        return toDomainDetail(
+          await unwrap(
+            apiClient.api.v1.domains[":name"].renew.$post({
+              param: { name },
+              json: input,
+            }),
+            domainEnvelopeSchema,
+          ),
         );
-        return toDomainDetail(domain);
       },
 
       /** PATCH /domains/:name（FR-09） */
@@ -229,14 +272,15 @@ export function createHttpServices(): Services {
           // `domainUpdateRequestSchema`（packages/shared）にはまだ無い（要確認 #14）。
           throw notImplemented("PATCH /domains/:name（contacts）");
         }
-        const { domain } = await unwrap(
-          apiClient.api.v1.domains[":name"].$patch({
-            param: { name },
-            json: { nameservers: input.nameservers },
-          }),
-          domainEnvelopeSchema,
+        return toDomainDetail(
+          await unwrap(
+            apiClient.api.v1.domains[":name"].$patch({
+              param: { name },
+              json: { nameservers: input.nameservers },
+            }),
+            domainEnvelopeSchema,
+          ),
         );
-        return toDomainDetail(domain);
       },
 
       /** DELETE /domains/:name（FR-10）。RGP 入りなら domain が返り、即時削除なら null。 */
@@ -254,21 +298,23 @@ export function createHttpServices(): Services {
 
       /** POST /domains/:name/restore（FR-11） */
       async restore(name) {
-        const { domain } = await unwrap(
-          apiClient.api.v1.domains[":name"].restore.$post({ param: { name } }),
-          domainEnvelopeSchema,
+        return toDomainDetail(
+          await unwrap(
+            apiClient.api.v1.domains[":name"].restore.$post({
+              param: { name },
+            }),
+            domainEnvelopeSchema,
+          ),
         );
-        return toDomainDetail(domain);
       },
 
       /**
-       * FR-12: 移管 OUT 用 AuthCode。
-       * §10.1 は POST だが、実装済みのルートは GET `/domains/:name/auth-code`
-       * （呼ぶたびに rotate-auth-info で再発行される）。
+       * FR-12: 移管 OUT 用 AuthCode（POST /domains/:name/auth-code、§10.1）。
+       * 呼ぶたびに rotate-auth-info で再発行されるため、前回表示した値は無効になる。
        */
       async authCode(name) {
         const { authCode } = await unwrap(
-          apiClient.api.v1.domains[":name"]["auth-code"].$get({
+          apiClient.api.v1.domains[":name"]["auth-code"].$post({
             param: { name },
           }),
           authCodeSchema,

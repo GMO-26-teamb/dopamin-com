@@ -107,3 +107,62 @@ export const transferCreateRequestSchema = z.object({
   authCode: z.string().min(1).max(64),
 });
 export type TransferCreateRequest = z.infer<typeof transferCreateRequestSchema>;
+
+/**
+ * §9.1 の所有権。`transferred_out`（移管 OUT 完了）は表示のみで全操作不可（AC-12-5）。
+ */
+export const ownershipSchema = z.enum(["owned", "transferred_out"]);
+export type Ownership = z.infer<typeof ownershipSchema>;
+
+/** 進行中の移管（FR-12）。`actByAt` はサーバ自動承認の期限（申請 + 20 分）。 */
+export const domainTransferBadgeSchema = z.object({
+  direction: z.enum(["in", "out"]),
+  actByAt: z.string(),
+});
+
+/**
+ * 保有ドメイン 1 件の要約（`GET /domains` / `POST /domains/sync`。FR-02）。
+ *
+ * 表示ステータスは含めない。EPP ステータスの解釈は `deriveDisplayStatus` が SSOT で、
+ * API・Web の双方がこの要約を入力にして同じ結果を導出する（web 側の ViewModel は
+ * これに `displayStatus` を足したもの）。
+ */
+export const domainSummarySchema = z.object({
+  name: z.string(),
+  sld: z.string(),
+  tld: z.string(),
+  registry: registryIdSchema,
+  statuses: z.array(z.string()),
+  rgpStatuses: z.array(z.string()),
+  ownership: ownershipSchema,
+  registeredAt: z.string(),
+  expiresAt: z.string().nullable(),
+  rgpUntil: z.string().nullable(),
+  /** 最後にレジストリと同期できた時刻（ISO 8601）。 */
+  syncedAt: z.string(),
+  /** true = 直近の同期に失敗し DB キャッシュを表示している（AC-07-2）。 */
+  stale: z.boolean(),
+  /** 移管一覧（FR-12）を実装するまでは常に null。 */
+  transfer: domainTransferBadgeSchema.nullable(),
+});
+export type DomainSummary = z.infer<typeof domainSummarySchema>;
+
+/** `GET /domains` のレスポンス（FR-02）。 */
+export const domainListResponseSchema = z.object({
+  domains: z.array(domainSummarySchema),
+});
+export type DomainListResponse = z.infer<typeof domainListResponseSchema>;
+
+/** `POST /domains/sync` で同期できなかったドメイン（部分失敗を許容する）。 */
+export const domainSyncFailureSchema = z.object({
+  name: z.string(),
+  code: apiErrorCodeSchema,
+  message: z.string(),
+});
+
+/** `POST /domains/sync` のレスポンス（FR-02）。失敗した行は stale: true で返る。 */
+export const domainSyncResponseSchema = z.object({
+  domains: z.array(domainSummarySchema),
+  failures: z.array(domainSyncFailureSchema),
+});
+export type DomainSyncResponse = z.infer<typeof domainSyncResponseSchema>;

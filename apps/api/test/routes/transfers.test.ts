@@ -3,6 +3,15 @@ import { type ApiErrorBody, apiErrorBodySchema } from "@dopamin/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../../src/index";
 import { setRegistrySetForTesting } from "../../src/lib/registries";
+import {
+  createInMemoryDomainStore,
+  setDomainStoreForTesting,
+} from "../../src/services/domain-store";
+import {
+  clearTestSession,
+  installTestSession,
+  SESSION_COOKIE_HEADER,
+} from "../helpers/session";
 import { TimeoutMockAdapter } from "../helpers/timeout-mock";
 
 /** FR-12（移管 IN / 状態照会）の Hono ルート統合テスト。 */
@@ -26,16 +35,24 @@ beforeEach(() => {
       ],
     }),
   );
+  setDomainStoreForTesting(createInMemoryDomainStore());
+  installTestSession();
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
 afterEach(() => {
   setRegistrySetForTesting(null);
+  setDomainStoreForTesting(null);
+  clearTestSession();
   vi.restoreAllMocks();
 });
 
+/** 認証済みリクエスト（移管操作も認証必須。AC-01-3）。 */
 async function api(path: string, init?: RequestInit): Promise<Response> {
-  return app.request(`/api/v1${path}`, init);
+  return app.request(`/api/v1${path}`, {
+    ...init,
+    headers: { cookie: SESSION_COOKIE_HEADER, ...init?.headers },
+  });
 }
 
 function sendJson(
@@ -58,7 +75,7 @@ async function parseError(res: Response): Promise<ApiErrorBody> {
 async function createDomainWithAuthCode(name: string): Promise<string> {
   const created = await sendJson("/domains", { name, period: 1 });
   expect(created.status).toBe(201);
-  const res = await api(`/domains/${name}/auth-code`);
+  const res = await api(`/domains/${name}/auth-code`, { method: "POST" });
   expect(res.status).toBe(200);
   const { authCode } = (await res.json()) as { authCode: string };
   return authCode;
@@ -182,5 +199,16 @@ describe("GET /api/v1/transfers/:name（FR-12 状態照会）", () => {
     const res = await api("/transfers/-bad.com");
     expect(res.status).toBe(400);
     expect((await parseError(res)).error.code).toBe("VALIDATION_ERROR");
+  });
+});
+
+describe("AC-01-3: 移管ルートの認証", () => {
+  it.each([
+    ["POST", "/api/v1/transfers"],
+    ["GET", "/api/v1/transfers/move.com"],
+  ])("%s %s は Cookie 無しで 401 UNAUTHORIZED", async (method, path) => {
+    const res = await app.request(path, { method });
+    expect(res.status).toBe(401);
+    expect((await parseError(res)).error.code).toBe("UNAUTHORIZED");
   });
 });

@@ -19,7 +19,17 @@ import { ApiError } from "../lib/api-error";
 import { reconcileOnTimeout } from "../lib/reconcile";
 import { adapterForDomain, getRegistrySet } from "../lib/registries";
 import { jsonValidator } from "../lib/validator";
-import type { AppEnv } from "../types";
+import { requireSession } from "../middleware/session";
+import {
+  listDomainSummaries,
+  removeDomain,
+  requireOwnedDomain,
+  syncDomains,
+  toDomainSummary,
+  upsertDomainFromInfo,
+} from "../services/domain.service";
+import type { DomainRecord } from "../services/domain-store";
+import type { AuthedEnv } from "../types";
 
 /** check 結果の 1 件分（§10.4）。uniqueness は FR-05 実装時に埋める（現状は常に null）。 */
 interface DomainCheckItem {
@@ -90,7 +100,48 @@ function isUpdateReflected(
   return true;
 }
 
-export const domains = new Hono<AppEnv>()
+/**
+ * キャッシュを返してよい失敗か（AC-07-2 / AC-18-1）。
+ * レジストリに繋がらない・応答が読めない場合だけキャッシュに退避する。
+ * NOT_FOUND や拒否応答は「レジストリ側の事実」なのでそのまま返す。
+ */
+function isTransportFailure(err: RegistryError): boolean {
+  return (
+    err.code === "REGISTRY_TIMEOUT" ||
+    err.code === "REGISTRY_UNAVAILABLE" ||
+    err.code === "REGISTRY_SPEC_MISMATCH"
+  );
+}
+
+/**
+ * 詳細レスポンス（FR-07）。`domain` は正規化済み `info`、`summary` は一覧と同じ要約。
+ * `stale = true` はレジストリに繋がらず DB キャッシュを返したことを示す（AC-07-2）。
+ */
+function detailResponse(record: DomainRecord, stale: boolean) {
+  return {
+    domain: record.info,
+    summary: toDomainSummary(record, stale),
+    stale,
+    syncedAt: record.syncedAt.toISOString(),
+  };
+}
+
+export const domains = new Hono<AuthedEnv>()
+  // NFR-04 / AC-01-3: ドメイン操作はすべて認証必須。所有権は requireOwnedDomain で個別に見る
+  .use(requireSession)
+
+  /** FR-02: 保有ドメイン一覧（DB キャッシュ。レジストリには問い合わせない）。 */
+  .get("/", async (c) => {
+    const list = await listDomainSummaries(c.get("user").id);
+    return c.json({ domains: list });
+  })
+
+  /** FR-02: 全保有ドメインを info で再同期する。1 件の失敗では全体を落とさない。 */
+  .post("/sync", async (c) => {
+    const result = await syncDomains(c.get("user").id);
+    return c.json(result);
+  })
+
   /** FR-03: ドメイン検索・空き確認。部分失敗を許容する（AC-03-2）。 */
   .post("/check", jsonValidator(domainCheckRequestSchema), async (c) => {
     const body = c.req.valid("json");
@@ -209,24 +260,55 @@ export const domains = new Hono<AppEnv>()
         }),
       () => adapter.info(body.name),
     );
-    return c.json({ domain }, 201);
+    // AC-06-1: 成功時点で DB に write-through し、一覧（FR-02）に即時反映する
+    const record = await upsertDomainFromInfo(c.get("user").id, domain);
+    return c.json(detailResponse(record, false), 201);
   })
 
-  /** FR-07: ドメイン詳細（レジストリの info で最新化して返す）。 */
+  /** FR-07: ドメイン詳細。info で最新化し、失敗時はキャッシュを stale で返す（AC-07-2）。 */
   .get("/:name", async (c) => {
     const name = parseDomainNameParam(c.req.param("name"));
-    const domain = await adapterForDomain(name).info(name);
-    return c.json({ domain });
+    const userId = c.get("user").id;
+    // 未対応 TLD は所有権を引く前に 400 で弾く（入力検証が先）
+    const adapter = adapterForDomain(name);
+    const cached = await requireOwnedDomain(userId, name);
+
+    try {
+      const info = await adapter.info(name);
+      const record = await upsertDomainFromInfo(userId, info);
+      return c.json(detailResponse(record, false));
+    } catch (err) {
+      if (!(err instanceof RegistryError) || !isTransportFailure(err)) {
+        throw err;
+      }
+      // AC-07-2: レジストリに繋がらないときは最終同期時刻付きでキャッシュを返す
+      console.warn(
+        JSON.stringify({
+          level: "warn",
+          requestId: c.get("requestId"),
+          message: "info に失敗したため DB キャッシュを返しました",
+          domain: name,
+          registry: err.registry,
+          code: err.code,
+        }),
+      );
+      return c.json(detailResponse(cached, true));
+    }
   })
 
   /** FR-08: 更新（有効期限延長）。curExpDate はレジストリ仕様により必須のため info から取得する。 */
   .post("/:name/renew", jsonValidator(domainRenewRequestSchema), async (c) => {
     const name = parseDomainNameParam(c.req.param("name"));
     const { period } = c.req.valid("json");
+    const userId = c.get("user").id;
     const adapter = adapterForDomain(name);
+    const owned = await requireOwnedDomain(userId, name);
 
     const current = await adapter.info(name);
-    const opCheck = isOperationAllowed("renew", current.statuses);
+    const opCheck = isOperationAllowed("renew", current.statuses, {
+      ownership: owned.ownership,
+      rgpStatuses: current.rgpStatuses,
+    });
     if (!opCheck.allowed) {
       throw new ApiError(
         409,
@@ -263,14 +345,17 @@ export const domains = new Hono<AppEnv>()
           : null;
       },
     );
-    return c.json({ domain });
+    const record = await upsertDomainFromInfo(userId, domain);
+    return c.json(detailResponse(record, false));
   })
 
   /** FR-09: 情報修正（NS・クライアントステータス）。NS は全量指定を差分（add/rem）に変換する。 */
   .patch("/:name", jsonValidator(domainUpdateRequestSchema), async (c) => {
     const name = parseDomainNameParam(c.req.param("name"));
     const body = c.req.valid("json");
+    const userId = c.get("user").id;
     const adapter = adapterForDomain(name);
+    const owned = await requireOwnedDomain(userId, name);
 
     const current = await adapter.info(name);
     // ロック解除だけの要求は clientUpdateProhibited 中でも許可する（解除経路を残す）
@@ -279,6 +364,8 @@ export const domains = new Hono<AppEnv>()
       (body.clientStatuses?.add?.length ?? 0) === 0 &&
       (body.clientStatuses?.remove?.length ?? 0) > 0;
     const opCheck = isOperationAllowed("update", current.statuses, {
+      ownership: owned.ownership,
+      rgpStatuses: current.rgpStatuses,
       unlockOnly,
     });
     if (!opCheck.allowed) {
@@ -321,7 +408,8 @@ export const domains = new Hono<AppEnv>()
       (input.addStatuses?.length ?? 0) > 0 ||
       (input.removeStatuses?.length ?? 0) > 0;
     if (!hasChanges) {
-      return c.json({ domain: current });
+      const unchanged = await upsertDomainFromInfo(userId, current);
+      return c.json(detailResponse(unchanged, false));
     }
 
     // AC-18-2: タイムアウト時は info で要求した変更がすべて反映されたかを照合する
@@ -332,16 +420,22 @@ export const domains = new Hono<AppEnv>()
         return isUpdateReflected(after, body) ? after : null;
       },
     );
-    return c.json({ domain });
+    const record = await upsertDomainFromInfo(userId, domain);
+    return c.json(detailResponse(record, false));
   })
 
   /** FR-10: 廃止。削除ロック中は実行しない（AC-10-2）。 */
   .delete("/:name", async (c) => {
     const name = parseDomainNameParam(c.req.param("name"));
+    const userId = c.get("user").id;
     const adapter = adapterForDomain(name);
+    const owned = await requireOwnedDomain(userId, name);
 
     const current = await adapter.info(name);
-    const opCheck = isOperationAllowed("delete", current.statuses);
+    const opCheck = isOperationAllowed("delete", current.statuses, {
+      ownership: owned.ownership,
+      rgpStatuses: current.rgpStatuses,
+    });
     if (!opCheck.allowed) {
       throw new ApiError(
         409,
@@ -371,20 +465,35 @@ export const domains = new Hono<AppEnv>()
         }
       },
     );
-    // 削除後の状態（RGP 等）を返す。即時削除で info が 404 になる場合は null。
-    let domain: DomainInfo | null = null;
+
+    // 削除後の状態（RGP 等）を読み直す。ここで例外が出ても廃止自体は成立している点に注意。
+    let domain: DomainInfo;
     try {
       domain = await adapter.info(name);
-    } catch {
-      domain = null;
+    } catch (err) {
+      if (err instanceof RegistryError && err.code === "NOT_FOUND") {
+        // 即時削除。レジストリから消えたので保有一覧からも外す（同名の再取得を妨げない）
+        await removeDomain(name);
+        return c.json({ domain: null, summary: null, stale: false });
+      }
+      if (err instanceof RegistryError && isTransportFailure(err)) {
+        // 繋がらないだけ。廃止は成立しているのに行を消すと RGP 中のドメインが
+        // 一覧から消えて復旧導線（FR-11）を失うため、キャッシュを stale で返す
+        return c.json(detailResponse(owned, true));
+      }
+      throw err;
     }
-    return c.json({ domain });
+    // AC-10-1: RGP バッジを一覧に出すため削除後の状態も write-through する
+    const record = await upsertDomainFromInfo(userId, domain);
+    return c.json(detailResponse(record, false));
   })
 
   /** FR-11: 復旧（RGP restore）。redemptionPeriod 中のみ実行できる（AC-11-2）。 */
   .post("/:name/restore", async (c) => {
     const name = parseDomainNameParam(c.req.param("name"));
+    const userId = c.get("user").id;
     const adapter = adapterForDomain(name);
+    await requireOwnedDomain(userId, name);
 
     const current = await adapter.info(name);
     if (!isRestorable(current.rgpStatuses, current.statuses)) {
@@ -407,13 +516,34 @@ export const domains = new Hono<AppEnv>()
           : null;
       },
     );
-    return c.json({ domain });
+    const record = await upsertDomainFromInfo(userId, domain);
+    return c.json(detailResponse(record, false));
   })
 
-  /** FR-12: 移管 OUT 用 AuthCode。info には含まれないため rotate-auth-info で再生成する。 */
-  .get("/:name/auth-code", async (c) => {
+  /**
+   * FR-12: 移管 OUT 用 AuthCode。info には含まれないため rotate-auth-info で再生成する。
+   * 再発行という副作用があるため POST（§10.1）。GET だと Origin 検証（§10.2）を通らない。
+   */
+  .post("/:name/auth-code", async (c) => {
     const name = parseDomainNameParam(c.req.param("name"));
-    const authCode = await adapterForDomain(name).authCode(name);
+    const adapter = adapterForDomain(name);
+    const owned = await requireOwnedDomain(c.get("user").id, name);
+
+    const current = await adapter.info(name);
+    const opCheck = isOperationAllowed("authCode", current.statuses, {
+      ownership: owned.ownership,
+      rgpStatuses: current.rgpStatuses,
+    });
+    if (!opCheck.allowed) {
+      throw new ApiError(
+        409,
+        "OPERATION_NOT_ALLOWED",
+        "現在のステータスでは AuthCode を発行できません。",
+        { statuses: opCheck.blockedBy },
+      );
+    }
+
+    const authCode = await adapter.authCode(name);
     // 取得のたびに authInfo が再生成される（前回表示した値は無効になる）
     return c.json({ authCode, rotated: true });
   });

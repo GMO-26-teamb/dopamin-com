@@ -11,9 +11,43 @@ export type AuthVariables = {
   sessionId: string;
 };
 
+/** セッション ID からユーザーを引く処理。既定は DB 参照で、テストのみ差し替える。 */
+export type SessionResolver = (sessionId: string) => Promise<{
+  user: AuthUser;
+  sessionId: string;
+  /** Cookie を張り直したか（有効期限の延長が起きたか）。 */
+  extended: boolean;
+} | null>;
+
+const dbSessionResolver: SessionResolver = async (sessionId) => {
+  const db = getDb();
+  const found = await getSessionWithUser(db, sessionId);
+  if (!found) {
+    return null;
+  }
+  return {
+    user: { id: found.user.id, displayName: found.user.displayName },
+    sessionId: found.session.id,
+    // 期限が近ければ DB 側を延長する（§10.2）
+    extended: await extendSessionIfNeeded(db, found.session),
+  };
+};
+
+let resolverOverride: SessionResolver | null = null;
+
+/**
+ * テスト専用: セッション解決だけを差し替える（Cookie 検証・401・Cookie 張り直しは本番と同じ経路を通す）。
+ * null で既定の DB 参照に戻す。本番コードからは呼ばない。
+ */
+export function setSessionResolverForTesting(
+  resolver: SessionResolver | null,
+): void {
+  resolverOverride = resolver;
+}
+
 /**
  * 認証必須ルート用ミドルウェア（§10.2）。
- * Cookie のセッションを DB で検証し、c.get("user") / c.get("sessionId") を設定する。
+ * Cookie のセッションを検証し、c.get("user") / c.get("sessionId") を設定する。
  * 未認証は 401（AC-01-3）。
  */
 export const requireSession = createMiddleware<{ Variables: AuthVariables }>(
@@ -22,20 +56,18 @@ export const requireSession = createMiddleware<{ Variables: AuthVariables }>(
     if (!sessionId) {
       throw new ApiException("UNAUTHORIZED", "ログインが必要です。");
     }
-    const db = getDb();
-    const found = await getSessionWithUser(db, sessionId);
-    if (!found) {
+    const resolved = await (resolverOverride ?? dbSessionResolver)(sessionId);
+    if (!resolved) {
       throw new ApiException(
         "UNAUTHORIZED",
         "セッションが無効です。もう一度ログインしてください。",
       );
     }
-    // 期限が近ければ DB 側を延長し、Cookie も張り直す
-    if (await extendSessionIfNeeded(db, found.session)) {
-      setSessionCookie(c, found.session.id);
+    if (resolved.extended) {
+      setSessionCookie(c, resolved.sessionId);
     }
-    c.set("user", { id: found.user.id, displayName: found.user.displayName });
-    c.set("sessionId", found.session.id);
+    c.set("user", resolved.user);
+    c.set("sessionId", resolved.sessionId);
     await next();
   },
 );
