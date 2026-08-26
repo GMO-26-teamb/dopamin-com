@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ApiClientError } from "@/lib/api/errors";
 import { ServicesProvider } from "@/lib/api/provider";
 import type { Services } from "@/lib/api/services";
-import { PasskeySection } from "./passkey-section";
+import { PASSKEY_NAME_ERROR, PasskeySection } from "./passkey-section";
 
 /** radix は body に pointer-events:none を敷くので、user-event の判定は切る */
 const user = () => userEvent.setup({ pointerEventsCheck: 0 });
@@ -211,5 +211,129 @@ describe("PasskeySection", () => {
         }),
       ),
     );
+  });
+
+  it("鉛筆ボタンでインライン編集になり、保存すると renamePasskey を呼んで一覧と Banner Ok に反映する", async () => {
+    const passkeys = PASSKEYS.map((p) => ({ ...p }));
+    const renamePasskey = vi.fn((id: string, name: string) => {
+      const index = passkeys.findIndex((p) => p.id === id);
+      const current = passkeys[index];
+      if (current === undefined) throw new Error("fixture が壊れている");
+      const renamed = { ...current, name };
+      passkeys[index] = renamed;
+      return Promise.resolve(renamed);
+    });
+    const { onNotify } = renderSection({
+      listPasskeys: () => Promise.resolve([...passkeys]),
+      renamePasskey,
+    });
+
+    await user().click(
+      await screen.findByRole("button", {
+        name: "iPhone Face ID の名前を変更",
+      }),
+    );
+    const input = screen.getByRole("textbox", { name: "パスキーの名前" });
+    expect(input).toHaveValue("iPhone Face ID");
+
+    await user().clear(input);
+    await user().type(input, "仕事用 iPhone");
+    await user().click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() =>
+      expect(renamePasskey).toHaveBeenCalledWith("pk_2", "仕事用 iPhone"),
+    );
+    expect(await screen.findByText("仕事用 iPhone")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("textbox", { name: "パスキーの名前" }),
+    ).toBeNull();
+    expect(onNotify).toHaveBeenCalledWith({
+      tone: "ok",
+      title: "パスキーの名前を変更しました",
+      body: "iPhone Face ID を 仕事用 iPhone に変更しました。",
+    });
+  });
+
+  it("空・33 文字はクライアントで弾いて renamePasskey を呼ばない（Input の Helper を warn に）", async () => {
+    const renamePasskey = vi.fn();
+    renderSection({ renamePasskey });
+
+    await user().click(
+      await screen.findByRole("button", {
+        name: "iPhone Face ID の名前を変更",
+      }),
+    );
+    const input = screen.getByRole("textbox", { name: "パスキーの名前" });
+
+    await user().clear(input);
+    await user().click(screen.getByRole("button", { name: "保存" }));
+    expect(screen.getByText(PASSKEY_NAME_ERROR)).toBeInTheDocument();
+    expect(input).toHaveAttribute("aria-invalid", "true");
+
+    // 入力し直すとエラーは消え、Enter で再送しても 33 文字は弾かれる
+    await user().type(input, "あ".repeat(33));
+    expect(screen.queryByText(PASSKEY_NAME_ERROR)).toBeNull();
+    await user().keyboard("{Enter}");
+    expect(screen.getByText(PASSKEY_NAME_ERROR)).toBeInTheDocument();
+    expect(renamePasskey).not.toHaveBeenCalled();
+  });
+
+  it("キャンセル / Escape で元の表示に戻り、renamePasskey を呼ばない", async () => {
+    const renamePasskey = vi.fn();
+    renderSection({ renamePasskey });
+
+    await user().click(
+      await screen.findByRole("button", {
+        name: "iPhone Face ID の名前を変更",
+      }),
+    );
+    await user().type(
+      screen.getByRole("textbox", { name: "パスキーの名前" }),
+      " 2",
+    );
+    await user().click(screen.getByRole("button", { name: "キャンセル" }));
+    expect(
+      screen.queryByRole("textbox", { name: "パスキーの名前" }),
+    ).toBeNull();
+    expect(screen.getByText("iPhone Face ID")).toBeInTheDocument();
+
+    await user().click(
+      screen.getByRole("button", { name: "iPhone Face ID の名前を変更" }),
+    );
+    await user().keyboard("{Escape}");
+    expect(
+      screen.queryByRole("textbox", { name: "パスキーの名前" }),
+    ).toBeNull();
+    expect(renamePasskey).not.toHaveBeenCalled();
+  });
+
+  it("変更に失敗したら編集中のまま Error Card を出す", async () => {
+    const { onNotify } = renderSection({
+      renamePasskey: () =>
+        Promise.reject(
+          new ApiClientError({
+            code: "INTERNAL",
+            message: "パスキーの名前を変更できませんでした。",
+          }),
+        ),
+    });
+
+    await user().click(
+      await screen.findByRole("button", {
+        name: "iPhone Face ID の名前を変更",
+      }),
+    );
+    const input = screen.getByRole("textbox", { name: "パスキーの名前" });
+    await user().clear(input);
+    await user().type(input, "仕事用 iPhone");
+    await user().click(screen.getByRole("button", { name: "保存" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("INTERNAL");
+    expect(alert).toHaveTextContent("パスキーの名前を変更できませんでした。");
+    expect(screen.getByRole("textbox", { name: "パスキーの名前" })).toHaveValue(
+      "仕事用 iPhone",
+    );
+    expect(onNotify).not.toHaveBeenCalled();
   });
 });
