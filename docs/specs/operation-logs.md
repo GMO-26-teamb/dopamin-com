@@ -131,6 +131,8 @@ NOT NULL 違反で落ち、フォールバック console にしか残らない�
 |---|---|---|---|
 | 1 | ログの保持期間・容量制御 | 無期限（削除しない） | TTL / パーティション / アーカイブは運用が固まってから要件化 |
 | 2 | mock の補助コマンド行 | 発行しない（svTrid 同様、mock の忠実度の限界） | mock にも host/contact 相当の行を合成する |
+| 3 | kitaq の `transferQuery` の command | kitaq には transfer query の専用エンドポイントが無く `info` で代替しているため、実レジストリでは `transfer_query` 行は記録されず `info` として残る（1 HTTP 呼び出し = 1 行の原則どおり）。`transfer_query` を出すのは mock のみ | 将来 kitaq に transfer query エンドポイントが追加されたら command を `transfer_query` に差し替える |
+| 4 | INSERT の待ち方（Vercel） | await（§2。3 秒上限）。レジストリ呼び出し 1 回ごとに Supabase への往復が応答経路に乗る（NS 付き create は 5 回） | `@vercel/functions` の `waitUntil` で INSERT を応答後に流す（関数フリーズによる消失リスクとのトレードオフ。遅延が問題になったら検討） |
 
 ---
 
@@ -139,3 +141,4 @@ NOT NULL 違反で落ち、フォールバック console にしか残らない�
 | 版 | 日付 | 内容 |
 |---|---|---|
 | v0.1 | 2026-08-26 | 初版（FR-15 実装と同時に作成） |
+| v0.2 | 2026-08-26 | レビュー反映: マスクを部分一致に、INSERT の 3 秒上限と console.error の出力方針（§2）、kitaq transferQuery = info と waitUntil の余地（§8） |
