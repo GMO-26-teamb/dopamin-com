@@ -46,6 +46,7 @@ function createServices(auth: AuthOverrides): Services {
       addPasskey: () => Promise.reject(new Error("未設定")),
       listPasskeys: () => Promise.resolve([...PASSKEYS]),
       deletePasskey: () => Promise.resolve(),
+      renamePasskey: () => Promise.reject(new Error("未設定")),
       ...auth,
     },
     // 設定画面のパスキーセクションは auth しか触らない

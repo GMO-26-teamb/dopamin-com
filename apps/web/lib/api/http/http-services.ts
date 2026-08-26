@@ -19,6 +19,7 @@ import {
   fetchPasskeys,
   loginWithPasskey,
   logout,
+  renamePasskeyById,
   signupWithPasskey,
 } from "../../webauthn";
 import { transferEligibleAt } from "../derive";
@@ -177,6 +178,15 @@ export function createHttpServices(): Services {
       async deletePasskey(id) {
         try {
           await deletePasskeyById(id);
+        } catch (e) {
+          throw toApiClientError(e);
+        }
+      },
+
+      /** PATCH /auth/passkeys/:id */
+      async renamePasskey(id, name) {
+        try {
+          return await renamePasskeyById(id, name);
         } catch (e) {
           throw toApiClientError(e);
         }

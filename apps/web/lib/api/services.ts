@@ -42,6 +42,8 @@ export interface AuthService {
   addPasskey(): Promise<PasskeySummary>;
   listPasskeys(): Promise<PasskeySummary[]>;
   deletePasskey(id: string): Promise<void>;
+  /** PATCH /auth/passkeys/:id（FR-01。1〜32 文字、他人 / 不在は NOT_FOUND） */
+  renamePasskey(id: string, name: string): Promise<PasskeySummary>;
 }
 
 export interface DomainService {
