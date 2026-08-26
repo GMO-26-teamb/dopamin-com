@@ -637,6 +637,7 @@ describe("エラー変換（§10.3: RegistryError → 統一エラー形式）",
     };
     const stub: RegistryAdapter = {
       id: "kitaqsign",
+      registrarId: "REG-STUB",
       specVersion: "stub",
       hello: async () => fail(),
       check: async () => fail(),
@@ -648,6 +649,9 @@ describe("エラー変換（§10.3: RegistryError → 統一エラー形式）",
       restore: async () => fail(),
       transferRequest: async () => fail(),
       transferQuery: async () => fail(),
+      transferApprove: async () => fail(),
+      transferReject: async () => fail(),
+      transferCancel: async () => fail(),
       authCode: async () => fail(),
     };
     setRegistrySetForTesting(
@@ -989,6 +993,7 @@ describe("廃止後に info が引けないときの扱い", () => {
     };
     const adapter: RegistryAdapter = {
       id: "kitaqsign",
+      registrarId: base.registrarId,
       specVersion: "post-delete",
       hello: () => base.hello(),
       check: (names) => base.check(names),
@@ -1005,6 +1010,9 @@ describe("廃止後に info が引けないときの扱い", () => {
       restore: (name) => base.restore(name),
       transferRequest: (name, code) => base.transferRequest(name, code),
       transferQuery: (name) => base.transferQuery(name),
+      transferApprove: (name) => base.transferApprove(name),
+      transferReject: (name) => base.transferReject(name),
+      transferCancel: (name) => base.transferCancel(name),
       authCode: (name) => base.authCode(name),
     };
     setRegistrySetForTesting(
@@ -1128,6 +1136,7 @@ describe("sync で info が NOT_FOUND のとき（AC-02-4 は #33 / #56 待ち�
     const base = new MockRegistryAdapter({ id: "kitaqsign" });
     const adapter: RegistryAdapter = {
       id: "kitaqsign",
+      registrarId: base.registrarId,
       specVersion: "sync-not-found",
       hello: () => base.hello(),
       check: (names) => base.check(names),
@@ -1147,6 +1156,9 @@ describe("sync で info が NOT_FOUND のとき（AC-02-4 は #33 / #56 待ち�
       restore: (name) => base.restore(name),
       transferRequest: (name, code) => base.transferRequest(name, code),
       transferQuery: (name) => base.transferQuery(name),
+      transferApprove: (name) => base.transferApprove(name),
+      transferReject: (name) => base.transferReject(name),
+      transferCancel: (name) => base.transferCancel(name),
       authCode: (name) => base.authCode(name),
     };
     setRegistrySetForTesting(

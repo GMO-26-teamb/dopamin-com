@@ -152,11 +152,12 @@ describe("MockRegistryAdapter: ライフサイクル", () => {
 
     const authCode = await mock.authCode(name); // rotate されるため取得値を使う
     const result = await mock.transferRequest(name, authCode);
+    // 申請したのは自レジストラなので requesting = 自分、対応するのは相手レジストラ
     expect(result).toMatchObject({
       status: "pending",
       registryStatus: "pending",
-      requestingRegistrarId: "MOCK-GAINING",
-      actingRegistrarId: "MOCK-LOSING",
+      requestingRegistrarId: mock.registrarId,
+      actingRegistrarId: "MOCK-FOREIGN",
     });
     // 自動承認の期限は申請から 20 分後（FR-12 / TRANSFER_AUTO_APPROVE_MS）
     expect(
@@ -195,6 +196,179 @@ describe("MockRegistryAdapter: ライフサイクル", () => {
   });
 });
 
+describe("MockRegistryAdapter: 移管の状態遷移（FR-12 AC-12-4 / AC-12-5）", () => {
+  /** 移管申請中のドメインを 1 件用意する。 */
+  async function pendingTransfer(
+    name: string,
+    now?: () => Date,
+  ): Promise<MockRegistryAdapter> {
+    const mock = new MockRegistryAdapter(now ? { now } : undefined);
+    await mock.create({ name, periodYears: 1, authInfo: "auth" });
+    await mock.transferRequest(name, "auth");
+    return mock;
+  }
+
+  it("request → approve で pendingTransfer が解け、trDate と Transfer GP が付く", async () => {
+    const name = "approve-me.xyz";
+    const approvedAt = new Date("2026-08-26T12:00:00.000Z");
+    const mock = await pendingTransfer(name, () => approvedAt);
+
+    const before = await mock.info(name);
+    expect(before.statuses).toContain("pendingTransfer");
+    expect(before.lastTransferAt).toBeNull();
+    const expiresBefore = before.expiresAt;
+
+    const result = await mock.transferApprove(name);
+    expect(result).toMatchObject({
+      name,
+      status: "approved",
+      registryStatus: "clientApproved",
+      requestingRegistrarId: mock.registrarId,
+      actingRegistrarId: "MOCK-FOREIGN",
+    });
+    // 申請時の日時をそのまま返す（承認応答でも申請の文脈を失わない）
+    expect(result.requestedAt).toBe(approvedAt.toISOString());
+    expect(result.actByAt).toBeTruthy();
+    // 実レジストリの transfer 応答に exDate が無いので mock も埋めない（ADR-0002）
+    expect(result.newExpiresAt).toBeUndefined();
+
+    const after = await mock.info(name);
+    expect(after.statuses).not.toContain("pendingTransfer");
+    expect(after.lastTransferAt).toBe(approvedAt.toISOString());
+    expect(after.rgpStatuses).toEqual(["transferPeriod"]);
+    // 移管完了で有効期限は延びない（【要確認: §21.2 #16】）
+    expect(after.expiresAt).toBe(expiresBefore);
+    // 移管が終わったので照会は none に戻る
+    expect((await mock.transferQuery(name)).status).toBe("none");
+  });
+
+  it("request → reject は申請を取り下げるだけで保有状態は変わらない", async () => {
+    const name = "reject-me.xyz";
+    const mock = await pendingTransfer(name);
+
+    const result = await mock.transferReject(name);
+    expect(result).toMatchObject({
+      name,
+      status: "rejected",
+      registryStatus: "clientRejected",
+    });
+
+    const after = await mock.info(name);
+    expect(after.statuses).not.toContain("pendingTransfer");
+    // 移管していないので最終移管日時も Transfer GP も付かない
+    expect(after.lastTransferAt).toBeNull();
+    expect(after.rgpStatuses).not.toContain("transferPeriod");
+    expect((await mock.transferQuery(name)).status).toBe("none");
+  });
+
+  it("request → cancel も申請の取り下げで、以後は通常の操作に戻る", async () => {
+    const name = "cancel-me.xyz";
+    const mock = await pendingTransfer(name);
+
+    const result = await mock.transferCancel(name);
+    expect(result).toMatchObject({
+      name,
+      status: "cancelled",
+      registryStatus: "clientCancelled",
+    });
+
+    const after = await mock.info(name);
+    expect(after.statuses).not.toContain("pendingTransfer");
+    expect(after.lastTransferAt).toBeNull();
+    // pendingTransfer 中はブロックされていた更新系が通るようになる
+    await expect(mock.delete(name)).resolves.toEqual({ name });
+  });
+
+  it.each(["transferApprove", "transferReject", "transferCancel"] as const)(
+    "%s: 移管申請が無ければ 2304（OPERATION_NOT_ALLOWED）",
+    async (method) => {
+      const mock = new MockRegistryAdapter();
+      const name = "idle.xyz";
+      await mock.create({ name, periodYears: 1, authInfo: "auth" });
+
+      const err = await expectRegistryError(
+        mock[method](name),
+        "OPERATION_NOT_ALLOWED",
+      );
+      expect(err.registryCode).toBe(2304);
+    },
+  );
+
+  it.each(["transferApprove", "transferReject", "transferCancel"] as const)(
+    "%s: 未登録ドメインは 2303（NOT_FOUND）",
+    async (method) => {
+      const mock = new MockRegistryAdapter();
+      const err = await expectRegistryError(
+        mock[method]("missing.xyz"),
+        "NOT_FOUND",
+      );
+      expect(err.registryCode).toBe(2303);
+    },
+  );
+
+  it("承認済みの移管をもう一度承認することはできない", async () => {
+    const name = "twice.xyz";
+    const mock = await pendingTransfer(name);
+    await mock.transferApprove(name);
+    await expectRegistryError(
+      mock.transferApprove(name),
+      "OPERATION_NOT_ALLOWED",
+    );
+  });
+
+  it("移管申請中の重複申請は 2304 で拒否される", async () => {
+    const name = "double-request.xyz";
+    const mock = await pendingTransfer(name);
+    const authCode = await mock.authCode(name);
+    await expectRegistryError(
+      mock.transferRequest(name, authCode),
+      "OPERATION_NOT_ALLOWED",
+    );
+  });
+
+  it("registrarId / foreignRegistrarId は上書きできる（direction 導出用）", async () => {
+    const mock = new MockRegistryAdapter({
+      registrarId: "REG-DOPAMIN",
+      foreignRegistrarId: "REG-OTHER",
+    });
+    expect(mock.registrarId).toBe("REG-DOPAMIN");
+
+    const name = "direction.xyz";
+    await mock.create({ name, periodYears: 1, authInfo: "auth" });
+    const result = await mock.transferRequest(name, "auth");
+    expect(result.requestingRegistrarId).toBe("REG-DOPAMIN");
+    expect(result.actingRegistrarId).toBe("REG-OTHER");
+  });
+
+  it("approve / reject / cancel も操作ログに 1 レコードずつ残る（FR-15）", async () => {
+    const records: RegistryCallRecord[] = [];
+    const mock = new MockRegistryAdapter({
+      onCall: (record) => {
+        records.push(record);
+      },
+    });
+    const name = "logged.xyz";
+    await mock.create({ name, periodYears: 1, authInfo: "auth" });
+
+    await mock.transferRequest(name, "auth");
+    await mock.transferApprove(name);
+    // 申請が無い状態の reject はエラーレコードとして残る
+    await expect(mock.transferReject(name)).rejects.toThrow();
+
+    expect(records.map((r) => [r.command, r.status])).toEqual([
+      ["create", "success"],
+      ["transfer_request", "success"],
+      ["transfer_approve", "success"],
+      ["transfer_reject", "error"],
+    ]);
+    expect(records[3]).toMatchObject({
+      errorCode: "OPERATION_NOT_ALLOWED",
+      registryCode: "2304",
+      domainName: name,
+    });
+  });
+});
+
 describe("MockRegistryAdapter: エラーシミュレーション（§11.6）", () => {
   it.each([
     ["timeout", "REGISTRY_TIMEOUT"],
@@ -204,6 +378,22 @@ describe("MockRegistryAdapter: エラーシミュレーション（§11.6）", (
   ] as const)("failMode=%s は %s を投げる", async (failMode, code) => {
     const mock = new MockRegistryAdapter({ failMode });
     await expectRegistryError(mock.check(["a.com"]), code);
+  });
+
+  it("failMode は approve / reject / cancel にも効く", async () => {
+    const mock = new MockRegistryAdapter({ failMode: "5xx" });
+    await expectRegistryError(
+      mock.transferApprove("any.xyz"),
+      "REGISTRY_UNAVAILABLE",
+    );
+    await expectRegistryError(
+      mock.transferReject("any.xyz"),
+      "REGISTRY_UNAVAILABLE",
+    );
+    await expectRegistryError(
+      mock.transferCancel("any.xyz"),
+      "REGISTRY_UNAVAILABLE",
+    );
   });
 
   it("setFailMode で復帰できる", async () => {
