@@ -46,7 +46,7 @@
 | POST | `/domains/:name/restore` | ✅ | `redemptionPeriod` 中のみ（AC-11-2） |
 | POST | `/domains/:name/auth-code` | ✅ | `rotate-auth-info` を実行（取得のたびに authInfo が変わる）。再発行という副作用があるため GET ではなく POST（§10.2 の Origin 検証を通すため） |
 | POST | `/transfers` | ✅ | `{name, authCode}` → transfer request → 202。応答は正規化 `TransferResult` から `raw` を除いた DTO（`transferResponseSchema`。ADR-0002） |
-| GET | `/transfers/:name` | ✅ | **要件 §10.1 の `GET /transfers/:id` に対する暫定実装**（要件を変更するものではない）。`transfers` テーブルがまだ無く id を発番できないため、ドメイン名で `transferQuery`（`info` の `pendingTransfer` から導出）を返す。移管中でなければ `status: 'none'`、相手レジストラ ID は `info` から取れないため省略。DB には保存せず一覧化もしない。#56（transfers 永続化）で `GET /transfers/:id` に戻す |
+| GET | `/transfers/:name` | ✅ | **要件 §10.1 の `GET /transfers/:id` に対する暫定実装**（要件を変更するものではない）。`transfers` への永続化がまだ無く id を発番できないため、ドメイン名で `transferQuery`（`info` の `pendingTransfer` から導出）を返す。移管中でなければ `status: 'none'`、相手レジストラ ID は `info` から取れないため省略。DB には保存せず一覧化もしない。#56（transfers 永続化）で `GET /transfers/:id` に戻す |
 
 本 spec のルート（`/domains*` `/transfers*`）はすべて `requireSession` 必須（Cookie `dopamin_session`。requirements §10.1 の「認証: 要」に対応）。
 統合テストは `apps/api/test/helpers/session.ts` の `installTestSession()` + `SESSION_COOKIE_HEADER`（DB 不要の seam）
