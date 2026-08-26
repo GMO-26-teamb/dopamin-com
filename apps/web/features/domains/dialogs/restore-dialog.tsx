@@ -1,5 +1,6 @@
 "use client";
 
+import { formatJpy, RESTORE_FEE } from "@dopamin/shared";
 import { FormDialog } from "@/components/ui/dialog";
 import type { DomainDetail } from "@/lib/api/types";
 import { remainingDays } from "../format";
@@ -7,9 +8,9 @@ import { remainingDays } from "../format";
 /**
  * Figma: D-04 `83:3826`（汎用 Dialog）
  * 費用（ダミー）と復旧後の状態を明示する（FR-11）。再入力は課さない。
+ * 金額は `packages/shared` の固定ダミー価格（`RESTORE_FEE`）。決済ステップは持たない（FR-19 の対象外）。
  */
-/** 復旧費用（ダミー表示。要件 FR-11「金額はダミー」）。 */
-const RESTORE_FEE_LABEL = "¥3,300（ダミー）";
+const RESTORE_FEE_LABEL = `${formatJpy(RESTORE_FEE)}（ダミー）`;
 
 export interface RestoreDialogProps {
   open: boolean;

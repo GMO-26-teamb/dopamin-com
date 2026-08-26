@@ -28,6 +28,7 @@ import {
 import {
   type ReconcileOutcome,
   RegisterConflictDialog,
+  type RegisterSuccess,
   RegisterSuccessDialog,
   RegisterTimeoutDialog,
 } from "@/features/candidates/register-result-dialogs";
@@ -36,6 +37,7 @@ import { useCheckDomains, useGenerateCandidates } from "@/lib/api/hooks";
 import type {
   Candidate,
   DomainDetail,
+  PaymentReceipt,
   SearchResult,
   UniquenessScore,
 } from "@/lib/api/types";
@@ -73,7 +75,7 @@ export default function DomainsNewPage() {
   const [target, setTarget] = useState<RegisterTarget | null>(null);
   const [lastTarget, setLastTarget] = useState<RegisterTarget | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [success, setSuccess] = useState<DomainDetail | null>(null);
+  const [success, setSuccess] = useState<RegisterSuccess | null>(null);
   const [conflict, setConflict] = useState<{
     name: string;
     alternatives: readonly string[];
@@ -208,11 +210,14 @@ export default function DomainsNewPage() {
     [openRegister],
   );
 
-  const handleRegistered = useCallback((domain: DomainDetail) => {
-    setTarget(null);
-    setRegisteredNames((prev) => new Set([...prev, domain.name]));
-    setSuccess(domain);
-  }, []);
+  const handleRegistered = useCallback(
+    (domain: DomainDetail, receipt: PaymentReceipt) => {
+      setTarget(null);
+      setRegisteredNames((prev) => new Set([...prev, domain.name]));
+      setSuccess({ domain, receipt });
+    },
+    [],
+  );
 
   const handleConflict = useCallback((name: string, alternatives: string[]) => {
     setTarget(null);
@@ -330,7 +335,7 @@ export default function DomainsNewPage() {
         target={target}
       />
       <RegisterSuccessDialog
-        domain={success}
+        success={success}
         onGoToDetail={(name) => router.push(`/domains/${name}`)}
         onGoToSubdomains={(name) => router.push(`/domains/${name}/subdomains`)}
         onOpenChange={(open) => {

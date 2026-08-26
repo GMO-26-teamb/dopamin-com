@@ -1,6 +1,6 @@
 "use client";
 
-import { DISPLAY_STATUS_LABEL, ERROR_STATUS } from "@dopamin/shared";
+import { DISPLAY_STATUS_LABEL, ERROR_STATUS, formatJpy } from "@dopamin/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,7 @@ import {
 } from "@/lib/api/errors";
 import { useQueryKeys } from "@/lib/api/hooks";
 import { useServices } from "@/lib/api/provider";
-import type { DomainDetail } from "@/lib/api/types";
+import type { DomainDetail, PaymentReceipt } from "@/lib/api/types";
 import { toErrorCopy } from "@/lib/error-messages";
 
 /**
@@ -34,30 +34,37 @@ const HTTP_STATUS: Partial<Record<ClientErrorCode, number>> = ERROR_STATUS;
 
 // ---- S-26 登録成功 ----
 
+/** 登録成功の内容。控え（receipt）は S-29 のモック決済のもの（FR-19） */
+export interface RegisterSuccess {
+  domain: DomainDetail;
+  receipt: PaymentReceipt;
+}
+
 export interface RegisterSuccessDialogProps {
-  domain: DomainDetail | null;
+  success: RegisterSuccess | null;
   onOpenChange: (open: boolean) => void;
   onGoToSubdomains: (name: string) => void;
   onGoToDetail: (name: string) => void;
 }
 
 export function RegisterSuccessDialog({
-  domain,
+  success,
   onOpenChange,
   onGoToSubdomains,
   onGoToDetail,
 }: RegisterSuccessDialogProps) {
-  if (domain === null) {
+  if (success === null) {
     return null;
   }
 
+  const { domain, receipt } = success;
   const status = DISPLAY_STATUS_LABEL[domain.displayStatus];
   const expires =
     domain.expiresAt === null ? "—" : domain.expiresAt.slice(0, 10);
 
   return (
     <SuccessDialog
-      body={`${status} になりました。有効期限 ${expires}・ネームサーバーは既定値。次はサブドメインの構成を決めましょう。`}
+      body={`${status} になりました。有効期限 ${expires}・ネームサーバーは既定値。お支払い ${formatJpy(receipt.amount)}（${receipt.brand} •••• ${receipt.last4}・受付 ${receipt.id}・モック）。次はサブドメインの構成を決めましょう。`}
       domain={domain.name}
       onOpenChange={onOpenChange}
       onPrimary={() => onGoToSubdomains(domain.name)}

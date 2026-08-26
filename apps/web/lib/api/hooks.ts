@@ -30,6 +30,8 @@ import type {
   DomainSummary,
   Me,
   OperationLog,
+  PaymentChargeInput,
+  PaymentResult,
   SearchResult,
   SubdomainPlan,
   SyncResult,
@@ -478,5 +480,18 @@ export function useAiLogs(): Query<AiLog[]> {
   return useQuery({
     queryKey: keys.aiLogs(),
     queryFn: () => services.logs.ai(),
+  });
+}
+
+// ---- 決済（FR-19、モック） ----
+
+/**
+ * 決済モック。拒否は `PaymentResult.ok === false` で返る（例外ではない）ので、
+ * 呼び出し側は `onSuccess` の中で分岐し、成功時だけレジストリ操作へ進む。
+ */
+export function usePayment(): Mutation<PaymentResult, PaymentChargeInput> {
+  const services = useServices();
+  return useMutation({
+    mutationFn: (input) => services.payments.charge(input),
   });
 }

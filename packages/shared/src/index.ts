@@ -11,6 +11,7 @@ export * from "./logs";
 export * from "./masking";
 export * from "./operation-log";
 export * from "./operations";
+export * from "./pricing";
 export * from "./registry";
 export * from "./subdomains";
 export * from "./tlds";

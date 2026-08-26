@@ -1,3 +1,4 @@
+import { formatJpy, type OrderQuote, quoteOrder } from "@dopamin/shared";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +9,7 @@ import type { MockScenario } from "@/lib/api/mock/scenario";
 import { resetMockStore } from "@/lib/api/mock/store";
 import { AppProviders } from "@/lib/api/query-client";
 import type { DomainService, Services } from "@/lib/api/services";
+import { DECLINED_CARD_NUMBER } from "@/lib/payments/card";
 import { ThemeProvider } from "@/lib/theme/theme-provider";
 import { DomainDetailPage } from "./domain-detail-page";
 
@@ -35,6 +37,20 @@ function renderPage(
         <DomainDetailPage name={name} />
       </AppProviders>
     </ThemeProvider>,
+  );
+}
+
+/**
+ * D-01（期間）→ D-11（お支払い）を既定のデモ用カードで通し、renew まで進める。
+ * 決済モックは FR-19 で挟まったステップなので、renew 側の分岐を見るテストはここを共通化する。
+ */
+async function payThroughRenewDialog(
+  user: ReturnType<typeof userEvent.setup>,
+): Promise<void> {
+  const dialog = await screen.findByRole("dialog");
+  await user.click(within(dialog).getByRole("button", { name: "お支払いへ" }));
+  await user.click(
+    within(dialog).getByRole("button", { name: /を支払って延長する/ }),
   );
 }
 
@@ -216,7 +232,7 @@ describe("DomainDetailPage", () => {
     expect(screen.getByRole("button", { name: "再試行" })).toBeInTheDocument();
   }, 25_000);
 
-  it("D-01: 更新ダイアログで延長すると Banner Ok が出る", async () => {
+  it("D-01 → D-11: お支払いを経て延長すると Banner Ok が出る（AC-19-2）", async () => {
     const user = userEvent.setup();
     renderPage("takutaku.com");
 
@@ -225,11 +241,57 @@ describe("DomainDetailPage", () => {
     );
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("有効期限を延長")).toBeInTheDocument();
-    await user.click(within(dialog).getByRole("button", { name: "延長する" }));
+    await user.click(
+      within(dialog).getByRole("button", { name: "お支払いへ" }),
+    );
+
+    const quote = quoteOrder({
+      kind: "renew",
+      domain: "takutaku.com",
+      years: 1,
+    });
+    expect(quote).not.toBeNull();
+    expect(within(dialog).getByText("ご注文内容")).toBeInTheDocument();
+    expect(within(dialog).getByTestId("order-total")).toHaveTextContent(
+      formatJpy((quote as OrderQuote).total),
+    );
+    await user.click(
+      within(dialog).getByRole("button", { name: /を支払って延長する/ }),
+    );
 
     expect(
-      await screen.findByText("takutaku.com の有効期限を延長しました"),
+      await screen.findByText(
+        new RegExp(
+          `takutaku.com の有効期限を延長しました（お支払い ${formatJpy((quote as OrderQuote).total)}`,
+        ),
+      ),
     ).toBeInTheDocument();
+  });
+
+  it("D-11: 決済が拒否されたら renew は呼ばれない（AC-19-3）", async () => {
+    const user = userEvent.setup();
+    const renew = vi.fn(() => Promise.reject(new Error("呼ばれてはいけない")));
+    renderPage("takutaku.com", "default", { renew });
+
+    await user.click(
+      await screen.findByRole("button", { name: /更新（期限延長）/ }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    await user.click(
+      within(dialog).getByRole("button", { name: "お支払いへ" }),
+    );
+
+    const numberInput = within(dialog).getByLabelText("カード番号");
+    await user.clear(numberInput);
+    await user.type(numberInput, DECLINED_CARD_NUMBER);
+    await user.click(
+      within(dialog).getByRole("button", { name: /を支払って延長する/ }),
+    );
+
+    expect(
+      await within(dialog).findByText("お支払いに失敗しました"),
+    ).toBeInTheDocument();
+    expect(renew).not.toHaveBeenCalled();
   });
 
   it("D-03: 廃止ダイアログはドメイン名が一致するまで実行できない", async () => {
@@ -317,11 +379,7 @@ describe("DomainDetailPage", () => {
     await user.click(
       await screen.findByRole("button", { name: /更新（期限延長）/ }),
     );
-    await user.click(
-      within(await screen.findByRole("dialog")).getByRole("button", {
-        name: "延長する",
-      }),
-    );
+    await payThroughRenewDialog(user);
 
     // ダイアログは閉じ、メイン先頭に Error Card（FR-18 の 1 文つき）
     expect(
@@ -357,11 +415,7 @@ describe("DomainDetailPage", () => {
     await user.click(
       await screen.findByRole("button", { name: /更新（期限延長）/ }),
     );
-    await user.click(
-      within(await screen.findByRole("dialog")).getByRole("button", {
-        name: "延長する",
-      }),
-    );
+    await payThroughRenewDialog(user);
 
     expect(
       await screen.findByText("ロック中のため実行できません"),

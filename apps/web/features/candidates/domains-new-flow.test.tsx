@@ -1,3 +1,4 @@
+import { formatJpy, type OrderQuote, quoteOrder } from "@dopamin/shared";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +9,7 @@ import {
 } from "@/lib/api/mock/mock-services";
 import type { MockScenario } from "@/lib/api/mock/scenario";
 import { AppProviders } from "@/lib/api/query-client";
+import { DECLINED_CARD_NUMBER, DEMO_CARD } from "@/lib/payments/card";
 import { SUPPORTED_TLDS } from "./tlds";
 
 /**
@@ -305,7 +307,7 @@ describe("/domains/new", () => {
     });
   });
 
-  it("S-25 → S-26: 登録に成功すると Dialog / Success を出す", async () => {
+  it("S-25 → S-29 → S-26: お支払いを経て登録に成功すると Dialog / Success を出す", async () => {
     const name = await firstAvailableCandidate();
     const user = await generate("default");
 
@@ -318,15 +320,113 @@ describe("/domains/new", () => {
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText(`${name} を登録`)).toBeInTheDocument();
     await within(dialog).findByText("空き・再確認済み");
-    await user.click(within(dialog).getByRole("button", { name: /登録する/ }));
+
+    // S-25 は期間選択まで。決済はまだ通っていない（AC-19-1）
+    await user.click(
+      within(dialog).getByRole("button", { name: "お支払いへ" }),
+    );
+
+    // S-29 お支払い: 注文サマリー（1 年 = 単価）とデモ用カードが入っている（AC-19-4）
+    const payment = await screen.findByRole("dialog");
+    expect(within(payment).getByText("ご注文内容")).toBeInTheDocument();
+    const quote = quoteOrder({ kind: "register", domain: name, years: 1 });
+    expect(quote).not.toBeNull();
+    expect(within(payment).getByTestId("order-total")).toHaveTextContent(
+      formatJpy((quote as OrderQuote).total),
+    );
+    expect(within(payment).getByLabelText("カード番号")).toHaveValue(
+      DEMO_CARD.number,
+    );
+
+    await user.click(
+      within(payment).getByRole("button", {
+        name: `${formatJpy((quote as OrderQuote).total)} を支払って登録する`,
+      }),
+    );
 
     expect(await screen.findByText("取得できました")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        new RegExp(`お支払い ${formatJpy((quote as OrderQuote).total)}`),
+      ),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "サブドメイン設計に進む" }),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "詳細を見る" }));
     expect(push).toHaveBeenCalledWith(`/domains/${name}`);
+  });
+
+  it("S-29: 決済が拒否されたら登録は呼ばれず、ダイアログ内に理由が出る（AC-19-3）", async () => {
+    const name = await firstAvailableCandidate();
+    const register = vi.fn(() =>
+      Promise.reject(new Error("呼ばれてはいけない")),
+    );
+    const services = createMockServices("default", { delayMs: 0 });
+    render(
+      <AppProviders
+        services={{
+          ...services,
+          domains: { ...services.domains, register },
+        }}
+      >
+        <DomainsNewPage />
+      </AppProviders>,
+    );
+    const user = userEvent.setup();
+    await user.type(
+      screen.getByLabelText("ニックネームまたはアプリ名 *"),
+      "たくたく",
+    );
+    await user.click(screen.getByRole("button", { name: "候補を考える" }));
+
+    const card = (await findDomainNode(name)).closest("li");
+    await user.click(
+      within(card as HTMLElement).getByRole("button", { name: "登録へ" }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText("空き・再確認済み");
+    await user.click(
+      within(dialog).getByRole("button", { name: "お支払いへ" }),
+    );
+
+    const payment = await screen.findByRole("dialog");
+    const numberInput = within(payment).getByLabelText("カード番号");
+    await user.clear(numberInput);
+    await user.type(numberInput, DECLINED_CARD_NUMBER);
+    await user.click(
+      within(payment).getByRole("button", { name: /を支払って登録する/ }),
+    );
+
+    expect(
+      await within(payment).findByText("お支払いに失敗しました"),
+    ).toBeInTheDocument();
+    expect(register).not.toHaveBeenCalled();
+    // ダイアログは開いたままで、やり直せる
+    expect(
+      within(payment).getByRole("button", { name: /を支払って登録する/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("S-29: 「戻る」で期間選択（S-25）に戻れる", async () => {
+    const name = await firstAvailableCandidate();
+    const user = await generate("default");
+
+    const card = (await findDomainNode(name)).closest("li");
+    await user.click(
+      within(card as HTMLElement).getByRole("button", { name: "登録へ" }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText("空き・再確認済み");
+    await user.click(
+      within(dialog).getByRole("button", { name: "お支払いへ" }),
+    );
+    await within(dialog).findByText("ご注文内容");
+
+    await user.click(within(dialog).getByRole("button", { name: "戻る" }));
+    expect(within(dialog).getByLabelText("期間 *")).toBeInTheDocument();
+    expect(within(dialog).queryByText("ご注文内容")).toBeNull();
   });
 
   it("S-27: CONFLICT は代替候補付きのダイアログになる", async () => {
@@ -339,7 +439,13 @@ describe("/domains/new", () => {
     );
     const dialog = await screen.findByRole("dialog");
     await within(dialog).findByText("空き・再確認済み");
-    await user.click(within(dialog).getByRole("button", { name: /登録する/ }));
+    await user.click(
+      within(dialog).getByRole("button", { name: "お支払いへ" }),
+    );
+    await within(dialog).findByText("ご注文内容");
+    await user.click(
+      within(dialog).getByRole("button", { name: /を支払って登録する/ }),
+    );
 
     expect(
       await screen.findByText(`${name} は取得できませんでした`),

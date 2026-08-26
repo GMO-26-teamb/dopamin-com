@@ -11,6 +11,7 @@ import type {
   ApiErrorCode,
   AuthUser,
   DisplayStatus,
+  OrderQuote,
 } from "@dopamin/shared";
 
 export type Ownership = "owned" | "transferred_out";
@@ -214,3 +215,44 @@ export interface Me {
   features: { demoReset: boolean };
   ai: AiSettings;
 }
+
+// ---- 決済（FR-19、モック） ----
+
+/** カード入力欄の値（表示用の整形済み文字列。PSP には送らない）。 */
+export interface PaymentCardInput {
+  /** `4242 4242 4242 4242` のように 4 桁区切り */
+  number: string;
+  /** `MM/YY` */
+  expiry: string;
+  cvc: string;
+  holder: string;
+}
+
+export interface PaymentChargeInput {
+  /** `quoteOrder()`（packages/shared）の見積もり。金額はここから取る */
+  quote: OrderQuote;
+  card: PaymentCardInput;
+}
+
+/** 決済の受付控え。実 PSP を繋いだときも同じ形にする。 */
+export interface PaymentReceipt {
+  /** 受付番号（`pay_` + 8 文字） */
+  id: string;
+  paidAt: string;
+  amount: number;
+  currency: OrderQuote["currency"];
+  brand: string;
+  last4: string;
+  /** 摘要（例 `takutaku.com 新規登録 2 年`） */
+  description: string;
+}
+
+export type PaymentErrorCode = "CARD_DECLINED";
+
+/**
+ * 決済の結果。拒否は例外ではなく値で返す（`ApiClientError` の統一コードには
+ * 決済が無く、Error Card ではなくダイアログ内の Banner で見せるため）。
+ */
+export type PaymentResult =
+  | { ok: true; receipt: PaymentReceipt }
+  | { ok: false; code: PaymentErrorCode; message: string };

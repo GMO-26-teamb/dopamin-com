@@ -27,6 +27,7 @@ import {
 } from "../../webauthn";
 import { transferEligibleAt } from "../derive";
 import { notImplemented, toApiClientError } from "../errors";
+import { createMockPaymentService } from "../payments/mock-gateway";
 import type { Services } from "../services";
 import type {
   DomainDetail,
@@ -450,5 +451,11 @@ export function createHttpServices(): Services {
         return Promise.reject(notImplemented("POST /demo/reset"));
       },
     },
+
+    /**
+     * 決済（FR-19）は API にルートが無く、HTTP モードでもブラウザ内のモックで完結させる。
+     * 実 PSP を繋ぐときは `payments/mock-gateway.ts` を差し替える（契約は同じ）。
+     */
+    payments: createMockPaymentService({ delayMs: 800 }),
   };
 }

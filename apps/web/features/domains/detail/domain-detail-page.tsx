@@ -1,5 +1,6 @@
 "use client";
 
+import { formatJpy } from "@dopamin/shared";
 import { LayoutDashboard } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -289,10 +290,13 @@ export function DomainDetailPage({ name }: DomainDetailPageProps) {
             closeDialog();
           }
         }}
-        onSubmit={(period) =>
+        onSubmit={(period, receipt) =>
           renew.mutate(
             { period },
-            settle("renew", `${domain.name} の有効期限を延長しました`),
+            settle(
+              "renew",
+              `${domain.name} の有効期限を延長しました（お支払い ${formatJpy(receipt.amount)}・受付 ${receipt.id}・モック）`,
+            ),
           )
         }
         open={dialog === "renew"}
