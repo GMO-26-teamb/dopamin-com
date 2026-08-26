@@ -9,6 +9,7 @@ import { reconcileOnTimeout } from "../lib/reconcile";
 import { adapterForDomain } from "../lib/registries";
 import { jsonValidator } from "../lib/validator";
 import { requireSession } from "../middleware/session";
+import { requireNotOwnedByOtherUser } from "../services/domain.service";
 import { consumePoll } from "../services/poll.service";
 import {
   actOnTransfer,
@@ -29,7 +30,8 @@ function parseTransferIdParam(raw: string): string {
 }
 
 export const transfers = new Hono<AuthedEnv>()
-  // NFR-04 / AC-01-3: 移管操作も認証必須（対象ドメインの所有権は移管の性質上ここでは見ない）
+  // NFR-04 / AC-01-3: 移管操作も認証必須。所有権は「保有必須」にはできない
+  // （移管 IN の対象は承認まで domains 行を持たない）ので、各ルートで個別に見る
   .use(requireSession)
 
   /**
@@ -41,6 +43,9 @@ export const transfers = new Hono<AuthedEnv>()
   .post("/", jsonValidator(transferCreateRequestSchema), async (c) => {
     const { name, authCode } = c.req.valid("json");
     const adapter = adapterForDomain(name);
+    // NFR-04: 他ユーザーが保有中のドメインは移管 IN の対象にできない（§2.2: 同一レジストラ内の
+    // 所有者変更は EPP 移管にならない）。行が無い＝移管 IN の通常ケースなので通す
+    await requireNotOwnedByOtherUser(c.get("user").id, name);
     // AC-18-2: タイムアウト時は transferQuery（info 導出）で受理済みかを照合する
     const transfer = await reconcileOnTimeout(
       () => adapter.transferRequest(name, authCode),

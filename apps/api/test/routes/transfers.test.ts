@@ -178,6 +178,23 @@ async function receiveOutboundRequest(name: string): Promise<string> {
 }
 
 describe("POST /api/v1/transfers（FR-12 移管 IN）", () => {
+  it("NFR-04: 他ユーザーが保有中のドメインへの移管 IN 申請は 403 FORBIDDEN", async () => {
+    // 同一レジストラ内の所有者変更は EPP 移管にならない（§2.2）ので、
+    // 他ユーザーの保有行に対する申請はレジストリに送る前に弾く
+    const authCode = await createDomainWithAuthCode("theirs.com");
+    const owned = await domainStore.find("theirs.com");
+    if (!owned) {
+      throw new Error("theirs.com の保有行がありません");
+    }
+    await domainStore.upsert({ ...owned, userId: OTHER_USER.id });
+
+    const res = await sendJson("/transfers", { name: "theirs.com", authCode });
+    expect(res.status).toBe(403);
+    expect((await parseError(res)).error.code).toBe("FORBIDDEN");
+    // レジストリに申請を送っていないので、移管中にもなっていない
+    expect(await transferStore.findPending("theirs.com", "in")).toBeNull();
+  });
+
   it("AC-12-1: 正しい AuthCode で申請が受理され pendingTransfer になる", async () => {
     const authCode = seedForeignDomain("move.com");
 

@@ -116,6 +116,29 @@ export async function requireOwnedDomainId(
 }
 
 /**
+ * 移管系（FR-12）の所有権チェック（NFR-04）。
+ *
+ * 移管 IN の対象ドメインは承認を検知するまで `domains` 行を持たない（§6.5）ので、
+ * 行が無いことは正常として通す（ここで 404 にすると移管 IN そのものができない）。
+ * 止めるのは他ユーザーが保有中の行への操作だけ。他ユーザーの `transferred_out` 行は
+ * 既に自レジストラのスポンサー下に無く、誰が移管 IN しても構わないため通す
+ * （§2.2: 同一レジストラ内の所有者変更は EPP 移管にならない）。
+ */
+export async function requireNotOwnedByOtherUser(
+  userId: string,
+  name: string,
+): Promise<DomainRecord | null> {
+  const record = await getDomainStore().find(name);
+  if (record && record.ownership === "owned" && record.userId !== userId) {
+    throw new ApiException(
+      "FORBIDDEN",
+      "このドメインを操作する権限がありません。",
+    );
+  }
+  return record;
+}
+
+/**
  * 進行中の移管 → 一覧・詳細の移管バッジ（§10.4 `transfer`）。
  * `actByAt` はサーバ自動承認の期限で、レジストリが `acDate` を返さない場合は
  * 申請 + 20 分が入っている（§9.2 / `recordInboundTransferRequest`）。

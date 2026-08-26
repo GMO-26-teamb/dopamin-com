@@ -77,6 +77,16 @@ export interface TransferStore {
     direction: TransferDirection,
   ): Promise<TransferRecord | null>;
   /**
+   * ドメイン名 + 向き + 状態で最新の行を 1 件引く（`created_at` 降順）。
+   * pending 行が無い確定通知が「決着済みの移管 IN」か「取りこぼした移管 OUT」かの
+   * 判別に使う（`handleSettlement`）。
+   */
+  findLatest(
+    domainName: string,
+    direction: TransferDirection,
+    status: TransferRecordStatus,
+  ): Promise<TransferRecord | null>;
+  /**
    * Poll メッセージ ID で引く（`UNIQUE(registry, registry_message_id)`）。
    * 同じ通知を二重に取り込まないための冪等キー（§9.1）。
    */
@@ -179,6 +189,23 @@ export function createDbTransferStore(db: Db): TransferStore {
       return row ? toTransferRecord(row) : null;
     },
 
+    async findLatest(domainName, direction, status) {
+      const rows = await db
+        .select()
+        .from(schema.transfers)
+        .where(
+          and(
+            eq(schema.transfers.domainName, domainName),
+            eq(schema.transfers.direction, direction),
+            eq(schema.transfers.status, status),
+          ),
+        )
+        .orderBy(desc(schema.transfers.createdAt))
+        .limit(1);
+      const row = rows[0];
+      return row ? toTransferRecord(row) : null;
+    },
+
     async findByMessageId(registry, registryMessageId) {
       const rows = await db
         .select()
@@ -252,6 +279,18 @@ export function createInMemoryTransferStore(
               r.domainName === domainName &&
               r.direction === direction &&
               r.status === "pending",
+          )
+          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0] ??
+          null,
+      ),
+    findLatest: (domainName, direction, status) =>
+      Promise.resolve(
+        [...byId.values()]
+          .filter(
+            (r) =>
+              r.domainName === domainName &&
+              r.direction === direction &&
+              r.status === status,
           )
           .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0] ??
           null,
