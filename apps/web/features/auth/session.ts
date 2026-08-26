@@ -2,7 +2,7 @@
  * 「このブラウザタブでログイン済みか」の目印（FR-01 / ui-screens §1）。
  *
  * 本番（`NEXT_PUBLIC_API_MODE=http`）のログイン状態は API が発行する `dopamin_session`
- * Cookie が持っていて、フロントは `GET /auth/me`（`lib/webauthn.ts` の `fetchMe`）で確かめる。
+ * Cookie が持っていて、フロントは `GET /auth/me`（`useMe({ probe: true })`）で確かめる。
  *
  * 一方モックモードにはセッションが無く、`AuthService.login()` も `settings.me()` も常に成功する。
  * それをそのまま「ログイン済み」と解釈すると S-00 / S-01 / S-02 が常に `/dashboard` へ飛んで

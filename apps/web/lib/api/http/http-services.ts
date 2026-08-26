@@ -2,13 +2,15 @@
  * HTTP 実装（fe-ui 設計 §4.6）。`NEXT_PUBLIC_API_MODE=http` のときに使う。
  *
  * 各メソッドの上に docs/requirements.md §10.1 のルートを書く。
- * まだ API が無いルート（一覧・同期・AI・サブドメイン設計・ログ・設定・移管一覧）は
+ * まだ API が無いルート（AI・サブドメイン設計・ログ・デモリセット・移管一覧）は
  * `NOT_IMPLEMENTED` を投げ、画面側は `toErrorCopy` の文言でその旨を出す。
  */
 
 import {
+  aiSettingsResponseSchema,
   type DomainCheckRequest,
   deriveDisplayStatus,
+  meResponseSchema,
   registryIdForDomain,
   splitDomainName,
 } from "@dopamin/shared";
@@ -421,14 +423,22 @@ export function createHttpServices(): Services {
     },
 
     settings: {
-      /** GET /auth/me + AI 設定（FR-17 の取得 API が未実装） */
+      /**
+       * GET /auth/me（FR-01 / FR-16 / FR-17、requirements §10.1）。
+       * `MeResponse`（packages/shared）は ViewModel `Me`（types.ts）と同じ形なので写像しない。
+       */
       me() {
-        return Promise.reject(notImplemented("GET /settings"));
+        return unwrap(apiClient.api.v1.auth.me.$get(), meResponseSchema);
       },
-      /** PATCH /settings/ai（FR-17、未実装） */
-      updateAi() {
-        return Promise.reject(notImplemented("PATCH /settings/ai"));
+
+      /** PATCH /settings/ai（FR-17）。更新後の実効値が返る */
+      updateAi(input) {
+        return unwrap(
+          apiClient.api.v1.settings.ai.$patch({ json: input }),
+          aiSettingsResponseSchema,
+        );
       },
+
       /** POST /demo/reset（FR-16、未実装） */
       demoReset() {
         return Promise.reject(notImplemented("POST /demo/reset"));
