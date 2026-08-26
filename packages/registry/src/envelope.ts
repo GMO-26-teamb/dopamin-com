@@ -87,6 +87,8 @@ export function interpretEppResponse(input: InterpretInput): InterpretSuccess {
       registryCode: resultCode,
       reason: envelope.result.reason ?? undefined,
       httpStatus,
+      // 操作ログ（§9.1）にレジストリ側トレース ID を残せるよう、得られた svTRID を持ち回る
+      svTrid: envelope.trID.svTRID,
     });
   }
 
@@ -98,6 +100,7 @@ export function interpretEppResponse(input: InterpretInput): InterpretSuccess {
       message: `${command}: HTTP ${httpStatus} なのに result ${resultCode} が返りました`,
       registryCode: resultCode,
       httpStatus,
+      svTrid: envelope.trID.svTRID,
     });
   }
 
@@ -123,6 +126,7 @@ export function parseResData<T>(
       reason: parsed.error.issues
         .map((i) => `${i.path.join(".")}: ${i.message}`)
         .join("; "),
+      svTrid: envelope.trID.svTRID,
     });
   }
   return parsed.data;

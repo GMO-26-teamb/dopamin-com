@@ -92,7 +92,7 @@
 
 ## 5. 未決事項
 
-- 操作ログ（FR-15）: 現状は Vercel ログ（console）のみ。`operation_logs` テーブル実装時に
-  `RegistryClient` ラッパーでアダプタ呼び出しを記録する（clTRID / svTRID を保存）。
+- ~~操作ログ（FR-15）~~: 実装済み。全レジストリ呼び出しを `operation_logs` へ永続化し
+  構造化 console ログ（NFR-06）を出す。設計は [`docs/specs/operation-logs.md`](operation-logs.md)。
 - `POST /domains/check` の 1 リクエストあたりの件数上限がレジストリ側で不明（API 側は 20 件に制限）。
 - コンタクト更新（FR-09 の一部）と移管の承認 / 拒否（受け側・P2）は未実装。

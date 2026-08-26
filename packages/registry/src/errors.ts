@@ -30,6 +30,8 @@ export class RegistryError extends Error {
   /** レジストリが返した人間向け詳細（UI にはそのまま出さない）。 */
   readonly reason?: string;
   readonly httpStatus?: number;
+  /** レジストリ採番のトレース ID（応答エンベロープが得られた場合のみ。操作ログ用）。 */
+  readonly svTrid?: string;
 
   constructor(options: {
     code: RegistryErrorCode;
@@ -38,6 +40,7 @@ export class RegistryError extends Error {
     registryCode?: number;
     reason?: string;
     httpStatus?: number;
+    svTrid?: string;
     cause?: unknown;
   }) {
     super(
@@ -50,6 +53,7 @@ export class RegistryError extends Error {
     this.registryCode = options.registryCode;
     this.reason = options.reason;
     this.httpStatus = options.httpStatus;
+    this.svTrid = options.svTrid;
   }
 
   get retryable(): boolean {
