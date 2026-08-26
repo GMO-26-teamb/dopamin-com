@@ -244,8 +244,18 @@ export function createHttpServices(): Services {
             // 表示上のプレースホルダを入れる（当該行は必ず availability: "error"）。
             registry: result.registry ?? "mock",
             availability: result.availability,
-            // FR-05 の独自性スコアは API 側が未実装（常に null）
-            uniqueness: null,
+            // FR-05: API の実スコアを ViewModel に写像する（topSimilar → nearest）
+            uniqueness:
+              result.uniqueness === null
+                ? null
+                : {
+                    score: result.uniqueness.score,
+                    label: result.uniqueness.label,
+                    nearest: result.uniqueness.topSimilar.map((t) => ({
+                      name: t.name,
+                      similarity: t.similarity,
+                    })),
+                  },
             alternatives: [],
             error:
               result.error === undefined

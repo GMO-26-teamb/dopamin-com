@@ -457,3 +457,40 @@ describe("settings.demoReset（POST /demo/reset）", () => {
     expect(calls).toHaveLength(0);
   });
 });
+
+describe("domains.check（FR-03 / FR-05）", () => {
+  it("uniqueness の topSimilar を nearest へ写像し、null はそのまま通す", async () => {
+    stubFetch(200, {
+      results: [
+        {
+          name: "googel.com",
+          registry: "kitaqsign",
+          availability: "available",
+          uniqueness: {
+            score: 12,
+            label: "low",
+            topSimilar: [{ name: "google", similarity: 0.95 }],
+            confidence: "normal",
+            algorithmVersion: "v3.4-r2-ts.1",
+            corpusVersion: "tranco-74V4X-2026-08-26-top10k+curated-v1",
+          },
+        },
+        {
+          name: "taken.com",
+          registry: "kitaqsign",
+          availability: "unavailable",
+          uniqueness: null,
+        },
+      ],
+    });
+    const results = await services().domains.check({
+      names: ["googel.com", "taken.com"],
+    });
+    expect(results[0]?.uniqueness).toEqual({
+      score: 12,
+      label: "low",
+      nearest: [{ name: "google", similarity: 0.95 }],
+    });
+    expect(results[1]?.uniqueness).toBeNull();
+  });
+});

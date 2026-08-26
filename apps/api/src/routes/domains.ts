@@ -4,14 +4,19 @@ import {
   type ApiErrorCode,
   type DomainAvailability,
   type DomainInfo,
+  type DomainUniqueness,
   domainCheckRequestSchema,
   domainCreateRequestSchema,
   domainNameSchema,
   domainRenewRequestSchema,
   domainUpdateRequestSchema,
+  getDefaultPreparedCorpus,
   isOperationAllowed,
   isRestorable,
   type RegistryId,
+  scoreDistinctiveness,
+  splitDomainName,
+  toDomainUniqueness,
   type UpdateInput,
 } from "@dopamin/shared";
 import { Hono } from "hono";
@@ -31,14 +36,37 @@ import {
 import type { DomainRecord } from "../services/domain-store";
 import type { AuthedEnv } from "../types";
 
-/** check 結果の 1 件分（§10.4）。uniqueness は FR-05 実装時に埋める（現状は常に null）。 */
+/** check 結果の 1 件分（§10.4）。uniqueness は available のときのみ付く（§10.4 の例に準拠）。 */
 interface DomainCheckItem {
   name: string;
   registry: RegistryId | null;
   availability: DomainAvailability;
   reason?: string;
-  uniqueness: null;
+  uniqueness: DomainUniqueness | null;
   error?: { code: ApiErrorCode; message: string };
+}
+
+/**
+ * FR-05: SLD の独自性スコアを計算する（リクエスト内で SLD ごとにメモ化）。
+ * スコア計算は check 本体の付随情報なので、失敗しても check 結果は返す。
+ */
+function createUniquenessResolver(): (name: string) => DomainUniqueness | null {
+  const bySld = new Map<string, DomainUniqueness | null>();
+  return (name) => {
+    try {
+      const { sld } = splitDomainName(name);
+      let u = bySld.get(sld);
+      if (u === undefined) {
+        u = toDomainUniqueness(
+          scoreDistinctiveness(sld, getDefaultPreparedCorpus()),
+        );
+        bySld.set(sld, u);
+      }
+      return u;
+    } catch {
+      return null;
+    }
+  };
 }
 
 /** 登録時の authInfo を自動生成する（RFC 9154: 128bit 以上のエントロピー推奨）。 */
@@ -149,6 +177,7 @@ export const domains = new Hono<AuthedEnv>()
         ? body.names
         : body.tlds.map((tld) => `${body.sld}.${tld}`);
     const uniqueNames = [...new Set(names)];
+    const uniquenessFor = createUniquenessResolver();
 
     const registrySet = getRegistrySet();
     const groups = new Map<
@@ -187,7 +216,8 @@ export const domains = new Hono<AuthedEnv>()
                 registry: adapter.id,
                 availability: result.available ? "available" : "unavailable",
                 ...(result.reason ? { reason: result.reason } : {}),
-                uniqueness: null,
+                // FR-05: 独自性スコアは「空き」のときだけ意味を持つ（§10.4 の例に準拠）
+                uniqueness: result.available ? uniquenessFor(name) : null,
               });
             } else {
               resultByName.set(name, {
