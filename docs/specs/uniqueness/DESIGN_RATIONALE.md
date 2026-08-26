@@ -42,8 +42,9 @@
 | 公開入口import | `@dopamin/shared` からの self-reference import をテストで検証(public-api.test.ts) | 解決・実行とも成功 |
 | JS↔TS全数一致 | parityスクリプト(gold91+ランダム5,000+攻撃系544=5,635件)。noUncheckedIndexedAccess対応リファクタ後に再実行 | 差異0 |
 | 連続採点性能 | 129件コーパス+同梱75,150語辞書で1,000件連続採点 | 初回40.8ms(辞書Set構築込み)、以後 平均1.5ms/件・p50 1.4ms・p95 2.8ms(約650件/秒)。修正前は採点ごとに辞書Setを再生成し約14.6ms/件 → 約9.5倍改善 |
-| 実リポジトリ `pnpm check`(実vitest・turbo build) | **未実施(Mac上で実行要。コンテナ/VMはnpm registry遮断のためpnpm実行不可)** | — |
-| rebase・push・PR | **未実施(VMにGitHub認証がないため。fetch→rebase→再テスト→push→PRの順で実施)** | — |
-| コミットID | `feat/fr-05-uniqueness-score` のHEAD(`git log -1` で確認) | 作成済み |
+| rebase / push | Mac上で `git fetch` → `git rebase origin/main`(ab36924) → `git push -u origin feat/fr-05-uniqueness-score` | 完了(rebase後コミット cc43826。rebase前は c210461) |
+| 実リポジトリ 実vitest(@dopamin/shared) | Mac上 `pnpm check`(turbo経由・vitest 4.1.11)初回実行 2026-08-26 16:05 | 447 pass / 1 fail。唯一の失敗は property fuzz テストが **vitest既定timeout 5秒を超過**したもの(実測約22秒。スコア実装の不具合ではない)。本修正コミットで重いテスト3件に timeout を明示指定 |
+| api / web のテスト | 同実行内で未完走・失敗 | 新worktreeに gitignore 対象の `.env.local`(リポジトリ直下・apps/api)が未配置だったことが原因と推定(未完走はDB接続系のみ)。配置のうえ再実行 |
+| 再実行(`pnpm check` 全green)・PR作成 | **未完了** | 全green確認+PR作成をもって「本番統合完了」 |
 
-※ 上記の未実施項目が完了するまでの状態は「TypeScript移植・単体検証完了」であり「本番統合完了」ではない。
+※ 上記の未完了項目が完了するまでの状態は「TypeScript移植・単体検証完了」であり「本番統合完了」ではない。

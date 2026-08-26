@@ -298,6 +298,7 @@ describe("fa: 一般語の過剰検出回帰", () => {
 });
 
 describe("property: fuzz 1,500件 + コーパス全件", () => {
+  // fuzz 1,500件×2回採点のため実vitestでは既定の5秒を超える (実測 ~22s) → timeout明示
   it("範囲・決定性・top整合・confidence (検証ハーネスと同一シード)", () => {
     let seed = 13579;
     const rnd = () => {
@@ -333,13 +334,13 @@ describe("property: fuzz 1,500件 + コーパス全件", () => {
         3;
       expect(r.confidence === "low").toBe(isShort);
     }
-  });
+  }, 120_000);
 
   it("コーパス収載名そのものは常に low (<40)", () => {
     for (const e of TEST_CORPUS) {
       expect(score(e.name).score).toBeLessThan(40);
     }
-  });
+  }, 60_000);
 });
 
 describe("結果スキーマ", () => {
@@ -377,5 +378,5 @@ describe("プレフィルタ1の等価性 (スポットチェック)", () => {
       }).score;
       expect(b).toBe(a);
     }
-  });
+  }, 60_000);
 });
