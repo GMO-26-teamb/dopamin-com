@@ -97,14 +97,19 @@ pnpm --filter @dopamin/web e2e --ui         # Playwright UI
 ### 注意
 
 - RP ID が `localhost` 固定なので baseURL は `http://localhost:3000`。`127.0.0.1` では動かない（FR-01 spec §6）。
-- ポート 3000 / 8787 で `pnpm dev` が動いていると `reuseExistingServer` がそれを掴む。mock モードの web だと
-  最初のテスト（AC-01-3 のリダイレクト）が失敗するので、`pnpm dev` を止めてから実行する。
-  逆に e2e が起動した web / api は次回の実行で再利用されるので、2 回目以降は `next build` を待たずに済む。
+- api（:8787）は既存プロセスを**再利用しない**（`reuseExistingServer: false`）。`pnpm dev` の api は
+  `apps/api/.env.local`（Supabase / 実レジストリ）を読んでいる可能性があり、掴むと signup やパスキー追加・削除が
+  共有 DB に書き込んでしまうため。:8787 が使用中だと Playwright が「is already used」で即失敗するので、
+  `pnpm dev` を止めてから実行する。
+- web（:3000）だけは既存プロセスを再利用する（`next build` を省くため）。`pnpm dev` の web（mock モード）を掴むと
+  最初のテスト（AC-01-3 のリダイレクト）が失敗する。e2e が起動した web は次回の実行で再利用されるので、
+  2 回目以降は `next build` を待たずに済む（web のコードを変えたら :3000 を止めて再ビルドさせる）。
 - DB の接続先は環境変数 `DATABASE_URL`（未設定なら上の docker の 54329）。表示名は毎回ユニークにしているので、
   同じ DB で繰り返し実行できる。
 - `next build` は `next/font/google` のフォント取得でネットワークを使う。
-- CI は `.github/workflows/ci.yml` の `e2e` ジョブ（`services: postgres`）。`continue-on-error: true` で必須にはしていない。
-  失敗時は `playwright-report` アーティファクトにトレース / スクリーンショットが残る。
+- CI は `.github/workflows/ci.yml` の `e2e` ジョブ（`services: postgres`）。Playwright の step に `continue-on-error: true` を
+  付けて必須にはしていない（check run は緑のまま）。失敗時は Summary に `::warning::` が出て、`playwright-report`
+  アーティファクトにトレース / スクリーンショットが残る。
 - turbo の `test` には含めない（`pnpm test` / `pnpm check` は e2e を走らせない）。
 
 ## 4. mock レジストリのエラーシミュレーション（§11.6）

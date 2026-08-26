@@ -20,10 +20,10 @@ jobs:
       - run: pnpm turbo run typecheck test build
 
   # FR-01 の e2e（Playwright + CDP Virtual Authenticator。docs/testing.md §3）。
-  # check とは独立に走らせ、必須にはしない（continue-on-error）。turbo の test には含めない。
+  # check とは独立に走らせ、必須にはしない（Playwright の step だけ continue-on-error）。
+  # ジョブ全体ではなく step に付けているのは、失敗を ::warning:: で Summary に残すため。turbo の test には含めない。
   e2e:
     runs-on: ubuntu-latest
-    continue-on-error: true
     timeout-minutes: 20
     services:
       postgres:
@@ -51,7 +51,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @dopamin/db migrate
       - run: pnpm --filter @dopamin/web exec playwright install --with-deps chromium
-      - run: pnpm --filter @dopamin/web e2e
+      - id: e2e
+        run: pnpm --filter @dopamin/web e2e
+        continue-on-error: true
+      - if: ${{ steps.e2e.outcome == 'failure' }}
+        run: echo "::warning title=e2e failed::FR-01 e2e（Playwright）が失敗しました。playwright-report アーティファクトのトレース / スクリーンショットを確認してください（必須チェックではありません）。"
       - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
         with:

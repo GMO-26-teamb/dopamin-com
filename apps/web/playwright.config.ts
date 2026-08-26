@@ -44,10 +44,13 @@ export default defineConfig({
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: [
     {
-      // apps/api/package.json の dev と同じ入口。`.env.local` は読まない（接続先を env で固定するため）
+      // apps/api/package.json の dev と同じ入口。`.env.local` は読まない（接続先を env で固定するため）。
+      // 既存の :8787 は再利用しない: `pnpm dev` の api は .env.local（Supabase / 実レジストリ）を読んでいる
+      // 可能性があり、それを掴むと signup / パスキー追加・削除が共有 DB に書き込んでしまう。
+      // tsx の起動は数秒なので再利用の利点もない。ポート使用中なら Playwright が即失敗する（安全側）。
       command: "pnpm --filter @dopamin/api exec tsx src/dev.ts",
       url: `${API_ORIGIN}/api/v1/health`,
-      reuseExistingServer: !isCi,
+      reuseExistingServer: false,
       timeout: 60_000,
       env: {
         PORT: "8787",
