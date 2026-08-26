@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  APP_OPERATION_COMMANDS,
   AUXILIARY_OPERATION_COMMANDS,
   isAuxiliaryOperationCommand,
   OPERATION_COMMANDS,
@@ -32,18 +33,30 @@ describe("OPERATION_COMMANDS", () => {
     expect(PRIMARY_OPERATION_COMMANDS).toHaveLength(15);
   });
 
-  it("主コマンド + 補助コマンドで構成され、重複が無い", () => {
+  it("主コマンド + 補助コマンド + アプリ内操作で構成され、重複が無い", () => {
     expect(OPERATION_COMMANDS).toEqual([
       ...PRIMARY_OPERATION_COMMANDS,
       ...AUXILIARY_OPERATION_COMMANDS,
+      ...APP_OPERATION_COMMANDS,
     ]);
     expect(new Set(OPERATION_COMMANDS).size).toBe(OPERATION_COMMANDS.length);
   });
 
-  it("すべて snake_case（コロン・ハイフンを含まない）", () => {
-    for (const command of OPERATION_COMMANDS) {
+  it("レジストリ通信のコマンドはすべて snake_case（コロン・ハイフンを含まない）", () => {
+    for (const command of [
+      ...PRIMARY_OPERATION_COMMANDS,
+      ...AUXILIARY_OPERATION_COMMANDS,
+    ]) {
       expect(command).toMatch(/^[a-z]+(_[a-z]+)*$/);
     }
+  });
+
+  it("アプリ内操作は <機能>.<操作> でレジストリ通信と見分けられる", () => {
+    for (const command of APP_OPERATION_COMMANDS) {
+      expect(command).toMatch(/^[a-z]+(_[a-z]+)*\.[a-z]+(_[a-z]+)*$/);
+    }
+    // FR-13 が名指ししている識別子
+    expect(APP_OPERATION_COMMANDS).toContain("subdomain_plan.apply");
   });
 
   it("registry アダプタが発行する補助コマンドを受理する", () => {

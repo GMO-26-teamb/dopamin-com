@@ -5,8 +5,10 @@ import {
 import { Hono } from "hono";
 import { getDb } from "../lib/db";
 import { parseDomainNameParam } from "../lib/params";
+import { adapterForDomain } from "../lib/registries";
 import { jsonValidator } from "../lib/validator";
 import { requireSession } from "../middleware/session";
+import { applySubdomainPlan, getDnsZone } from "../services/dns.service";
 import {
   requireOwnedDomain,
   requireOwnedDomainId,
@@ -67,4 +69,37 @@ export const subdomainPlan = new Hono<AuthedEnv>()
     const name = parseDomainNameParam(c.req.param("name"));
     const { id } = await requireOwnedDomainId(c.get("user").id, name);
     return c.json(await getSubdomainPlan(getDb(), name, id));
+  })
+
+  /**
+   * FR-13 / AC-13-4・AC-13-5・AC-13-7: 保存済み設計を疑似 DNS ゾーンに反映する。
+   * NS がドパ民 DNS でなければ先に切り替え、失敗したらレコードは変更しない。
+   */
+  .post("/:name/subdomain-plan/apply", async (c) => {
+    const name = parseDomainNameParam(c.req.param("name"));
+    // 未対応 TLD は所有権を引く前に 400 で弾く（入力検証が先）
+    const adapter = adapterForDomain(name);
+    const { record, id } = await requireOwnedDomainId(c.get("user").id, name, {
+      forWrite: true,
+    });
+    return c.json(
+      await applySubdomainPlan({
+        db: getDb(),
+        user: c.get("user"),
+        adapter,
+        domain: name,
+        owned: record,
+        domainId: id,
+      }),
+    );
+  })
+
+  /**
+   * FR-13 / AC-13-4・AC-13-7: 疑似 DNS ゾーンのレコード一覧と保存済み設計との差分。
+   * 差分は apply と同じ計算なので、確認ダイアログの表示と実際に起きることがずれない。
+   */
+  .get("/:name/dns", async (c) => {
+    const name = parseDomainNameParam(c.req.param("name"));
+    const { id } = await requireOwnedDomainId(c.get("user").id, name);
+    return c.json(await getDnsZone(getDb(), id));
   });
