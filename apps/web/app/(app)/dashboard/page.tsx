@@ -14,8 +14,10 @@ import { DomainGridSkeleton } from "@/features/domains/domain-card-skeleton";
 import { DomainGrid, visibleDomains } from "@/features/domains/domain-grid";
 import { formatRelativeTime } from "@/features/domains/format";
 import { syncNotice } from "@/features/domains/sync-notice";
+import type { ApiClientError } from "@/lib/api/errors";
 import { useDomains, useSyncDomains } from "@/lib/api/hooks";
 import { useQueryScope } from "@/lib/api/provider";
+import type { SyncResult } from "@/lib/api/types";
 
 /**
  * S-10 保有ドメイン一覧 / S-11 0 件 / S-12 読み込み / S-13 同期エラー（FR-02・AC-18-1）。
@@ -24,13 +26,16 @@ import { useQueryScope } from "@/lib/api/provider";
  * （ui-screens S-12）。同期に失敗したら Banner Warn を出し、キャッシュ表示を続ける。
  */
 
+/** 1 回の同期試行の結果。ハード失敗（error）か、部分失敗を含む応答（data）のどちらか。 */
+type SyncOutcome = ApiClientError | SyncResult;
+
 export default function DashboardPage() {
   const domains = useDomains();
   const sync = useSyncDomains();
   const scope = useQueryScope();
   // 閉じた Banner を覚えるキー。ハード失敗（error）と部分失敗（data）を
   // 同じ 1 本で扱えるよう、その同期試行の結果オブジェクトの同一性で比べる
-  const [dismissed, setDismissed] = useState<object | null>(null);
+  const [dismissed, setDismissed] = useState<SyncOutcome | null>(null);
 
   // シナリオ（?mock=）が変わったら 1 回だけ背後で同期し直す。ただしすでに十分新しければスキップする
   const syncedScopeRef = useRef<string | null>(null);
@@ -128,7 +133,7 @@ export default function DashboardPage() {
 
   // 部分失敗（200 + failures）とリクエストごとの失敗（error）の両方をここで拾う。
   // 一覧そのものが取れていないときは Error Card が出ているので Banner は重ねない
-  const syncOutcome: object | null = sync.error ?? sync.data ?? null;
+  const syncOutcome: SyncOutcome | null = sync.error ?? sync.data ?? null;
   const notice = syncNotice({
     error: sync.error,
     failures: sync.data?.failures ?? [],
