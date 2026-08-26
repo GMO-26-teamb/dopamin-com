@@ -28,6 +28,7 @@ import { createTestSession } from "../helpers/session";
 let db: Db;
 let closeDb: () => Promise<void>;
 let consoleLog: MockInstance<typeof console.log>;
+let consoleError: MockInstance<typeof console.error>;
 
 beforeAll(async () => {
   ({ db, close: closeDb } = await createTestDb());
@@ -41,6 +42,8 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await resetTestDb(db);
+  // INSERT 失敗のテストで差し替えた Db を毎回 pglite に戻す
+  setDbForTesting(db);
   process.env.REGISTRY_MODE = "mock";
   delete process.env.MOCK_REGISTRY_FAIL_MODE;
   // 環境変数から onCall 配線込みで再構築させる
@@ -48,7 +51,7 @@ beforeEach(async () => {
   setRegistrySetForTesting(null);
   // 構造化ログでテスト出力が汚れないよう抑止しつつ、内容の検証にも使う
   consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
-  vi.spyOn(console, "error").mockImplementation(() => {});
+  consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
 afterEach(() => {
@@ -62,6 +65,24 @@ async function selectLogs() {
     .select()
     .from(schema.operationLogs)
     .orderBy(asc(schema.operationLogs.createdAt));
+}
+
+/** console の spy から単一行 JSON を取り出し、type が一致する最初の行を返す。 */
+function findConsoleLine(
+  spy: MockInstance<typeof console.log>,
+  type: string,
+): Record<string, unknown> | undefined {
+  return (
+    spy.mock.calls
+      .map((call) => {
+        try {
+          return JSON.parse(String(call[0])) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })
+      .find((parsed) => parsed?.type === type) ?? undefined
+  );
 }
 
 describe("operation_logs への永続化（FR-15）", () => {
@@ -93,15 +114,7 @@ describe("operation_logs への永続化（FR-15）", () => {
     expect(rows[0]?.latencyMs).toBeGreaterThanOrEqual(0);
 
     // NFR-06: Vercel で見る単一行 JSON が console に出る
-    const line = consoleLog.mock.calls
-      .map((call) => {
-        try {
-          return JSON.parse(String(call[0])) as Record<string, unknown>;
-        } catch {
-          return null;
-        }
-      })
-      .find((parsed) => parsed?.type === "operation_log");
+    const line = findConsoleLine(consoleLog, "operation_log");
     expect(line).toMatchObject({
       level: "info",
       type: "operation_log",
@@ -123,6 +136,41 @@ describe("operation_logs への永続化（FR-15）", () => {
       registry: "mock",
       status: "success",
     });
+  });
+
+  it("INSERT が失敗しても API 応答は壊れず、根本原因だけを console.error に出す（ペイロードは載せない）", async () => {
+    // drizzle の DrizzleQueryError 相当: message に全パラメータ、cause に DB ドライバのエラー
+    const failingDb = {
+      insert: () => ({
+        values: () =>
+          Promise.reject(
+            new Error(
+              'Failed query: insert into "operation_logs" ... params: raw-payload-should-not-leak',
+              { cause: new Error("connect ECONNREFUSED 127.0.0.1:1") },
+            ),
+          ),
+      }),
+    } as unknown as Db;
+    setDbForTesting(failingDb);
+
+    const res = await app.request("/api/v1/health");
+    expect(res.status).toBe(200);
+
+    // console.log の operation_log 行は INSERT の成否に関係なく先に出る
+    expect(findConsoleLine(consoleLog, "operation_log")).toMatchObject({
+      command: "hello",
+      status: "success",
+    });
+    const failed = findConsoleLine(consoleError, "operation_log_write_failed");
+    expect(failed).toMatchObject({
+      level: "error",
+      registry: "mock",
+      command: "hello",
+      reason: "error",
+      errorName: "Error",
+      message: "connect ECONNREFUSED 127.0.0.1:1",
+    });
+    expect(JSON.stringify(failed)).not.toContain("raw-payload-should-not-leak");
   });
 
   it("タイムアウトはエラー種別付きで記録される（AC-15-1）", async () => {

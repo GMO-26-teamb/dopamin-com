@@ -9,6 +9,7 @@ import { SUPPORTED_TLDS } from "@dopamin/shared";
 import {
   buildOperationLogConsoleLine,
   buildOperationLogRow,
+  OperationLogWriteTimeoutError,
   recordOperationLog,
 } from "../services/operation-log.service";
 import { ApiError } from "./api-error";
@@ -55,6 +56,13 @@ async function handleRegistryCall(record: RegistryCallRecord): Promise<void> {
   try {
     await recordOperationLog(getDb(), buildOperationLogRow(record, context));
   } catch (cause) {
+    // drizzle の DrizzleQueryError は message に「Failed query: insert … params: <全パラメータ>」を
+    // 持つため、そのまま出すとマスク済みとはいえペイロード全体が Vercel ログに載る。
+    // 根本原因（ECONNREFUSED / 23502 など）は cause.cause 側にあるので、そちらを短く出す。
+    const root =
+      cause instanceof Error && cause.cause instanceof Error
+        ? cause.cause
+        : cause;
     console.error(
       JSON.stringify({
         level: "error",
@@ -63,7 +71,13 @@ async function handleRegistryCall(record: RegistryCallRecord): Promise<void> {
         registry: record.registry,
         command: record.command,
         clTrid: record.clTrid,
-        message: cause instanceof Error ? cause.message : String(cause),
+        reason:
+          root instanceof OperationLogWriteTimeoutError ? "timeout" : "error",
+        errorName: root instanceof Error ? root.name : null,
+        message: (root instanceof Error ? root.message : String(root)).slice(
+          0,
+          300,
+        ),
       }),
     );
   }

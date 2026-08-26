@@ -61,10 +61,43 @@ export function buildOperationLogConsoleLine(
   };
 }
 
-/** operation_logs へ 1 行 INSERT する。失敗時の扱い（握りつぶし）は呼び出し側の責務。 */
+/**
+ * INSERT を待つ上限。DB に到達できない（SYN drop・Supavisor 飽和）場合に postgres-js の
+ * 接続タイムアウト（既定 30s）までレジストリ操作の応答が遅れないようにする。
+ * create のように 1 リクエストで複数回呼ばれる経路では累積するため短めに取る。
+ */
+export const OPERATION_LOG_WRITE_TIMEOUT_MS = 3_000;
+
+/** INSERT が上限時間内に終わらなかったことを表す（呼び出し側が reason: "timeout" として出力する）。 */
+export class OperationLogWriteTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(
+      `operation_logs への INSERT が ${timeoutMs}ms 以内に完了しませんでした`,
+    );
+    this.name = "OperationLogWriteTimeoutError";
+  }
+}
+
+/**
+ * operation_logs へ 1 行 INSERT する。失敗時の扱い（握りつぶし）は呼び出し側の責務。
+ * `timeoutMs` を超えると OperationLogWriteTimeoutError で reject する
+ * （INSERT 自体は打ち切らず裏で続行するため、遅れて成功することはある）。
+ */
 export async function recordOperationLog(
   db: Db,
   row: OperationLogRow,
+  timeoutMs: number = OPERATION_LOG_WRITE_TIMEOUT_MS,
 ): Promise<void> {
-  await db.insert(schema.operationLogs).values(row);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new OperationLogWriteTimeoutError(timeoutMs)),
+      timeoutMs,
+    );
+  });
+  try {
+    await Promise.race([db.insert(schema.operationLogs).values(row), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }

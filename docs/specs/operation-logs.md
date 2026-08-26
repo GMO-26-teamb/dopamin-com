@@ -73,7 +73,11 @@ sequenceDiagram
 - **書き込みは await**（fire-and-forget は Vercel の関数フリーズで消失リスク）。
   順序は console → INSERT: INSERT 失敗・フリーズでも Vercel ログには必ず残る。
   INSERT 失敗は `type:"operation_log_write_failed"` の console.error のみで、
-  ユーザーリクエストは壊さない。
+  ユーザーリクエストは壊さない。INSERT の待ち時間は 3 秒を上限とし
+  （`OPERATION_LOG_WRITE_TIMEOUT_MS`。DB に到達できないときに postgres-js の接続タイムアウト
+  30s までレジストリ操作の応答を遅らせないため）、超過時は `reason:"timeout"` で同じ
+  console.error を出して続行する。console.error にはペイロードを載せず、根本原因
+  （`cause.cause` の ECONNREFUSED / SQLSTATE 等）の message を 300 文字に切って出す。
 - **console 行**（NFR-06、`error-handler.ts` と同じ単一行 JSON.stringify 流儀）:
   `{"level":"info|warn","type":"operation_log",requestId,userId,registry,command,domainName,status,errorCode,registryCode,clTrid,svTrid,latencyMs}`。
   マスク済みペイロードは console には載せない（量と秘匿の多層防御。DB のみ）。

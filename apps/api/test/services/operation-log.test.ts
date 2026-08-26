@@ -1,11 +1,14 @@
+import type { Db } from "@dopamin/db";
 import type { RegistryCallRecord } from "@dopamin/registry";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildOperationLogConsoleLine,
   buildOperationLogRow,
+  OperationLogWriteTimeoutError,
+  recordOperationLog,
 } from "../../src/services/operation-log.service";
 
-/** buildOperationLogRow / buildOperationLogConsoleLine の純関数テスト（FR-15 §9.1）。 */
+/** buildOperationLogRow / buildOperationLogConsoleLine の純関数テストと recordOperationLog の上限時間（FR-15 §9.1）。 */
 
 const RECORD: RegistryCallRecord = {
   registry: "kitaqsign",
@@ -88,5 +91,39 @@ describe("buildOperationLogConsoleLine（NFR-06 構造化ログ）", () => {
       CONTEXT,
     );
     expect(line.level).toBe("info");
+  });
+});
+
+describe("recordOperationLog（INSERT の上限時間）", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("上限内に INSERT が完了すれば resolve し、行をそのまま渡す", async () => {
+    const values = vi.fn().mockResolvedValue(undefined);
+    const db = { insert: vi.fn(() => ({ values })) } as unknown as Db;
+    const row = buildOperationLogRow(RECORD, CONTEXT);
+
+    await expect(recordOperationLog(db, row)).resolves.toBeUndefined();
+    expect(values).toHaveBeenCalledWith(row);
+  });
+
+  it("timeoutMs を超えても INSERT が終わらなければ OperationLogWriteTimeoutError で reject する", async () => {
+    vi.useFakeTimers();
+    // DB に到達できず接続待ちが続く状況（postgres-js の connect_timeout まで返らない）を模す
+    const db = {
+      insert: () => ({ values: () => new Promise<never>(() => {}) }),
+    } as unknown as Db;
+
+    const pending = recordOperationLog(
+      db,
+      buildOperationLogRow(RECORD, CONTEXT),
+      3_000,
+    );
+    const assertion = expect(pending).rejects.toBeInstanceOf(
+      OperationLogWriteTimeoutError,
+    );
+    await vi.advanceTimersByTimeAsync(3_000);
+    await assertion;
   });
 });
