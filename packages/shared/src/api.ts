@@ -5,41 +5,23 @@ import {
   sldSchema,
   tldSchema,
 } from "./domain-name";
+import { errorCodeSchema } from "./errors";
 import { clientStatusSchema, registryIdSchema } from "./registry";
 
-/** 統一エラーコード（docs/requirements.md §10.3）。 */
-export const API_ERROR_CODES = [
-  "VALIDATION_ERROR",
-  "UNAUTHORIZED",
-  "FORBIDDEN",
-  "NOT_FOUND",
-  "CONFLICT",
-  "OPERATION_NOT_ALLOWED",
-  "REGISTRY_REJECTED",
-  "REGISTRY_TIMEOUT",
-  "REGISTRY_UNAVAILABLE",
-  "REGISTRY_SPEC_MISMATCH",
-  "AI_UNAVAILABLE",
-  "RATE_LIMITED",
-  "INTERNAL",
-] as const;
-
-export const apiErrorCodeSchema = z.enum(API_ERROR_CODES);
-export type ApiErrorCode = z.infer<typeof apiErrorCodeSchema>;
-
-/** 統一エラー形式（docs/requirements.md §10.3）。 */
-export const apiErrorBodySchema = z.object({
-  error: z.object({
-    code: apiErrorCodeSchema,
-    message: z.string(),
-    retryable: z.boolean(),
-    registry: registryIdSchema.optional(),
-    registryCode: z.string().optional(),
-    requestId: z.string().optional(),
-    details: z.unknown().optional(),
-  }),
-});
-export type ApiErrorBody = z.infer<typeof apiErrorBodySchema>;
+/**
+ * 統一エラー（docs/requirements.md §10.3）の定義は `./errors.ts` が正（issue #30）。
+ * 以下は後方互換の別名。新しいコードは `ERROR_CODES` / `errorCodeSchema` / `ErrorCode` /
+ * `apiErrorSchema` / `ApiError` を直接使うこと。
+ */
+export type {
+  ApiError as ApiErrorBody,
+  ErrorCode as ApiErrorCode,
+} from "./errors";
+export {
+  apiErrorSchema as apiErrorBodySchema,
+  ERROR_CODES as API_ERROR_CODES,
+  errorCodeSchema as apiErrorCodeSchema,
+} from "./errors";
 
 /** `POST /domains/check` の入力（FR-03）。SLD + TLD 群、または FQDN 群のどちらか。 */
 export const domainCheckRequestSchema = z.union([
@@ -156,7 +138,7 @@ export type DomainListResponse = z.infer<typeof domainListResponseSchema>;
 /** `POST /domains/sync` で同期できなかったドメイン（部分失敗を許容する）。 */
 export const domainSyncFailureSchema = z.object({
   name: z.string(),
-  code: apiErrorCodeSchema,
+  code: errorCodeSchema,
   message: z.string(),
 });
 

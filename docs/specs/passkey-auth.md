@@ -159,14 +159,7 @@ sequenceDiagram
 
 `*JSON` 型は `@simplewebauthn/types` のものをそのまま使う。zod スキーマは `packages/shared/src/schemas/auth.ts` に置き、`response` は最低限 `{ id: string, rawId: string, type: 'public-key', response: object }` の形を検証してから SimpleWebAuthn に渡す。
 
-エラーコード（§10.3 に追加）:
-
-| code | status | 場面 |
-|---|---|---|
-| `CHALLENGE_NOT_FOUND` | 400 | challengeId 不明・期限切れ・使用済み |
-| `VERIFICATION_FAILED` | 401 | attestation / assertion 検証失敗、counter 後退、userHandle 不一致 |
-| `CREDENTIAL_NOT_FOUND` | 401 | ログイン時に credential ID が DB に無い（別環境で登録したパスキー等） |
-| `LAST_PASSKEY` | 409 | 最後の 1 件を削除しようとした |
+エラーコード（`CHALLENGE_NOT_FOUND` 400 / `VERIFICATION_FAILED` 401 / `CREDENTIAL_NOT_FOUND` 401 / `LAST_PASSKEY` 409）は requirements v0.1.8 で §10.3 に取り込み済み。定義は `packages/shared/src/errors.ts` の `ERROR_CODES` / `ERROR_STATUS`（#30 で統合）。
 
 ---
 
