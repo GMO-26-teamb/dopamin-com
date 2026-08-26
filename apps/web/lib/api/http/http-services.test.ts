@@ -315,6 +315,58 @@ const ME = {
   },
 };
 
+describe("transfers.request（POST /transfers。FR-12）", () => {
+  it("正規化 TransferResult の DTO を画面用 Transfer に写す", async () => {
+    stubFetch(202, {
+      transfer: {
+        name: "move.com",
+        status: "pending",
+        registryStatus: "pending",
+        requestingRegistrarId: "REG-DOPAMIN",
+        actingRegistrarId: "REG-OTHER",
+        requestedAt: "2026-08-26T10:00:00.000Z",
+        actByAt: "2026-08-26T10:20:00.000Z",
+      },
+    });
+
+    const transfer = await services().transfers.request({
+      name: "move.com",
+      authCode: "s3cr3t",
+    });
+
+    expect(calls[0]).toMatchObject({ method: "POST" });
+    expect(calls[0]?.url).toContain("/api/v1/transfers");
+    expect(transfer).toMatchObject({
+      id: "move.com",
+      domainName: "move.com",
+      direction: "in",
+      status: "pending",
+    });
+  });
+
+  it("必須フィールドが欠けていれば INTERNAL（API との契約ずれを検知する）", async () => {
+    stubFetch(202, { transfer: { name: "move.com" } });
+
+    const error = await services()
+      .transfers.request({ name: "move.com", authCode: "s3cr3t" })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiClientError);
+    expect((error as ApiClientError).code).toBe("INTERNAL");
+  });
+
+  it("status が未知の値なら INTERNAL（正規化ユニオン外は受け取らない）", async () => {
+    stubFetch(202, {
+      transfer: { name: "move.com", status: "clientApproved" },
+    });
+
+    const error = await services()
+      .transfers.request({ name: "move.com", authCode: "s3cr3t" })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiClientError);
+    expect((error as ApiClientError).code).toBe("INTERNAL");
+  });
+});
+
 describe("settings.me（GET /auth/me）", () => {
   it("同一オリジンの /api/v1/auth/me を GET し、meResponseSchema で検証した結果を返す", async () => {
     stubFetch(200, ME);

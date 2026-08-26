@@ -10,6 +10,7 @@ import {
   operationLogStatusFromErrorCode,
   type RegistryId,
   type RenewInput,
+  TRANSFER_AUTO_APPROVE_MS,
   type TransferResult,
   type UpdateInput,
 } from "@dopamin/shared";
@@ -66,6 +67,10 @@ function deriveStatuses(state: MockDomainState): string[] {
   }
   return statuses;
 }
+
+/** mock が名乗る相手レジストラ ID（移管の申請側 / 対応側）。 */
+const MOCK_REQUESTING_REGISTRAR_ID = "MOCK-GAINING";
+const MOCK_ACTING_REGISTRAR_ID = "MOCK-LOSING";
 
 /**
  * ローカル開発・テスト・デモ用のインメモリレジストリ（docs/requirements.md §11.1）。
@@ -246,6 +251,9 @@ export class MockRegistryAdapter implements RegistryAdapter {
       updatedAt: state.upDate,
       expiresAt: state.exDate,
       lastTransferAt: state.trDate,
+      // 実レジストリの info 応答に clID が無いので mock も返さない（挙動を揃える）。
+      // 移管 OUT 検知のシミュレーションは #45 / #56 で Poll 側に載せる。
+      sponsoringRegistrarId: null,
       rgpStatuses: [...state.rgpStatuses],
     };
   }
@@ -493,12 +501,20 @@ export class MockRegistryAdapter implements RegistryAdapter {
       });
     }
     state.pendingTransfer = true;
-    state.upDate = this.now().toISOString();
+    const requestedAt = this.now().toISOString();
+    state.upDate = requestedAt;
     return {
       name: state.name,
       status: "pending",
-      gainingRegistrar: "MOCK-GAINING",
-      losingRegistrar: "MOCK-LOSING",
+      registryStatus: "pending",
+      requestingRegistrarId: MOCK_REQUESTING_REGISTRAR_ID,
+      actingRegistrarId: MOCK_ACTING_REGISTRAR_ID,
+      requestedAt,
+      // 放置時のサーバ自動承認（FR-12。既定 20 分後）。
+      actByAt: new Date(
+        new Date(requestedAt).getTime() + TRANSFER_AUTO_APPROVE_MS,
+      ).toISOString(),
+      raw: this.toTransferRaw("transfer_request", state),
     };
   }
 
@@ -511,11 +527,33 @@ export class MockRegistryAdapter implements RegistryAdapter {
   private async doTransferQuery(name: string): Promise<TransferResult> {
     this.gate("transfer:query");
     const state = this.getState(name, "transfer:query");
+    // 実アダプタと同じく info 相当からの導出。移管中でなければレジストラ ID は返さない。
     return {
       name: state.name,
       status: state.pendingTransfer ? "pending" : "none",
-      gainingRegistrar: state.pendingTransfer ? "MOCK-GAINING" : null,
-      losingRegistrar: state.pendingTransfer ? "MOCK-LOSING" : null,
+      ...(state.pendingTransfer
+        ? {
+            registryStatus: "pending",
+            requestingRegistrarId: MOCK_REQUESTING_REGISTRAR_ID,
+            actingRegistrarId: MOCK_ACTING_REGISTRAR_ID,
+          }
+        : {}),
+      raw: this.toTransferRaw("transfer_query", state),
+    };
+  }
+
+  /** `raw` に載せる状態スナップショット。JSON 化できるプレーン値だけを入れる。 */
+  private toTransferRaw(
+    command: string,
+    state: MockDomainState,
+  ): Record<string, unknown> {
+    return {
+      source: "mock",
+      registry: this.id,
+      command,
+      domain: state.name,
+      pendingTransfer: state.pendingTransfer,
+      statuses: deriveStatuses(state),
     };
   }
 

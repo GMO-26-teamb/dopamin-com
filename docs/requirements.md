@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.1.11（2026-08-26） |
+| 版 | v0.1.12（2026-08-26） |
 | プロダクト | ドパ民.com / dopamin.com — Z世代向けドメイン管理プラットフォーム（疑似レジストラ） |
 | チーム | チームドパ民（Team B）: 佐々木 琢登・星 はるか・上原 拓也 |
 | 位置づけ | GMO Internet Internship in kitaQ Webアプリケーションコース（2026/08/24–28）成果物 |
@@ -469,7 +469,7 @@ flowchart LR
 - 読み取り: 一覧は DB、詳細は `info` で最新化して DB を更新。
 - 書き込み: レジストリ成功 → DB 更新の順（write-through）。レジストリ成功後の DB 更新失敗は操作ログに残し、次回 `info` で自己修復する。
 - 更新系コマンドのタイムアウト: 再送しない。`info` で結果を照合し、存在すれば成功扱いで DB を更新する。`transferRequest` のみ `transferQuery` で照合する（FR-18）。
-- 所有権（移管 OUT）: Poll の移管承認通知、または `info` の `sponsoringRegistrarId`（clID）が自レジストラ ID（`adapter.registrarId`）と異なることを検知したら、`domains.ownership` を `transferred_out` に遷移させる。行は削除せず履歴として残し、`subdomain_plans` も旧行に紐付いたまま新所有者へは引き継がない。同じドメインを後日再び移管 IN した場合は新しい行を作る（一意制約は保有中の行のみ、§9.1）【要確認: 非スポンサーからの `info` 応答、§21.2 #12】。
+- 所有権（移管 OUT）: Poll の移管承認通知、または `info` の `sponsoringRegistrarId`（clID）が自レジストラ ID（`adapter.registrarId`）と異なることを検知したら、`domains.ownership` を `transferred_out` に遷移させる。行は削除せず履歴として残し、`subdomain_plans` も旧行に紐付いたまま新所有者へは引き継がない。同じドメインを後日再び移管 IN した場合は新しい行を作る（一意制約は保有中の行のみ、§9.1）。`sponsoringRegistrarId` は当面 null（§11.1）なので、それまでの検知手段は Poll の承認通知だけになる【要確認: 非スポンサーからの `info` 応答、§21.2 #12】。
 - 所有権（移管 IN）: `transfers(in)` が承認されるまで `domains` 行は作らない。承認検知 → `info` 取り込み → `domains` 作成の順で、取り込みが失敗しても `transfers` は `approved` のまま残し、次回の `/transfers` 表示で再試行する。
 
 ---
@@ -619,7 +619,7 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。すべてのテーブル
 | registry | text NOT NULL | `kitaqsign` / `kitaqnic` / `mock` |
 | registry_ref | text | レジストリ側 ID（ROID 相当）があれば |
 | ownership | text NOT NULL DEFAULT 'owned' | `owned` / `transferred_out`（§6.5） |
-| sponsoring_registrar_id | text | `info` の clID（現スポンサーレジストラ）。自レジストラ ID と一致すれば保有中【要確認: §21.2 #12】 |
+| sponsoring_registrar_id | text | `info` の clID（現スポンサーレジストラ）。自レジストラ ID と一致すれば保有中。両 OpenAPI に clID が無いため当面 null（§11.1）【要確認: §21.2 #12】 |
 | transferred_out_at | timestamptz | 移管 OUT 完了を検知した日時 |
 | statuses | text[] NOT NULL | EPP ステータス（§11.3） |
 | nameservers | text[] NOT NULL DEFAULT '{}' | |
@@ -864,7 +864,7 @@ export interface RegistryAdapter {
   readonly registrarId: string;                 // 自レジストラ ID（X-Registrar-Id）。スポンサー判定に使う
   readonly specVersion: string;                 // Swagger のバージョン or 取得日
   check(names: string[]): Promise<CheckResult[]>;
-  info(name: string): Promise<DomainInfo>;      // DomainInfo.sponsoringRegistrarId（clID）を含む
+  info(name: string): Promise<DomainInfo>;      // DomainInfo.sponsoringRegistrarId（clID）。当面 null（下記）
   create(input: CreateInput): Promise<DomainInfo>;
   renew(name: string, input: RenewInput): Promise<DomainInfo>;
   update(name: string, input: UpdateInput): Promise<DomainInfo>;
@@ -881,7 +881,14 @@ export interface RegistryAdapter {
 }
 ```
 
-- `TransferResult` は `{ name, status: 'pending' | 'approved' | 'rejected' | 'cancelled', registryStatus?, requestingRegistrarId?, actingRegistrarId?, requestedAt?, actByAt?, newExpiresAt?, raw }`。`PollMessage` は `{ id, count, queuedAt, type: 'transfer_request' | 'transfer_approved' | 'transfer_rejected' | 'transfer_cancelled' | 'unknown', domainName?, transfer?: TransferResult, raw }`。いずれも実際のレスポンス形状は Swagger 確認後に確定する【要確認: §21.2 #13】。
+- `DomainInfo.sponsoringRegistrarId`（clID = 現スポンサーレジストラ）は**両レジストリの OpenAPI の `info` 応答に相当フィールドが無い**ため当面 null で固定する。型だけ先に用意し、実測で判明したら §11.5 の手順でアダプタのマッピングだけを追加する（`packages/shared` は変えない）【要確認: §21.2 #12】。
+- `TransferResult` は `{ name, status: 'pending' | 'approved' | 'rejected' | 'cancelled' | 'none', registryStatus?, requestingRegistrarId?, actingRegistrarId?, requestedAt?, actByAt?, newExpiresAt?, raw }`。`PollMessage` は `{ id, count, queuedAt, type: 'transfer_request' | 'transfer_approved' | 'transfer_rejected' | 'transfer_cancelled' | 'unknown', domainName?, transfer?: TransferResult, raw }`。正は `packages/shared/src/registry.ts`。設計判断は ADR-0002。
+  - `status` の `'none'` は `transferQuery` が「移管中でない」を返すための値。transfer query の専用エンドポイントが無く `info` の `pendingTransfer` から導出するため必要になる。`transfers.status`（§9.1）には保存しない（正規化型が DB の値域の上位集合）。
+  - `registrarId` 系は申請側 / 対応側という視点非依存の語彙にする（レジストリの `gainingRegistrar` / `losingRegistrar` は申請時点の役割語で、承認 / 拒否 / 取消の応答や Poll 通知では `direction` と一対一にならない）。
+  - `requestedAt` ← `reDate` / `actByAt` ← `acDate` は kitaqnic のみ返す（`reDate` 必須・`acDate` 任意）。kitaqsign は両方持たないため optional。新有効期限に相当する `exDate` は両レジストリの transfer 応答に無く、`newExpiresAt` は当面常に undefined（埋めるには移管後の `info` 追い読みが要る）。
+  - `raw` はレジストリの生エンベロープ。`transfers.raw`（§9.1）への保存・障害調査・契約テストの fixture 化に使う。レジストリの生の出力は画面に流さない方針（FR-18 / NFR-03）に合わせ、API は `raw` を除いた DTO を返す。
+  - エンベロープの形は両 OpenAPI の `DomainTransferResponse` / `PollMessageDto`（`{ id: int64, msgType, payload, qdate }`。両レジストリ同一）で確定済み。未確定なのは `msgType` に入る値と `payload` の中身で、`PollMessage.type` の 5 値は正規化側の語彙（レジストリの生 `msgType` とは別物。未知は `'unknown'` に倒す）【要確認: §21.2 #13】。
+  - `PollMessage.id` はレジストリが int64 で返すが `string` に正規化する（`transfers.registry_message_id`（§9.1）が text の一意キーで、JS の number では桁が落ちうるため）。ack 時に数値へ戻す責務はアダプタ側に置く。
 - 入出力型（`CheckResult` / `DomainInfo` / ...）は `packages/shared` の正規化型。レジストリ固有のフィールド名・日付形式・エラーコードはアダプタ内で変換する。
 - 各アダプタは `fetch` ベースの薄い HTTP クライアント + zod によるレスポンス検証（`.passthrough()` で未知フィールドは許容、必須フィールド欠落は `REGISTRY_SPEC_MISMATCH`）。
 - タイムアウト: 参照系 5 秒、更新系 15 秒（`AbortSignal.timeout`）。
@@ -1291,7 +1298,7 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | 10 | 役割分担 | チーム | 8/25 |
 | 11 | レジストラ ID はチームごとに別か。テスト用の第 2 レジストラ資格情報を発行してもらえるか（無い場合は他チームとの日程調整が必須） | 運営 | 8/26 午前 |
 | 12 | 非スポンサーからの `info` / `transferQuery` の応答（2201 で拒否か、限定情報か。`clID` を含むか）。移管 OUT 完了の検知方法がこれに依存する | Swagger / 実測 | 8/26 |
-| 13 | Poll 通知の種別と JSON 形状（transfer request / approve / reject / 自動承認）。gaining 側にも通知が積まれるか。`transferQuery` 応答の trStatus / acDate / exDate の有無 | Swagger / 実測 | 8/26 |
+| 13 | Poll 通知の `msgType` に入る値と `payload` の中身（transfer request / approve / reject / 自動承認）。gaining 側にも通知が積まれるか。移管応答の `status` の値域（両 OpenAPI に enum も例も無い）。※形（`PollMessageDto` / `DomainTransferResponse`）は OpenAPI で確定済み（§11.1） | Swagger / 実測 | 8/26 |
 | 14 | 移管時のコンタクトの扱い（相手レジストラ発行のコンタクト ID を参照したまま `update` できるか、自コンタクトへの差し替えが必須か、非スポンサーの `contact info` は可か） | Swagger / 実測 | 8/26 |
 | 15 | 自レジストラがスポンサーのドメインに同じレジストラ ID から `transfer request` を送ったときの応答（result code） | 実測 | 8/26 |
 | 16 | 移管系で実際に返る result code（2202 / 2106 / 2300 / 2301 / 2304 …）と、`transfer request` に `period` を渡せるか・完了時に exDate が延びるか | Swagger / 実測 | 8/26 |
@@ -1363,3 +1370,4 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | v0.1.9 | 2026-08-26 | FR-15（PR #139）の設計判断を追記: §9.1 `operation_logs.user_id` の FK を `ON DELETE SET NULL`（退会後も通信ログを恒久保存）、`request_id` = `<x-request-id>-<連番>` の形式、§11.1 のログ発行点を `packages/registry` の HTTP クライアント層（1 HTTP 呼び出し = 1 レコード、`onCall` フック）に変更しマスク・保存は `apps/api` の observer が担当、`mock` は公開メソッド 1 回 = 1 レコードで補助コマンド行・svTRID を持たない例外を明記 |
 | v0.1.10 | 2026-08-26 | §16.2: `deploy.yml` に `migrate` ジョブ（`pnpm --filter @dopamin/db migrate`）を追加し、**migrate → api → web** の 3 ジョブ構成に変更。マイグレーション適用の【要確認】を解消し、drizzle の適用判定（`drizzle.__drizzle_migrations` の最新 `created_at` より新しい journal エントリのみ）と手動適用を避ける運用を明記。§16.3 / §17: `DIRECT_DATABASE_URL` を Supavisor session mode（5432）に変更（直結ホストは IPv6 のみで GitHub Actions から到達できないため）。INFRA-01 |
 | v0.1.11 | 2026-08-26 | §16.2: Vercel Hobby の「commit author = チーム所有者」制約で他メンバー author のデプロイが `BLOCKED` になり固着する問題への対策として、`deploy.yml` の `api` / `web` ジョブでチェックアウト上の author を所有者に書き換えてから deploy する運用（`--meta originalSha` で元 SHA を保持、`timeout-minutes: 10`）を明記 |
+| v0.1.12 | 2026-08-26 | §11.1: 正規化型を実装に合わせて確定。`TransferResult.status` に `'none'`（`transferQuery` の「移管中でない」）を追加し、`registrarId` 語彙・`reDate` / `acDate` のレジストリ差・`raw` の扱いを明記。`DomainInfo.sponsoringRegistrarId` は両 OpenAPI に clID が無いため当面 null（§6.5 / §9.1 に追随）。`PollMessage` の未確定点を `msgType` / `payload` に限定（§21.2 #13）。判断は ADR-0002 |

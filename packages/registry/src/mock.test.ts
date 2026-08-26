@@ -1,3 +1,4 @@
+import { TRANSFER_AUTO_APPROVE_MS } from "@dopamin/shared";
 import { describe, expect, it } from "vitest";
 import { RegistryError } from "./errors";
 import { MockRegistryAdapter } from "./mock";
@@ -151,11 +152,46 @@ describe("MockRegistryAdapter: ライフサイクル", () => {
 
     const authCode = await mock.authCode(name); // rotate されるため取得値を使う
     const result = await mock.transferRequest(name, authCode);
-    expect(result.status).toBe("pending");
+    expect(result).toMatchObject({
+      status: "pending",
+      registryStatus: "pending",
+      requestingRegistrarId: "MOCK-GAINING",
+      actingRegistrarId: "MOCK-LOSING",
+    });
+    // 自動承認の期限は申請から 20 分後（FR-12 / TRANSFER_AUTO_APPROVE_MS）
+    expect(
+      new Date(String(result.actByAt)).getTime() -
+        new Date(String(result.requestedAt)).getTime(),
+    ).toBe(TRANSFER_AUTO_APPROVE_MS);
+    // raw は JSON 化できる状態スナップショット（ADR-0002）
+    expect(JSON.parse(JSON.stringify(result.raw))).toMatchObject({
+      source: "mock",
+      command: "transfer_request",
+      domain: name,
+      pendingTransfer: true,
+    });
 
     const info = await mock.info(name);
     expect(info.statuses).toContain("pendingTransfer");
     expect((await mock.transferQuery(name)).status).toBe("pending");
+  });
+
+  it("transfer: 移管中でなければ status none でレジストラ ID は返さない", async () => {
+    const mock = new MockRegistryAdapter();
+    const name = "idle-transfer.xyz";
+    await mock.create({ name, periodYears: 1, authInfo: "initial-auth" });
+
+    const queried = await mock.transferQuery(name);
+    expect(queried.status).toBe("none");
+    expect(queried.requestingRegistrarId).toBeUndefined();
+    expect(queried.actingRegistrarId).toBeUndefined();
+    expect(queried.registryStatus).toBeUndefined();
+  });
+
+  it("info の sponsoringRegistrarId は実レジストリに合わせて null（§21.2 #12）", async () => {
+    const mock = new MockRegistryAdapter();
+    await mock.create({ name: "clid.xyz", periodYears: 1, authInfo: "a" });
+    expect((await mock.info("clid.xyz")).sponsoringRegistrarId).toBeNull();
   });
 });
 

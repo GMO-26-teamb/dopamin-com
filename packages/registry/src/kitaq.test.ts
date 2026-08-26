@@ -144,6 +144,8 @@ describe("info（fixture → DomainInfo への正規化）", () => {
       updatedAt: null,
       expiresAt: "2027-05-05T10:00:00Z",
       lastTransferAt: null,
+      // 両レジストリの info 応答に clID 相当が無いため常に null（§21.2 #12 / ADR-0002）
+      sponsoringRegistrarId: null,
       rgpStatuses: ["addPeriod"],
     });
   });
@@ -308,6 +310,108 @@ describe("update（ensureHosts と resData 形状差の吸収）", () => {
       addNameservers: ["ns9.example.net"],
     });
     expect(domain.name).toBe("example.com");
+  });
+});
+
+describe("transfer（fixture → TransferResult への正規化。ADR-0002）", () => {
+  it("kitaqnic は reDate / acDate を requestedAt / actByAt にマップする", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(loadFixture("transfer-request.kitaqnic.json"), 202),
+    );
+    const result = await createKitaqAdapter({
+      ...CONFIG,
+      id: "kitaqnic",
+    }).transferRequest("example.xyz", "s3cr3t-pass");
+
+    expect(requestAt(0)).toMatchObject({
+      method: "POST",
+      path: "/api/v1/epp/domains/example.xyz/transfer/request",
+      body: { op: "request", authInfo: "s3cr3t-pass" },
+    });
+    expect(result).toMatchObject({
+      name: "example.xyz",
+      status: "pending",
+      requestingRegistrarId: "REG-DOPAMIN",
+      actingRegistrarId: "REG-OTHER",
+      requestedAt: "2026-08-26T10:00:00Z",
+      actByAt: "2026-08-26T10:20:00Z",
+    });
+    // 生の status は必ず残す（値域が未確定なため。§21.2 #13）
+    expect(result.registryStatus).toBe("pending");
+    // raw にはエンベロープごと入れる（障害調査で svTRID を突合できるように）
+    expect(result.raw).toMatchObject({
+      result: { code: 1001 },
+      trID: { svTRID: "KQNIC-20260825-000004" },
+    });
+  });
+
+  it("kitaqsign は reDate / acDate を返さないので requestedAt / actByAt は undefined", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(loadFixture("transfer-request.kitaqsign.json"), 202),
+    );
+    const result = await createKitaqAdapter(CONFIG).transferRequest(
+      "example.com",
+      "pass",
+    );
+
+    expect(result.requestedAt).toBeUndefined();
+    expect(result.actByAt).toBeUndefined();
+    // exDate は両レジストリの transfer 応答に無いため常に undefined
+    expect(result.newExpiresAt).toBeUndefined();
+  });
+
+  it.each([
+    ["clientApproved", "approved"],
+    ["serverApproved", "approved"],
+    ["clientRejected", "rejected"],
+    ["clientCancelled", "cancelled"],
+    ["pending", "pending"],
+    ["まったく未知の値", "pending"],
+  ])("生ステータス %s は %s に正規化される", async (raw, expected) => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        envelope({
+          domain: "example.com",
+          status: raw,
+          gainingRegistrar: "REG-DOPAMIN",
+          losingRegistrar: "REG-OTHER",
+        }),
+        202,
+      ),
+    );
+    const result = await createKitaqAdapter(CONFIG).transferRequest(
+      "example.com",
+      "pass",
+    );
+    expect(result.status).toBe(expected);
+    expect(result.registryStatus).toBe(raw);
+  });
+
+  it("transferQuery は info の pendingTransfer から状態を導出する", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse(loadFixture("domain-info.pending-transfer.json")),
+      )
+      .mockResolvedValueOnce(jsonResponse(loadFixture("domain-info.json")));
+    const adapter = createKitaqAdapter(CONFIG);
+
+    const pending = await adapter.transferQuery("example.com");
+    expect(requestAt(0)).toMatchObject({
+      method: "GET",
+      path: "/api/v1/epp/domains/example.com",
+    });
+    expect(pending.status).toBe("pending");
+    // 導出元は info なので raw も info のエンベロープになる
+    expect(pending.raw).toMatchObject({
+      trID: { svTRID: "KQSGN-20260825-000005" },
+    });
+
+    const idle = await adapter.transferQuery("example.com");
+    expect(idle.status).toBe("none");
+    // info からはレジストラ ID も申請日時も取れない
+    expect(idle.requestingRegistrarId).toBeUndefined();
+    expect(idle.actingRegistrarId).toBeUndefined();
+    expect(idle.requestedAt).toBeUndefined();
   });
 });
 

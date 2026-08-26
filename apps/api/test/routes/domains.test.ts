@@ -113,6 +113,7 @@ async function seedDomain(
       updatedAt: null,
       expiresAt: "2027-08-01T00:00:00.000Z",
       lastTransferAt: null,
+      sponsoringRegistrarId: null,
       rgpStatuses: [],
     },
     syncedAt: new Date("2026-08-20T00:00:00.000Z"),

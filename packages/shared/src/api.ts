@@ -6,7 +6,12 @@ import {
   tldSchema,
 } from "./domain-name";
 import { errorCodeSchema } from "./errors";
-import { clientStatusSchema, registryIdSchema } from "./registry";
+import {
+  clientStatusSchema,
+  registryIdSchema,
+  type TransferResult,
+  transferStatusSchema,
+} from "./registry";
 
 /**
  * 統一エラー（docs/requirements.md §10.3）の定義は `./errors.ts` が正（issue #30）。
@@ -89,6 +94,39 @@ export const transferCreateRequestSchema = z.object({
   authCode: z.string().min(1).max(64),
 });
 export type TransferCreateRequest = z.infer<typeof transferCreateRequestSchema>;
+
+/**
+ * `POST /transfers` / `GET /transfers/:name` が返す移管情報（FR-12）。
+ *
+ * 正規化型 {@link TransferResult} から `raw`（レジストリの生応答）を除いたもの。
+ * レジストリの生の出力は画面に流さない方針（FR-18 / NFR-03）に合わせ、API 境界で剥がす
+ * （ADR-0002）。web もこのスキーマで応答を検証する（形の二重定義を作らない）。
+ */
+export const transferResponseSchema = z.object({
+  name: z.string(),
+  status: transferStatusSchema,
+  registryStatus: z.string().optional(),
+  requestingRegistrarId: z.string().optional(),
+  actingRegistrarId: z.string().optional(),
+  requestedAt: z.string().optional(),
+  actByAt: z.string().optional(),
+  newExpiresAt: z.string().optional(),
+});
+export type TransferResponse = z.infer<typeof transferResponseSchema>;
+
+/** 正規化結果 → API 応答。`raw` を落とすだけの純関数（分割代入せず明示的に組み立てる）。 */
+export function toTransferResponse(result: TransferResult): TransferResponse {
+  return {
+    name: result.name,
+    status: result.status,
+    registryStatus: result.registryStatus,
+    requestingRegistrarId: result.requestingRegistrarId,
+    actingRegistrarId: result.actingRegistrarId,
+    requestedAt: result.requestedAt,
+    actByAt: result.actByAt,
+    newExpiresAt: result.newExpiresAt,
+  };
+}
 
 /**
  * §9.1 の所有権。`transferred_out`（移管 OUT 完了）は表示のみで全操作不可（AC-12-5）。
