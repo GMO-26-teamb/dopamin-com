@@ -169,16 +169,8 @@ describe("info（fixture → DomainInfo への正規化）", () => {
 describe("create（コンタクト作成 → create → info のオーケストレーション）", () => {
   it("ダミー PII でコンタクトを作成し、その ID を registrant に指定して登録する", async () => {
     fetchMock
-      .mockResolvedValueOnce(jsonResponse(envelope())) // contact:create
-      .mockResolvedValueOnce(
-        jsonResponse(
-          envelope({
-            domain: "example.com",
-            crDate: "2026-08-25T00:00:00Z",
-            exDate: "2027-08-25T00:00:00Z",
-          }),
-        ),
-      ) // create
+      .mockResolvedValueOnce(jsonResponse(loadFixture("contact-create.json"))) // contact:create
+      .mockResolvedValueOnce(jsonResponse(loadFixture("create.json"))) // create
       .mockResolvedValueOnce(jsonResponse(loadFixture("domain-info.json"))); // info
 
     const domain = await createKitaqAdapter(CONFIG).create({
@@ -218,11 +210,7 @@ describe("create（コンタクト作成 → create → info のオーケスト�
 describe("renew（curExpDate の日付変換）", () => {
   it("currentExpiresAt を YYYY-MM-DD に丸めて送る", async () => {
     fetchMock
-      .mockResolvedValueOnce(
-        jsonResponse(
-          envelope({ domain: "example.com", exDate: "2028-05-05T10:00:00Z" }),
-        ),
-      ) // renew
+      .mockResolvedValueOnce(jsonResponse(loadFixture("renew.json"))) // renew
       .mockResolvedValueOnce(jsonResponse(loadFixture("domain-info.json"))); // info
 
     await createKitaqAdapter(CONFIG).renew("example.com", {
@@ -243,7 +231,7 @@ describe("update（ensureHosts と resData 形状差の吸収）", () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(loadFixture("error-2303.json"), 404)) // host:info
       .mockResolvedValueOnce(jsonResponse(envelope())) // host:create
-      .mockResolvedValueOnce(jsonResponse(envelope())) // update（kitaqnic 形: resData 空）
+      .mockResolvedValueOnce(jsonResponse(loadFixture("update.kitaqnic.json"))) // update（kitaqnic 形: resData 空）
       .mockResolvedValueOnce(jsonResponse(loadFixture("domain-info.json"))); // info fallback
 
     const domain = await createKitaqAdapter(CONFIG).update("example.com", {
@@ -273,12 +261,11 @@ describe("update（ensureHosts と resData 形状差の吸収）", () => {
   });
 
   it("既存ホストは作成をスキップし、DomainResponse 形の resData はそのまま使う", async () => {
-    const infoFixture = loadFixture("domain-info.json") as {
-      resData: unknown;
-    };
     fetchMock
       .mockResolvedValueOnce(jsonResponse(envelope())) // host:info（存在する）
-      .mockResolvedValueOnce(jsonResponse(envelope(infoFixture.resData))); // update（kitaqsign 形）
+      .mockResolvedValueOnce(
+        jsonResponse(loadFixture("update.kitaqsign.json")),
+      ); // update（kitaqsign 形）
 
     const domain = await createKitaqAdapter(CONFIG).update("example.com", {
       addNameservers: ["ns1.example.com"],
@@ -287,24 +274,17 @@ describe("update（ensureHosts と resData 形状差の吸収）", () => {
     // 追加の info 呼び出しをせず 2 リクエストで完結する
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(domain.name).toBe("example.com");
+    // kitaqsign 形は update の応答をそのまま正規化する（upDate が入っている）
+    expect(domain.updatedAt).toBe("2026-08-25T12:00:00Z");
   });
 
   it("host:create の 2302（並行作成による既存）は無視して続行する", async () => {
-    const infoFixture = loadFixture("domain-info.json") as {
-      resData: unknown;
-    };
     fetchMock
       .mockResolvedValueOnce(jsonResponse(loadFixture("error-2303.json"), 404)) // host:info
+      .mockResolvedValueOnce(jsonResponse(loadFixture("error-2302.json"), 409)) // host:create → CONFLICT
       .mockResolvedValueOnce(
-        jsonResponse(
-          {
-            result: { code: 2302, message: "Object exists" },
-            trID: { svTRID: "KQSGN-TEST-2" },
-          },
-          409,
-        ),
-      ) // host:create → CONFLICT
-      .mockResolvedValueOnce(jsonResponse(envelope(infoFixture.resData))); // update
+        jsonResponse(loadFixture("update.kitaqsign.json")),
+      ); // update
 
     const domain = await createKitaqAdapter(CONFIG).update("example.com", {
       addNameservers: ["ns9.example.net"],
@@ -476,6 +456,39 @@ describe("transfer approve / reject / cancel（§11.1 / FR-12 AC-12-4）", () =>
     },
   );
 
+  it("fixture の approve 応答（clientApproved）を approved に正規化する", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(loadFixture("transfer-approve.json")),
+    );
+    const result =
+      await createKitaqAdapter(CONFIG).transferApprove("example.com");
+    expect(result).toMatchObject({
+      name: "example.com",
+      status: "approved",
+      // 生値は必ず残す（値域が未確定なため。§21.2 #13）
+      registryStatus: "clientApproved",
+      requestingRegistrarId: "REG-OTHER",
+      actingRegistrarId: "REG-DOPAMIN",
+    });
+  });
+
+  it("移管申請が無いときの 2304 は fixture 経由でも OPERATION_NOT_ALLOWED", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(loadFixture("error-2304.json"), 409),
+    );
+    const err = await createKitaqAdapter(CONFIG)
+      .transferApprove("example.com")
+      .then(
+        () => null,
+        (e: unknown) => e,
+      );
+    expect(err).toMatchObject({
+      code: "OPERATION_NOT_ALLOWED",
+      registryCode: 2304,
+      command: "transfer_approve",
+    });
+  });
+
   it("approve 応答が pending を返したら pending のまま扱う", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(transferEnvelope("pending")));
     const result =
@@ -557,7 +570,93 @@ describe("transfer approve / reject / cancel（§11.1 / FR-12 AC-12-4）", () =>
   });
 });
 
+describe("delete / restore（fixture → 正規化。FR-10 / FR-11）", () => {
+  it("delete は DELETE /domains/{name} を呼び、resData 空でも name を返す", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(loadFixture("delete.json")));
+
+    const result = await createKitaqAdapter(CONFIG).delete("example.com");
+
+    expect(requestAt(0)).toMatchObject({
+      method: "DELETE",
+      path: "/api/v1/epp/domains/example.com",
+    });
+    // 応答は Unit（空）なので、返す名前は要求した名前から決まる
+    expect(result).toEqual({ name: "example.com" });
+  });
+
+  it("restore は POST /domains/{name}/restore の後 info で状態を取り直す", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(loadFixture("restore.json"))) // restore（Unit）
+      .mockResolvedValueOnce(jsonResponse(loadFixture("domain-info.json"))); // info
+
+    const domain = await createKitaqAdapter(CONFIG).restore("example.com");
+
+    expect(requestAt(0)).toMatchObject({
+      method: "POST",
+      path: "/api/v1/epp/domains/example.com/restore",
+    });
+    expect(requestAt(1)).toMatchObject({
+      method: "GET",
+      path: "/api/v1/epp/domains/example.com",
+    });
+    expect(domain.name).toBe("example.com");
+  });
+
+  it("削除ロック中の 2304 は OPERATION_NOT_ALLOWED に変換される（AC-10-2）", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(loadFixture("error-2304.json"), 409),
+    );
+    const err = await createKitaqAdapter(CONFIG)
+      .delete("example.com")
+      .then(
+        () => null,
+        (e: unknown) => e,
+      );
+    expect(err).toBeInstanceOf(RegistryError);
+    expect(err).toMatchObject({
+      code: "OPERATION_NOT_ALLOWED",
+      registryCode: 2304,
+      command: "delete",
+    });
+  });
+});
+
+describe("EPP result code → 正規化エラー（§10.3。fixture を本番経路に通す）", () => {
+  it.each([
+    ["error-2202.json", 422, "REGISTRY_REJECTED", 2202],
+    ["error-2302.json", 409, "CONFLICT", 2302],
+    ["error-2303.json", 404, "NOT_FOUND", 2303],
+    ["error-2304.json", 409, "OPERATION_NOT_ALLOWED", 2304],
+    ["error-2306.json", 422, "REGISTRY_REJECTED", 2306],
+  ])("%s は %i / %s に写す", async (fixture, status, code, registryCode) => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(loadFixture(String(fixture)), Number(status)),
+    );
+    const err = await createKitaqAdapter(CONFIG)
+      .info("example.com")
+      .then(
+        () => null,
+        (e: unknown) => e,
+      );
+    expect(err).toMatchObject({ code, registryCode, command: "info" });
+    // FR-18: レジストリの生の理由は reason に残し、message には混ぜない
+    expect((err as RegistryError).reason).toBeTruthy();
+  });
+});
+
 describe("authCode（rotate-auth-info）", () => {
+  it("fixture の authInfo を読み取る", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(loadFixture("rotate-auth-info.json")),
+    );
+    const code = await createKitaqAdapter(CONFIG).authCode("example.com");
+    expect(code).toBe("rotated-s3cr3t-value");
+    expect(requestAt(0)).toMatchObject({
+      method: "POST",
+      path: "/api/v1/epp/domains/example.com/rotate-auth-info",
+    });
+  });
+
   it("resData の authInfo キーを大文字小文字を無視して読み取る", async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse(envelope({ AuthInfo: "rotated-code" })),

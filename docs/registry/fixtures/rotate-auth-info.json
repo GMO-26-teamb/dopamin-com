@@ -1,0 +1,5 @@
+{
+  "result": { "code": 1000, "message": "Command completed successfully" },
+  "resData": { "authInfo": "rotated-s3cr3t-value" },
+  "trID": { "clTRID": "dp-fixture-0017", "svTRID": "KQSGN-20260825-000017" }
+}

@@ -7,6 +7,35 @@
 - レジストリの仕様変更通知を受けたら、新しい実レスポンスで fixture を更新し、
   契約テストをグリーンにしてから該当アダプタを修正する（requirements.md §11.5）。
 
+## 一覧
+
+| fixture | 対象コマンド | 備考 |
+|---|---|---|
+| `hello.kitaqsign.json` / `hello.kitaqnic.json` | `hello` | resData の形がレジストリで違う（`tlds` / `info.supportedTlds`） |
+| `check.json` | `check` | `results[].avail` / `reason` |
+| `domain-info.json` | `info` | `DomainResponse`。正規化 `DomainInfo` の基準 |
+| `domain-info.pending-transfer.json` | `info` / `transferQuery` | `status` に `pendingTransfer`。移管中の導出に使う |
+| `create.json` | `create` | `DomainCreateResponse`（domain / crDate / exDate） |
+| `contact-create.json` | `contact_create` | `Unit`（空）。`create` の前段 |
+| `renew.json` | `renew` | `DomainRenewResponse`（domain / exDate） |
+| `update.kitaqsign.json` | `update` | kitaqsign は `DomainResponse` を返す（info を追い読みしない） |
+| `update.kitaqnic.json` | `update` | kitaqnic は `Unit`（空）。アダプタは info で取り直す |
+| `delete.json` | `delete` | `Unit`（空）。返す名前は要求から決まる |
+| `restore.json` | `restore` | `Unit`（空）。状態は info で取り直す |
+| `rotate-auth-info.json` | `auth_info` | `MapStringString`（`authInfo` キー） |
+| `transfer-request.kitaqsign.json` / `.kitaqnic.json` | `transfer_request` | kitaqnic だけが `reDate` / `acDate` を返す |
+| `transfer-approve.json` | `transfer_approve` | `status: clientApproved` → `approved` に正規化 |
+| `poll.kitaqsign.json` / `poll.kitaqnic.json` / `poll-empty.json` | `poll` | `msgType` の揺れ 2 パターンと未読なし |
+| `error-2202.json` | 移管系 | AuthCode 不一致 → `REGISTRY_REJECTED`（AC-12-2） |
+| `error-2302.json` | `create` / `host_create` | 既存 → `CONFLICT` |
+| `error-2303.json` | `info` / `host_info` | 不在 → `NOT_FOUND` |
+| `error-2304.json` | 更新系・移管系 | ステータスによる拒否 → `OPERATION_NOT_ALLOWED` |
+| `error-2306.json` | `renew` 等 | パラメータ方針違反 → `REGISTRY_REJECTED` |
+
+`Unit`（空 resData）を返すコマンドは、fixture 単体では「何が起きたか」を表現できない。
+契約テストはそこを見るのではなく、**アダプタが後続で `info` を呼んで状態を取り直すこと**を
+確かめる（`delete` / `restore` / kitaqnic の `update`）。
+
 ## 暫定値を含む fixture
 
 `transfer-request.*.json` の `resData.status` は暫定値。両レジストリの OpenAPI で

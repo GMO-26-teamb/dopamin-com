@@ -1,0 +1,9 @@
+{
+  "result": { "code": 1000, "message": "Command completed successfully" },
+  "resData": {
+    "domain": "example.com",
+    "crDate": "2026-08-25T00:00:00Z",
+    "exDate": "2027-08-25T00:00:00Z"
+  },
+  "trID": { "clTRID": "dp-fixture-0010", "svTRID": "KQSGN-20260825-000010" }
+}

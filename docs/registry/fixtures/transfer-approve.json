@@ -1,0 +1,10 @@
+{
+  "result": { "code": 1000, "message": "Command completed successfully" },
+  "resData": {
+    "domain": "example.com",
+    "status": "clientApproved",
+    "gainingRegistrar": "REG-OTHER",
+    "losingRegistrar": "REG-DOPAMIN"
+  },
+  "trID": { "clTRID": "dp-fixture-0016", "svTRID": "KQSGN-20260825-000016" }
+}
