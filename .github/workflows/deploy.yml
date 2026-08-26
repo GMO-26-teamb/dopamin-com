@@ -4,7 +4,8 @@ name: Deploy
 # Git 連携は使わず Vercel CLI でデプロイする（組織リポジトリ + Hobby プランの制約）。
 # Hobby は commit author = チーム所有者のデプロイしか受け付けないため、api / web ジョブでは
 # チェックアウト上で author を所有者に書き換えてから deploy する（§16.2）。
-# migrate → API → Web の順で実行する（Web の rewrites はビルド時に API_ORIGIN を読む）。
+# API → Web の順で実行する（Web の rewrites はビルド時に API_ORIGIN を読む）。
+# DB マイグレーションはこのワークフローでは行わない。ローカルから手で当てる（§16.2）。
 on:
   push:
     branches: [main]
@@ -25,63 +26,8 @@ env:
   VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
 
 jobs:
-  # DB マイグレーション（docs/requirements.md §16.2）。失敗したらデプロイしない。
-  # drizzle は drizzle.__drizzle_migrations の最新 created_at より新しい journal エントリだけを
-  # 1 トランザクションで適用する。差分が無い push では何もせずに終わる（冪等）。
-  migrate:
-    name: Migrate DB
-    runs-on: ubuntu-latest
-    environment: production
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - name: Apply Drizzle migrations
-        env:
-          # Supavisor session mode（5432）。直結の db.<ref>.supabase.co は IPv6 のみで
-          # Actions ランナーから届かないため、pooler のホストを使う（docs/requirements.md §16.3）
-          DIRECT_DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
-        run: |
-          if [ -z "$DIRECT_DATABASE_URL" ]; then
-            echo "::error title=DIRECT_DATABASE_URL 未設定::production environment の Secrets に DIRECT_DATABASE_URL（Supavisor session mode, 5432）を登録してください（README / docs/requirements.md §17）"
-            exit 1
-          fi
-
-          # drizzle-kit は接続失敗の理由を出さずに exit 1 するため、先に接続先を検査して
-          # 原因の分かるエラーを出す。パスワードは表示しない（ホストとポートのみ）。
-          # 認証情報は最後の @ までを落とす（パスワードに @ が含まれていても取り違えない）
-          hostport=$(printf '%s' "$DIRECT_DATABASE_URL" | sed -E 's#^[a-z+]+://.*@##; s#[/?].*$##')
-          host=${hostport%%:*}
-          port=${hostport##*:}
-          [ "$port" = "$host" ] && port=5432
-          echo "接続先: $host:$port"
-
-          case "$host" in
-            db.*.supabase.co)
-              echo "::error title=DIRECT_DATABASE_URL が直結ホスト::$host は IPv6 のみで公開されており、IPv4 のみの GitHub Actions ランナーからは到達できません。Supavisor session mode（postgresql://postgres.<project-ref>:<password>@aws-<n>-<region>.pooler.supabase.com:5432/postgres）に差し替えてください（docs/requirements.md §16.3）"
-              exit 1
-              ;;
-          esac
-
-          if ! getent hosts "$host" >/dev/null; then
-            echo "::error title=DB ホストを解決できない::$host の名前解決に失敗しました。DIRECT_DATABASE_URL のホスト名を確認してください"
-            exit 1
-          fi
-          if ! timeout 10 bash -c "cat < /dev/null > /dev/tcp/$host/$port" 2>/dev/null; then
-            echo "::error title=DB に接続できない::$host:$port へ TCP 接続できません（IPv6 専用ホスト・ファイアウォール・ポート番号の誤りが典型）。docs/requirements.md §16.3 を参照してください"
-            exit 1
-          fi
-
-          pnpm --filter @dopamin/db migrate
-
   api:
     name: Deploy API
-    needs: migrate
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 10
