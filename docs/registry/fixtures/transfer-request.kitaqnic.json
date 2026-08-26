@@ -1,0 +1,15 @@
+{
+  "result": {
+    "code": 1001,
+    "message": "Command completed successfully; action pending"
+  },
+  "resData": {
+    "domain": "example.xyz",
+    "status": "pending",
+    "gainingRegistrar": "REG-DOPAMIN",
+    "losingRegistrar": "REG-OTHER",
+    "reDate": "2026-08-26T10:00:00Z",
+    "acDate": "2026-08-26T10:20:00Z"
+  },
+  "trID": { "clTRID": "dp-fixture-0006", "svTRID": "KQNIC-20260825-000004" }
+}

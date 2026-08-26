@@ -46,6 +46,9 @@ export const storedInfoSchema = z.object({
   updatedAt: z.string().nullable(),
   expiresAt: z.string().nullable(),
   lastTransferAt: z.string().nullable(),
+  // 既存行の raw_info にはこのキーが無い（#26 以前に書かれた行）。必須にすると全行が
+  // parse に失敗して fallbackInfo に落ち、registrant / contacts が静かに消えるため既定 null。
+  sponsoringRegistrarId: z.string().nullable().default(null),
   rgpStatuses: z.array(z.string()),
 });
 
@@ -65,6 +68,8 @@ export function fallbackInfo(row: DomainRow): DomainInfo {
     updatedAt: null,
     expiresAt: row.expiresAt?.toISOString() ?? null,
     lastTransferAt: row.lastTransferAt?.toISOString() ?? null,
+    // domains に sponsoring_registrar_id 列がまだ無い（列追加は #33）。
+    sponsoringRegistrarId: null,
     rgpStatuses: row.rgpStatus ? [row.rgpStatus] : [],
   };
 }

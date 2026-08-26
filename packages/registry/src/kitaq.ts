@@ -8,10 +8,12 @@ import {
   type HelloResult,
   type RenewInput,
   type TransferResult,
+  type TransferStatus,
   type UpdateInput,
 } from "@dopamin/shared";
 import { z } from "zod";
 import type { RegistryAdapter } from "./adapter";
+import type { EppEnvelope } from "./envelope";
 import { RegistryError } from "./errors";
 import { type KitaqAdapterConfig, KitaqHttpClient } from "./http";
 
@@ -56,11 +58,18 @@ const renewResDataSchema = z.looseObject({
   exDate: z.string(),
 });
 
+/**
+ * DomainTransferResponse。kitaqnic だけが `reDate`（必須）/ `acDate`（任意）を返し、
+ * kitaqsign はどちらも持たない（両 openapi.json で確認）。共通実装 1 本で両方を受けるため
+ * nullish にする。新有効期限に相当する `exDate` はどちらの応答にも無い。
+ */
 const transferResDataSchema = z.looseObject({
   domain: z.string(),
   status: z.string(),
   gainingRegistrar: z.string().nullish(),
   losingRegistrar: z.string().nullish(),
+  reDate: z.string().nullish(),
+  acDate: z.string().nullish(),
 });
 
 /**
@@ -102,8 +111,34 @@ function toDomainInfo(
     updatedAt: resData.upDate ?? null,
     expiresAt: resData.exDate ?? null,
     lastTransferAt: resData.trDate ?? null,
+    // 両レジストリの info 応答に clID 相当のフィールドが無い【要確認: §21.2 #12】。
+    // 実測で判明したら domainResDataSchema に足してここでマップする（ADR-0002）。
+    sponsoringRegistrarId: null,
     rgpStatuses: resData.rgpStatus,
   };
+}
+
+/**
+ * レジストリの生の移管ステータス → 正規化ステータス。
+ *
+ * 両レジストリの OpenAPI は `status: string` としか書いておらず enum も例も無い
+ * 【要確認: §21.2 #13】ため、EPP（RFC 5731）の trStatus 語彙
+ * （pending / clientApproved / serverApproved / clientRejected / clientCancelled /
+ * serverCancelled）を前提に部分一致で寄せる。生値は registryStatus に必ず残す。
+ * 未知値は例外にせず pending に倒す（移管の受理応答を落とさないため）。
+ */
+function toTransferStatus(raw: string): TransferStatus {
+  const normalized = raw.toLowerCase();
+  if (normalized.includes("approve")) {
+    return "approved";
+  }
+  if (normalized.includes("reject")) {
+    return "rejected";
+  }
+  if (normalized.includes("cancel")) {
+    return "cancelled";
+  }
+  return "pending";
 }
 
 class KitaqRegistryAdapter implements RegistryAdapter {
@@ -188,8 +223,11 @@ class KitaqRegistryAdapter implements RegistryAdapter {
     }));
   }
 
-  async info(name: string): Promise<DomainInfo> {
-    const { resData } = await this.client.command({
+  /** `info` を生エンベロープ付きで取る（transferQuery が raw に載せるため）。 */
+  private async infoWithEnvelope(
+    name: string,
+  ): Promise<{ info: DomainInfo; envelope: EppEnvelope }> {
+    const { resData, envelope } = await this.client.command({
       method: "GET",
       path: `/domains/${encodeURIComponent(name)}`,
       kind: "read",
@@ -197,7 +235,12 @@ class KitaqRegistryAdapter implements RegistryAdapter {
       domainName: name,
       resDataSchema: domainResDataSchema,
     });
-    return toDomainInfo(this.id, resData);
+    return { info: toDomainInfo(this.id, resData), envelope };
+  }
+
+  async info(name: string): Promise<DomainInfo> {
+    const { info } = await this.infoWithEnvelope(name);
+    return info;
   }
 
   async create(input: CreateInput): Promise<DomainInfo> {
@@ -338,7 +381,7 @@ class KitaqRegistryAdapter implements RegistryAdapter {
     name: string,
     authCode: string,
   ): Promise<TransferResult> {
-    const { resData } = await this.client.command({
+    const { resData, envelope } = await this.client.command({
       method: "POST",
       path: `/domains/${encodeURIComponent(name)}/transfer/request`,
       body: { op: "request", authInfo: authCode },
@@ -347,22 +390,29 @@ class KitaqRegistryAdapter implements RegistryAdapter {
       domainName: name,
       resDataSchema: transferResDataSchema,
     });
+    // newExpiresAt は設定しない: transfer 応答に exDate が無く、埋めるには info の追い読みが要る。
     return {
       name: resData.domain.toLowerCase(),
-      status: resData.status,
-      gainingRegistrar: resData.gainingRegistrar ?? null,
-      losingRegistrar: resData.losingRegistrar ?? null,
+      status: toTransferStatus(resData.status),
+      registryStatus: resData.status,
+      requestingRegistrarId: resData.gainingRegistrar ?? undefined,
+      actingRegistrarId: resData.losingRegistrar ?? undefined,
+      requestedAt: resData.reDate ?? undefined,
+      actByAt: resData.acDate ?? undefined,
+      raw: envelope,
     };
   }
 
   async transferQuery(name: string): Promise<TransferResult> {
-    // transfer query の専用エンドポイントが無いため info のステータスから導出する
-    const info = await this.info(name);
+    // transfer query の専用エンドポイントが無いため info のステータスから導出する。
+    // 導出元なので raw には info のエンベロープが入る。レジストラ ID・申請日時は
+    // info からは取れないため undefined のまま（approved / rejected / cancelled の
+    // 区別も付かないので、状態遷移の把握は Poll が主になる。ADR-0002）。
+    const { info, envelope } = await this.infoWithEnvelope(name);
     return {
       name: info.name,
       status: info.statuses.includes("pendingTransfer") ? "pending" : "none",
-      gainingRegistrar: null,
-      losingRegistrar: null,
+      raw: envelope,
     };
   }
 

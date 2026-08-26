@@ -8,7 +8,9 @@ import {
   domainCreateRequestSchema,
   domainRenewRequestSchema,
   domainUpdateRequestSchema,
+  toTransferResponse,
   transferCreateRequestSchema,
+  transferResponseSchema,
 } from "./api";
 import { apiErrorSchema, ERROR_CODES, errorCodeSchema } from "./errors";
 
@@ -396,6 +398,54 @@ describe("transferCreateRequestSchema（FR-12 移管 IN）", () => {
       transferCreateRequestSchema.safeParse({
         name: "not a domain",
         authCode: "abc",
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("transferResponseSchema / toTransferResponse（FR-12 / ADR-0002）", () => {
+  it("raw を落とし、残りのフィールドをそのまま通す", () => {
+    const response = toTransferResponse({
+      name: "example.com",
+      status: "pending",
+      registryStatus: "pending",
+      requestingRegistrarId: "REG-DOPAMIN",
+      actingRegistrarId: "REG-OTHER",
+      requestedAt: "2026-08-26T10:00:00Z",
+      actByAt: "2026-08-26T10:20:00Z",
+      raw: { result: { code: 1001 }, secret: "レジストリの生応答" },
+    });
+
+    expect(response).not.toHaveProperty("raw");
+    expect(JSON.stringify(response)).not.toContain("レジストリの生応答");
+    expect(transferResponseSchema.parse(response)).toEqual({
+      name: "example.com",
+      status: "pending",
+      registryStatus: "pending",
+      requestingRegistrarId: "REG-DOPAMIN",
+      actingRegistrarId: "REG-OTHER",
+      requestedAt: "2026-08-26T10:00:00Z",
+      actByAt: "2026-08-26T10:20:00Z",
+    });
+  });
+
+  it("任意フィールドが無い結果は JSON 化でキーごと落ちる", () => {
+    const response = toTransferResponse({
+      name: "idle.com",
+      status: "none",
+      raw: {},
+    });
+    expect(JSON.parse(JSON.stringify(response))).toEqual({
+      name: "idle.com",
+      status: "none",
+    });
+  });
+
+  it("未知の status は拒否する（レジストリの生値は registryStatus に入れる）", () => {
+    expect(
+      transferResponseSchema.safeParse({
+        name: "example.com",
+        status: "clientApproved",
       }).success,
     ).toBe(false);
   });

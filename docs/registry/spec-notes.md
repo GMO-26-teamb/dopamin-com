@@ -111,7 +111,8 @@ host（ネームサーバ）────────┘
 
 ### 非同期通知（Poll）
 
-`GET /messages` は**常に最古の未 ack メッセージを 1 件**返す FIFO（未 ack 件数も返る）。
+Poll は**常に最古の未 ack メッセージを 1 件**返す FIFO（未 ack 件数も返る）。
+エンドポイントだけはレジストリで異なる（§2 の差分表）。
 **ack するまで同じメッセージが返り続け、新しい通知を受け取れない。** 自動失効なし。
 移管の承認/拒否は専用 API で行うため、ack は業務処理をブロックしない（消し込み専用）。
 
@@ -147,16 +148,18 @@ exDate 超過でも廃止されず、レジストリが自動で 1 年延長（�
 | launch 拡張 | なし | `LaunchApplicationRequest` / `LaunchApplicationResult` スキーマあり |
 | `domain:info` の型 | `DomainResponse` / `EppResponseDomainResponse` | `DomainInfoResponse` / `EppResponseDomainInfoResponse` |
 | `domain:update`（PUT）の応答 | `EppResponseDomainResponse`（更新後のドメイン情報が返る） | `EppResponseUnit`（**空**。更新後の情報は `info` で取り直す） |
-| poll ack | 概要に「`POST /messages/{id}/ack` 等」 | `DELETE /api/v1/epp/messages/{id}` |
+| poll / ack | `GET /messages/poll` + `POST /messages/{id}/ack` | `GET /messages` + `DELETE /messages/{id}` |
 | Poll のタグ名 | `Message` | `Messages` |
 | svTRID プレフィクス | `KQSGN-` | `KQNIC-` |
 | `hello` の TLD フィールド | `resData.tlds` | `resData.info.supportedTlds` |
+| `DomainTransferResponse` | `domain` / `status` / `gainingRegistrar` / `losingRegistrar` | + `reDate`（必須）/ `acDate`（任意）。`exDate` は**両方に無い** |
 | `hello` の形状 | `resData` に `registryCode` / `tlds` / `message` | `resData` に `svID` / `svDate` / `svcMenu` / `info`（EPP greeting に近い） |
 | 宣言 extension | なし | `premium` / `launch` / `fee` |
 
 **認証・エンベロープ・result code・値の制約・移管フロー・Auto-Renew は両者で同一。**
-差分は「対応 TLD」「一部エンドポイントの有無とメソッド」「レスポンス型名」に限られるため、`RegistryAdapter`
-の正規化型（`packages/shared`）を変える必要はない見込み。
+差分の大半は「対応 TLD」「一部エンドポイントの有無とメソッド」「レスポンス型名」に収まる。
+唯一のフィールドレベルの差が `DomainTransferResponse` の `reDate` / `acDate` で、これが
+`TransferResult.requestedAt` / `actByAt` を optional にする理由になっている（ADR-0002）。
 
 ## 3. 【要確認】
 
@@ -183,8 +186,14 @@ exDate 超過でも廃止されず、レジストリが自動で 1 年延長（�
     レジストリ側の未実装かバグの疑い。運営に確認する。解決までは FR-09 の「ロック」トグルは動作しない前提。
 11. **非スポンサーからの `domain:info` の応答** — 2201 で拒否されるのか、限定情報が返るのか。
     `clID`（現スポンサー）はレスポンスに含まれるか。移管 OUT 完了の検知がこれに依存する（§21.2 #12）。
-12. **Poll 通知の種別と形状** — transfer request / approve / reject / 自動承認のそれぞれで何が積まれるか、
-    gaining 側にも積まれるか。通知内の trStatus / acDate / exDate の有無（§21.2 #13）。
+12. **Poll 通知の種別と中身** — transfer request / approve / reject / 自動承認のそれぞれで何が積まれるか、
+    gaining 側にも積まれるか（§21.2 #13）。
+    **形は両レジストリで完全に同一**と openapi.json で確定済み:
+    `PollResponse { count: int32（必須）, message?: PollMessageDto }`、
+    `PollMessageDto { id: int64, msgType: string, payload: object, qdate: string }`（すべて必須）。
+    未確定なのは `msgType` に入る値と `payload` の中身で、どちらにも enum・example・description が無い。
+    `DomainTransferResponse.status` も同様に `string` としか宣言されていない。
+    そのため正規化型（`PollMessage.type`）は独自語彙にし、対応づけられない通知は `unknown` に倒す（ADR-0002）。
 13. **移管時のコンタクトの扱い** — 相手レジストラ発行のコンタクト ID を参照したまま `domain:update` できるか、
     自コンタクトへの差し替えが必須か。非スポンサーの `contact:info` は可か（§21.2 #14）。
 14. **同一レジストラ ID からの `transfer/request`** — 自分がスポンサーのドメインに送ったときの result code（§21.2 #15）。
@@ -193,6 +202,7 @@ exDate 超過でも廃止されず、レジストリが自動で 1 年延長（�
 16. **transfer query の専用エンドポイントは無い**（確定事項として記録）。`DomainTransferRequest.op` の enum に
    `query` はあるが、paths には request / approve / reject / cancel しか無い。
    移管状態の照会は `domain:info` の `pendingTransfer` ステータスで代替する。
+   このため approved / rejected / cancelled は照会では区別できず、状態遷移の検知は Poll が主になる（ADR-0002）。
 
 ## 4. 検証時の注意
 

@@ -1,0 +1,13 @@
+{
+  "result": {
+    "code": 1001,
+    "message": "Command completed successfully; action pending"
+  },
+  "resData": {
+    "domain": "example.com",
+    "status": "pending",
+    "gainingRegistrar": "REG-DOPAMIN",
+    "losingRegistrar": "REG-OTHER"
+  },
+  "trID": { "clTRID": "dp-fixture-0005", "svTRID": "KQSGN-20260825-000004" }
+}

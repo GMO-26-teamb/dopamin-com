@@ -13,6 +13,7 @@ import {
   domainSummarySchema,
   domainSyncResponseSchema,
   registryIdSchema,
+  transferResponseSchema,
 } from "@dopamin/shared";
 import { hc } from "hono/client";
 import { z } from "zod";
@@ -116,12 +117,10 @@ export const checkResponseSchema = z.object({
   ),
 });
 
-/** `RegistryAdapter.transferRequest` / `transferQuery` の正規化結果。 */
+/**
+ * `POST /transfers` / `GET /transfers/:name` の応答。
+ * 形の正は `packages/shared` の `transferResponseSchema`（`raw` は API 境界で落ちる）。
+ */
 export const transferEnvelopeSchema = z.object({
-  transfer: z.object({
-    name: z.string(),
-    status: z.string(),
-    gainingRegistrar: z.string().nullable(),
-    losingRegistrar: z.string().nullable(),
-  }),
+  transfer: transferResponseSchema,
 });

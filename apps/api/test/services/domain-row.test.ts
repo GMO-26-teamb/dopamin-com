@@ -25,6 +25,7 @@ const INFO: DomainInfo = {
   updatedAt: "2026-08-10T00:00:00.000Z",
   expiresAt: "2027-08-01T00:00:00.000Z",
   lastTransferAt: null,
+  sponsoringRegistrarId: null,
   rgpStatuses: ["addPeriod"],
 };
 
@@ -74,6 +75,16 @@ describe("toDomainRecord", () => {
       ownership: "owned",
     });
     expect(result.syncedAt.toISOString()).toBe("2026-08-26T00:00:00.000Z");
+  });
+
+  it("#26 以前に書かれた raw_info（sponsoringRegistrarId 無し）も落とさない", () => {
+    // 必須にすると全行が parse に失敗して fallbackInfo に落ち、registrant / contacts が
+    // 静かに消える。既定 null で受けて既存の値はそのまま保つ。
+    const { sponsoringRegistrarId: _omitted, ...legacy } = INFO;
+    const result = toDomainRecord(row({ rawInfo: legacy }));
+    expect(result.info).toEqual(INFO);
+    expect(result.info.registrant).toBe("C-1");
+    expect(result.info.sponsoringRegistrarId).toBeNull();
   });
 
   it("registry は raw_info を優先する（列と食い違っても壊れない）", () => {

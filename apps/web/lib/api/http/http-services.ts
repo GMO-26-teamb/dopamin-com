@@ -14,6 +14,7 @@ import {
   meResponseSchema,
   registryIdForDomain,
   splitDomainName,
+  type TransferStatus,
 } from "@dopamin/shared";
 import {
   addPasskey,
@@ -103,19 +104,22 @@ function toSyncFailure(
   return { ...failure, registry: registryIdForDomain(failure.name) };
 }
 
-/** レジストリの移管ステータス文字列を画面用の状態に寄せる。 */
-function toTransferStatus(raw: string): Transfer["status"] {
-  const normalized = raw.toLowerCase();
-  if (normalized.includes("approve")) {
-    return "approved";
+/**
+ * 正規化された移管ステータス（`packages/shared` の `TransferStatus`）を画面用の状態に寄せる。
+ *
+ * `none`（移管中でない）は画面用 `Transfer` に対応する値が無い。`POST /transfers` の応答が
+ * `none` になることは無いので申請直後の `pending` に倒す。取り込み待ち（`import_pending`）
+ * との出し分けは移管一覧 API（#56）が来てから決める。
+ */
+function toTransferStatus(status: TransferStatus): Transfer["status"] {
+  switch (status) {
+    case "approved":
+    case "rejected":
+    case "cancelled":
+      return status;
+    default:
+      return "pending";
   }
-  if (normalized.includes("reject")) {
-    return "rejected";
-  }
-  if (normalized.includes("cancel")) {
-    return "cancelled";
-  }
-  return "pending";
 }
 
 export function createHttpServices(): Services {

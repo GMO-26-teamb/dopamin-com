@@ -16,12 +16,16 @@ import { TimeoutMockAdapter } from "../helpers/timeout-mock";
 
 /** FR-12（移管 IN / 状態照会）の Hono ルート統合テスト。 */
 
+/** 応答は正規化 `TransferResult` から `raw` を除いた DTO（ADR-0002）。 */
 interface TransferPayload {
   transfer: {
     name: string;
     status: string;
-    gainingRegistrar: string | null;
-    losingRegistrar: string | null;
+    registryStatus?: string;
+    requestingRegistrarId?: string;
+    actingRegistrarId?: string;
+    requestedAt?: string;
+    actByAt?: string;
   };
 }
 
@@ -88,14 +92,24 @@ describe("POST /api/v1/transfers（FR-12 移管 IN）", () => {
     const res = await sendJson("/transfers", { name: "move.com", authCode });
     expect(res.status).toBe(202);
     const { transfer } = (await res.json()) as TransferPayload;
-    expect(transfer).toMatchObject({ name: "move.com", status: "pending" });
+    expect(transfer).toMatchObject({
+      name: "move.com",
+      status: "pending",
+      requestingRegistrarId: "MOCK-GAINING",
+      actingRegistrarId: "MOCK-LOSING",
+    });
+    // 自動承認の期限は申請から 20 分後（FR-12）
+    expect(
+      new Date(String(transfer.actByAt)).getTime() -
+        new Date(String(transfer.requestedAt)).getTime(),
+    ).toBe(20 * 60 * 1000);
 
     // 状態照会（transferQuery）と info のステータスにも反映される
     const query = await api("/transfers/move.com");
     expect(query.status).toBe(200);
     const queried = (await query.json()) as TransferPayload;
     expect(queried.transfer.status).toBe("pending");
-    expect(queried.transfer.gainingRegistrar).not.toBeNull();
+    expect(queried.transfer.requestingRegistrarId).toBe("MOCK-GAINING");
 
     const info = await api("/domains/move.com");
     const { domain } = (await info.json()) as {
@@ -192,7 +206,27 @@ describe("GET /api/v1/transfers/:name（FR-12 状態照会）", () => {
     const res = await api("/transfers/idle.com");
     expect(res.status).toBe(200);
     const { transfer } = (await res.json()) as TransferPayload;
-    expect(transfer).toMatchObject({ status: "none", gainingRegistrar: null });
+    expect(transfer).toMatchObject({ status: "none" });
+    // 移管中でなければ相手レジストラは分からない（info から導出しているため）
+    expect(transfer.requestingRegistrarId).toBeUndefined();
+    expect(transfer.actingRegistrarId).toBeUndefined();
+  });
+
+  it("FR-18: レジストリの生応答（raw）はクライアントに返さない", async () => {
+    const authCode = await createDomainWithAuthCode("noraw.com");
+    const created = await sendJson("/transfers", {
+      name: "noraw.com",
+      authCode,
+    });
+    expect(created.status).toBe(202);
+    expect(await created.json()).toMatchObject({
+      transfer: expect.not.objectContaining({ raw: expect.anything() }),
+    });
+
+    const res = await api("/transfers/noraw.com");
+    expect(await res.json()).toMatchObject({
+      transfer: expect.not.objectContaining({ raw: expect.anything() }),
+    });
   });
 
   it("不正なドメイン名は 400 VALIDATION_ERROR", async () => {

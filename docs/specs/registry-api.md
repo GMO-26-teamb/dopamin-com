@@ -11,7 +11,8 @@
 
 - `packages/registry`: `RegistryAdapter` IF、kitaqsign / kitaqnic 実装（共通実装 `kitaq.ts`）、
   `mock` 実装（エラーシミュレーション付き）、TLD ルーティング、`RegistrySet` ファクトリ。
-- `packages/shared`: 正規化型（`DomainInfo` 等）、zod スキーマ（ドメイン名・API 入力・統一エラー）、
+- `packages/shared`: 正規化型（`DomainInfo` / `TransferResult` / `PollMessage` 等）、
+  zod スキーマ（ドメイン名・API 入出力・統一エラー）、
   操作可否の導出（`isOperationAllowed` / `isRestorable`）。
 - `apps/api`: `/api/v1/domains` `/api/v1/transfers` ルート、requestId / errorHandler ミドルウェア、
   `/health` のレジストリ疎通表示。
@@ -44,8 +45,8 @@
 | DELETE | `/domains/:name` | ✅ | 削除ロック中 409（AC-10-2）。削除後の状態（RGP）を返す |
 | POST | `/domains/:name/restore` | ✅ | `redemptionPeriod` 中のみ（AC-11-2） |
 | POST | `/domains/:name/auth-code` | ✅ | `rotate-auth-info` を実行（取得のたびに authInfo が変わる）。再発行という副作用があるため GET ではなく POST（§10.2 の Origin 検証を通すため） |
-| POST | `/transfers` | ✅ | `{name, authCode}` → transfer request → 202 |
-| GET | `/transfers/:name` | ✅ | **spec の `GET /transfers/:id` からの変更**: ドメイン名で `transferQuery`（`info` の `pendingTransfer` から導出）を返す。DB には保存せず一覧化もしない（移管の永続化は #56） |
+| POST | `/transfers` | ✅ | `{name, authCode}` → transfer request → 202。応答は正規化 `TransferResult` から `raw` を除いた DTO（`transferResponseSchema`。ADR-0002） |
+| GET | `/transfers/:name` | ✅ | **spec の `GET /transfers/:id` からの変更**: ドメイン名で `transferQuery`（`info` の `pendingTransfer` から導出）を返す。移管中でなければ `status: 'none'`、相手レジストラ ID は `info` から取れないため省略。DB には保存せず一覧化もしない（移管の永続化は #56） |
 
 本 spec のルート（`/domains*` `/transfers*`）はすべて `requireSession` 必須（Cookie `dopamin_session`。requirements §10.1 の「認証: 要」に対応）。
 統合テストは `apps/api/test/helpers/session.ts` の `installTestSession()` + `SESSION_COOKIE_HEADER`（DB 不要の seam）
@@ -62,7 +63,8 @@
 2. **restore は両レジストリとも 1 段階**（`POST /domains/{name}/restore`）。kitaqsign にも存在する
    （spec-notes の懸念は解消）。
 3. **transfer query の専用エンドポイントは無い**（`op` enum に `query` はあるが paths に無い）。
-   照会は `info` の `pendingTransfer` から導出する。
+   照会は `info` の `pendingTransfer` から導出する。approved / rejected / cancelled は区別できないため、
+   状態遷移の検知は Poll 通知に寄せる（ADR-0002）。
 4. **`renew` は `curExpDate`（YYYY-MM-DD）必須**。API は直前の `info` から取得して渡す。
 5. **`domain:create` の registrant は既存コンタクト ID 必須**。アダプタの `create` が
    ダミー PII（レジストリの許可パターンに一致する固定値）でコンタクトを都度作成する。
@@ -74,7 +76,16 @@
    アダプタの `ensureHosts` が `host:info` → 無ければ `host:create` で自動作成してから update を送る。
 9. **`add.statuses`（ロックトグル）は実測でレジストリに反映されない**（成功応答のまま無視。
    spec-notes【要確認】10）。API はコマンドを送るが、運営確認まで UI 側のロックトグル実装は保留する。
-10. **更新系タイムアウト時は再送せず参照系で結果を照合する**（AC-06-2 / AC-18-2）。
+10. **移管・Poll の正規化型は ADR-0002 に従う**。`TransferResult.status` は
+    `pending / approved / rejected / cancelled / none` の 5 値（`none` は「移管中でない」）で、
+    レジストリの生値は `registryStatus` に残す。レジストラ ID は `requestingRegistrarId` /
+    `actingRegistrarId`（旧 `gainingRegistrar` / `losingRegistrar`）。`raw`（生応答）は
+    正規化型には持つが API 境界で落とす（FR-18 / NFR-03）。`DomainInfo.sponsoringRegistrarId` は
+    両 OpenAPI に clID が無いため当面 null。
+    レジストリ差分: `reDate`（→ `requestedAt`）は kitaqnic のみ必須、`acDate`（→ `actByAt`）は
+    kitaqnic のみ任意で kitaqsign は両方持たない。新有効期限の `exDate` は両方に無いため
+    `newExpiresAt` は当面つねに undefined。
+11. **更新系タイムアウト時は再送せず参照系で結果を照合する**（AC-06-2 / AC-18-2）。
     `apps/api/src/lib/reconcile.ts` の `reconcileOnTimeout` が `REGISTRY_TIMEOUT` を捕捉し、
     `info`（transfer は `transferQuery`）で反映を確認できた場合のみ成功として返す
     （create=存在確認 / renew=期限延長 / update=要求変更の全反映 / delete=RGP 入りまたは消滅 /
@@ -96,3 +107,9 @@
   構造化 console ログ（NFR-06）を出す。設計は [`docs/specs/operation-logs.md`](operation-logs.md)。
 - `POST /domains/check` の 1 リクエストあたりの件数上限がレジストリ側で不明（API 側は 20 件に制限）。
 - コンタクト更新（FR-09 の一部）と移管の承認 / 拒否（受け側・P2）は未実装。
+- `RegistryAdapter` は §11.1 の `registrarId` / `transferApprove` / `transferReject` /
+  `transferCancel` / `poll` / `ackMessage` をまだ持たない（追加は #43 / #44）。
+  `PollMessage` 型は `packages/shared` に用意済みだが生産者はまだ居ない。
+- Poll の契約テスト fixture は未整備（#44 / #48）。transfer fixture の `status` は
+  実応答が未取得のため暫定値（`docs/registry/fixtures/README.md`）。
+- Poll 通知の `msgType` の値と `payload` の中身は未確定【要確認: requirements.md §21.2 #13】。

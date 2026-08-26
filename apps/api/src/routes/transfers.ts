@@ -1,4 +1,8 @@
-import { domainNameSchema, transferCreateRequestSchema } from "@dopamin/shared";
+import {
+  domainNameSchema,
+  toTransferResponse,
+  transferCreateRequestSchema,
+} from "@dopamin/shared";
 import { Hono } from "hono";
 import { ApiException } from "../lib/errors";
 import { reconcileOnTimeout } from "../lib/reconcile";
@@ -10,7 +14,10 @@ import type { AuthedEnv } from "../types";
 export const transfers = new Hono<AuthedEnv>()
   // NFR-04 / AC-01-3: 移管操作も認証必須（対象ドメインの所有権は移管の性質上ここでは見ない）
   .use(requireSession)
-  /** FR-12: 移管 IN 申請。受理されると pendingTransfer になる（放置時は 20 分後に自動承認）。 */
+  /**
+   * FR-12: 移管 IN 申請。受理されると pendingTransfer になる（放置時は 20 分後に自動承認）。
+   * 応答は正規化 `TransferResult` から `raw`（レジストリ生応答）を除いた DTO（FR-18 / ADR-0002）。
+   */
   .post("/", jsonValidator(transferCreateRequestSchema), async (c) => {
     const { name, authCode } = c.req.valid("json");
     const adapter = adapterForDomain(name);
@@ -22,7 +29,7 @@ export const transfers = new Hono<AuthedEnv>()
         return queried.status === "pending" ? queried : null;
       },
     );
-    return c.json({ transfer }, 202);
+    return c.json({ transfer: toTransferResponse(transfer) }, 202);
   })
 
   /**
@@ -40,5 +47,5 @@ export const transfers = new Hono<AuthedEnv>()
     const transfer = await adapterForDomain(parsed.data).transferQuery(
       parsed.data,
     );
-    return c.json({ transfer });
+    return c.json({ transfer: toTransferResponse(transfer) });
   });

@@ -21,6 +21,7 @@ function record(overrides: Partial<DomainRecord> = {}): DomainRecord {
       updatedAt: null,
       expiresAt: "2027-08-01T00:00:00.000Z",
       lastTransferAt: null,
+      sponsoringRegistrarId: null,
       rgpStatuses: [],
     },
     syncedAt: new Date("2026-08-26T01:02:03.000Z"),
