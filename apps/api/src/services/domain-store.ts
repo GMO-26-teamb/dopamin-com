@@ -37,12 +37,14 @@ export function createDbDomainStore(db: Db): DomainStore {
     async find(name) {
       // 同名で transferred_out の履歴行が残り得る（§9.1 の部分一意）。
       // 保有中の行を優先し、無ければ最後に移管 OUT した行を返す（AC-12-5 の「移管済み」表示用）。
+      // transferred_out_at が NULL の履歴行（#57 以前に遷移した行）は created_at で順序を決める。
       const rows = await db
         .select()
         .from(schema.domains)
         .where(eq(schema.domains.name, name))
         .orderBy(
           desc(sql`${schema.domains.ownership} = 'owned'`),
+          sql`${schema.domains.transferredOutAt} DESC NULLS LAST`,
           desc(schema.domains.createdAt),
         )
         .limit(1);
@@ -51,9 +53,19 @@ export function createDbDomainStore(db: Db): DomainStore {
     },
 
     async upsert(record) {
+      // 競合の調停に使えるのは部分一意インデックス domains_name_owned_uniq だけで、その述語は
+      // ownership = 'owned'。INSERT しようとする行がそれを満たさないと ON CONFLICT が発火せず、
+      // 更新のつもりが履歴行の重複挿入になる。表現できない操作は黙って壊れるより落とす
+      // （transferred_out への遷移は #57 / #58 が専用の UPDATE で行う）。
+      if (record.ownership !== "owned") {
+        throw new Error(
+          `upsert は保有中の行専用（ownership=owned）。${record.name} の ownership=${record.ownership} は UPDATE で遷移させること`,
+        );
+      }
       const values = toDomainValues(record);
-      // 一意なのは保有中の行だけ（部分一意インデックス domains_name_owned_uniq、§9.1）。
-      // ON CONFLICT の推論も同じ述語で絞らないと制約に一致せず失敗するため targetWhere を付ける。
+      // ON CONFLICT の推論も部分インデックスと同じ述語で絞らないと制約に一致せず失敗する。
+      // 述語は必ずリテラルで書く: バインドパラメータにすると PostgreSQL が generic plan に
+      // 切り替えた時点（同一 prepared statement の 6 回目）で述語を畳めず 42P10 で落ちる。
       // レジストリが正なので、保有中の同名行は最新の所有者・情報で上書きする
       // （移管 IN / 廃止後の再取得で所有者が変わり得る）。transferred_out の履歴行は触らない。
       const [row] = await db
@@ -61,7 +73,7 @@ export function createDbDomainStore(db: Db): DomainStore {
         .values(values)
         .onConflictDoUpdate({
           target: schema.domains.name,
-          targetWhere: eq(schema.domains.ownership, "owned"),
+          targetWhere: sql`${schema.domains.ownership} = 'owned'`,
           set: values,
         })
         .returning();
@@ -96,6 +108,14 @@ export function createInMemoryDomainStore(
       ),
     find: (name) => Promise.resolve(byName.get(name) ?? null),
     upsert: (record) => {
+      // DB 実装と同じ前提（保有中の行だけを upsert できる）をテストでも守らせる
+      if (record.ownership !== "owned") {
+        return Promise.reject(
+          new Error(
+            `upsert は保有中の行専用（ownership=owned）。${record.name}`,
+          ),
+        );
+      }
       byName.set(record.name, record);
       return Promise.resolve(record);
     },

@@ -64,5 +64,9 @@ export const domains = pgTable(
     uniqueIndex("domains_name_owned_uniq")
       .on(t.name)
       .where(sql`${t.ownership} = 'owned'`),
+    // 上の部分インデックスは ownership 述語を持つ問い合わせにしか使えない。
+    // find(name) は履歴行も引くため述語を持てず、これが無いと domains の全表走査になる
+    // （外した domains_name_unique が兼ねていた索引の置き換え）。
+    index("domains_name_idx").on(t.name),
   ],
 );

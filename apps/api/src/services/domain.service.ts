@@ -24,7 +24,9 @@ export async function upsertDomainFromInfo(
     userId,
     name: info.name,
     registry: info.registry,
-    // `info` が返るのは保有中の行だけ。移管 OUT の検知は #57 / #58 が別経路で行う
+    // write-through は保有中の行だけを対象にする（store.upsert の前提）。
+    // `info` が返ったこと自体は保有の証明にならない（非スポンサーへの応答は未確定。§21.2 #12）。
+    // 移管 OUT の検知と ownership の遷移は Poll / 移管サービス（#56 / #57 / #58）が行う。
     ownership: "owned",
     info,
     syncedAt,

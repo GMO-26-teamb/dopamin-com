@@ -1105,7 +1105,7 @@ describe("セッションの検証（§10.2）", () => {
   });
 });
 
-describe("sync で info が NOT_FOUND のとき（AC-02-4 は #33 / #56 待ち）", () => {
+describe("sync で info が NOT_FOUND のとき（AC-02-4 は #56 / #57 / #58 待ち）", () => {
   it("行は消さず、失敗一覧に NOT_FOUND を載せてキャッシュを stale で返す", async () => {
     await createDomain("still-here.com");
     // レジストリからは引けないが DB には行がある状態

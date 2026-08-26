@@ -1,5 +1,5 @@
 {
-  "id": "0e6abc94-09a7-46bc-97f6-5155dbbfc542",
+  "id": "21928556-2ab8-4a94-90a8-cef93f48725f",
   "prevId": "0a2bd33f-088c-4a7a-8f98-a1dc14548464",
   "version": "7",
   "dialect": "postgresql",
@@ -266,6 +266,21 @@
           ],
           "isUnique": true,
           "where": "\"domains\".\"ownership\" = 'owned'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "domains_name_idx": {
+          "name": "domains_name_idx",
+          "columns": [
+            {
+              "expression": "name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
