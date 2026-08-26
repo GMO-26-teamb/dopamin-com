@@ -5,8 +5,8 @@ import {
   type RegistrySet,
 } from "@dopamin/registry";
 import { SUPPORTED_TLDS } from "@dopamin/shared";
-import { ApiError } from "./api-error";
 import { type ApiEnv, getApiEnv } from "./env";
+import { ApiException } from "./errors";
 
 function kitaqConfig(
   env: ApiEnv,
@@ -62,7 +62,7 @@ export function setRegistrySetForTesting(set: RegistrySet | null): void {
 export function adapterForDomain(name: string): RegistryAdapter {
   const adapter = getRegistrySet().forDomain(name);
   if (!adapter) {
-    throw new ApiError(400, "VALIDATION_ERROR", "未対応の TLD です。", {
+    throw new ApiException("VALIDATION_ERROR", "未対応の TLD です。", {
       supportedTlds: SUPPORTED_TLDS,
     });
   }

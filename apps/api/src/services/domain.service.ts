@@ -6,7 +6,7 @@ import type {
   DomainSyncResponse,
 } from "@dopamin/shared";
 import { splitDomainName } from "@dopamin/shared";
-import { ApiError } from "../lib/api-error";
+import { ApiException } from "../lib/errors";
 import { adapterForDomain } from "../lib/registries";
 import { registryErrorMessage } from "../lib/registry-message";
 import { type DomainRecord, getDomainStore } from "./domain-store";
@@ -46,15 +46,13 @@ export async function requireOwnedDomain(
 ): Promise<DomainRecord> {
   const record = await getDomainStore().find(name);
   if (!record) {
-    throw new ApiError(
-      404,
+    throw new ApiException(
       "NOT_FOUND",
       "保有ドメインに見つかりません。ダッシュボードの「最新化」をお試しください。",
     );
   }
   if (record.userId !== userId) {
-    throw new ApiError(
-      403,
+    throw new ApiException(
       "FORBIDDEN",
       "このドメインを操作する権限がありません。",
     );
@@ -102,7 +100,7 @@ export async function listDomainSummaries(
 /**
  * 同期の失敗を一覧用の項目に変換する。
  * レジストリ由来は正規化コードとユーザー向け文言、TLD 表の変更などで
- * アダプタを引けなかった場合（ApiError）はそのコードをそのまま残す。
+ * アダプタを引けなかった場合（ApiException）はそのコードをそのまま残す。
  */
 function toSyncFailure(
   name: string,
@@ -115,7 +113,7 @@ function toSyncFailure(
       message: registryErrorMessage(err),
     };
   }
-  if (err instanceof ApiError) {
+  if (err instanceof ApiException) {
     return { name, code: err.code, message: err.message };
   }
   return { name, code: "INTERNAL", message: "同期に失敗しました。" };
