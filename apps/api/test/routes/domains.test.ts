@@ -11,7 +11,15 @@ import {
   domainListResponseSchema,
   domainSyncResponseSchema,
 } from "@dopamin/shared";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import app from "../../src/index";
 import { setRegistrySetForTesting } from "../../src/lib/registries";
 import {
@@ -55,10 +63,23 @@ interface CheckPayload {
   }>;
 }
 
+/** originCheck（§10.2）が照合する正規の Origin。 */
+const APP_ORIGIN = "http://localhost:3000";
+
+let kitaqsign: MockRegistryAdapter;
 let kitaqnic: MockRegistryAdapter;
 let store: DomainStore;
 
+// originCheck は Origin ヘッダ付きの更新系リクエストでだけ env() を評価する。
+// DB には触らない（domains 行は setDomainStoreForTesting の seam 経由）ので接続先はダミーで良い。
+beforeAll(() => {
+  process.env.DATABASE_URL = "postgres://unused:unused@localhost:1/unused";
+  process.env.WEBAUTHN_RP_ID = "localhost";
+  process.env.WEBAUTHN_ORIGIN = APP_ORIGIN;
+});
+
 beforeEach(() => {
+  kitaqsign = new MockRegistryAdapter({ id: "kitaqsign" });
   kitaqnic = new MockRegistryAdapter({ id: "kitaqnic" });
   // DB を立てずに所有権チェック・write-through を検証する（#40 のテスト DB が入るまでの seam）
   store = createInMemoryDomainStore();
@@ -67,7 +88,7 @@ beforeEach(() => {
   setRegistrySetForTesting(
     createRegistrySet({
       mode: "real",
-      adapters: [new MockRegistryAdapter({ id: "kitaqsign" }), kitaqnic],
+      adapters: [kitaqsign, kitaqnic],
     }),
   );
   // errorHandler の構造化ログでテスト出力が汚れないようにする
@@ -500,6 +521,44 @@ describe("POST /api/v1/domains/:name/auth-code（FR-12 移管 OUT）", () => {
     });
     const b = (await second.json()) as { authCode: string };
     expect(b.authCode).not.toBe(a.authCode);
+  });
+
+  // #55: rotate-auth-info は「発行のたびに前の値が無効になる」副作用を持つため、
+  // GET ではなく POST にして originCheck（§10.2）の CSRF 検証対象に入れている。
+  it("GET では生えていない（CSRF 検証を迂回する経路を残さない）", async () => {
+    await createDomain("get-auth.com");
+
+    const res = await api("/domains/get-auth.com/auth-code");
+
+    expect(res.status).toBe(404);
+  });
+
+  it("Origin が一致しなければ 403 FORBIDDEN で、再発行も起きない", async () => {
+    await createDomain("csrf-auth.com");
+    const rotate = vi.spyOn(kitaqsign, "authCode");
+
+    const res = await api("/domains/csrf-auth.com/auth-code", {
+      method: "POST",
+      headers: { origin: "https://evil.example" },
+    });
+
+    expect(res.status).toBe(403);
+    expect((await parseError(res)).error.code).toBe("FORBIDDEN");
+    expect(rotate).not.toHaveBeenCalled();
+  });
+
+  it("正しい Origin なら 200 で AuthCode を返す", async () => {
+    await createDomain("origin-auth.com");
+
+    const res = await api("/domains/origin-auth.com/auth-code", {
+      method: "POST",
+      headers: { origin: APP_ORIGIN },
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { authCode: string; rotated: boolean };
+    expect(body.rotated).toBe(true);
+    expect(body.authCode.length).toBeGreaterThan(0);
   });
 });
 
