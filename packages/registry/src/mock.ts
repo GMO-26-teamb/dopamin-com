@@ -20,6 +20,13 @@ import {
 } from "@dopamin/shared";
 import type { RegistryAdapter } from "./adapter";
 import { RegistryError } from "./errors";
+import type {
+  MockDomainState,
+  MockPendingTransfer,
+  MockPollMessage,
+  MockStateSnapshot,
+  MockStateStore,
+} from "./mock-store";
 import type { ClTridFactory, RegistryCallObserver } from "./observer";
 import { REGISTRY_TLDS, SUPPORTED_TLDS } from "./routing";
 
@@ -30,55 +37,6 @@ export type MockFailMode =
   | "5xx"
   | "reject"
   | "spec_mismatch";
-
-/**
- * 進行中の移管申請。approve / reject / cancel の応答は申請時のレジストラ ID・
- * 日時をそのまま返す必要があるため、boolean ではなく申請内容ごと保持する。
- */
-interface MockPendingTransfer {
-  /** 申請した側（レジストリの gainingRegistrar）。 */
-  requestingRegistrarId: string;
-  /** 承認 / 拒否の権限を持つ側（レジストリの losingRegistrar）。 */
-  actingRegistrarId: string;
-  requestedAt: string;
-  /** 放置時にサーバが自動承認する期限（FR-12。既定 20 分後）。 */
-  actByAt: string;
-}
-
-/**
- * Poll キューに積まれた通知 1 件（正規化前の内部表現）。
- * `count`（未 ack 残件数）は取り出し時のキュー長から決まるのでここには持たない。
- */
-interface MockPollMessage {
-  id: string;
-  type: PollMessageType;
-  domainName: string;
-  queuedAt: string;
-  /** 通知が表す移管の正規化結果（積んだ時点のスナップショット）。 */
-  transfer: TransferResult;
-}
-
-interface MockDomainState {
-  name: string;
-  /**
-   * 現スポンサー（保有）レジストラ ID。自レジストラか相手レジストラのどちらか。
-   * `DomainInfo` には出さない（実レジストリの info に clID が無いため。ADR-0002 決定 4）。
-   */
-  sponsoringRegistrarId: string;
-  registrant: string;
-  contacts: Record<string, string>;
-  nameservers: string[];
-  clientStatuses: ClientStatus[];
-  crDate: string;
-  upDate: string | null;
-  exDate: string;
-  trDate: string | null;
-  rgpStatuses: string[];
-  authInfo: string;
-  pendingDelete: boolean;
-  /** 移管申請中なら申請内容、そうでなければ null。 */
-  pendingTransfer: MockPendingTransfer | null;
-}
 
 function addYears(iso: string, years: number): string {
   const date = new Date(iso);
@@ -143,20 +101,21 @@ export class MockRegistryAdapter implements RegistryAdapter {
   private readonly foreignRegistrarId: string;
   /** 放置された移管申請をサーバが自動承認するまでのミリ秒（§17 MOCK_TRANSFER_AUTO_APPROVE_MS）。 */
   private readonly autoApproveMs: number;
-  private readonly domains = new Map<string, MockDomainState>();
+  private domains = new Map<string, MockDomainState>();
   /** レジストリ側に作られたコンタクト（ID → プロファイル）。 */
-  private readonly contacts = new Map<string, RegistrantProfile>();
+  private contacts = new Map<string, RegistrantProfile>();
   /**
    * レジストラ ID ごとの Poll キュー（FIFO）。相手レジストラ側のキューも持つ:
    * `poll()` からは読めないが、「申請が相手に届いた」状態を表現するために積む。
    */
-  private readonly pollQueues = new Map<string, MockPollMessage[]>();
+  private pollQueues = new Map<string, MockPollMessage[]>();
   /** メッセージ ID の採番（レジストリの int64 に相当。数字だけの文字列で持つ）。 */
   private nextMessageId = 1;
   private readonly now: () => Date;
   private failMode: MockFailMode;
   private readonly onCall?: RegistryCallObserver;
   private readonly makeClTrid?: ClTridFactory;
+  private readonly store?: MockStateStore;
 
   constructor(options?: {
     /**
@@ -184,6 +143,12 @@ export class MockRegistryAdapter implements RegistryAdapter {
     onCall?: RegistryCallObserver;
     /** clTRID の採番上書き。null 返却時は既定の採番。 */
     makeClTrid?: ClTridFactory;
+    /**
+     * 状態の永続化（#46）。渡すと公開メソッドの前後で状態を読み書きし、
+     * プロセスをまたいでも状態が残る（Vercel Functions のインスタンス跨ぎ）。
+     * 未指定ならプロセス内 Map に閉じる（従来どおり）。
+     */
+    store?: MockStateStore;
   }) {
     this.id = options?.id ?? "mock";
     this.registrarId = options?.registrarId ?? MOCK_REGISTRAR_ID;
@@ -194,6 +159,7 @@ export class MockRegistryAdapter implements RegistryAdapter {
     this.now = options?.now ?? (() => new Date());
     this.onCall = options?.onCall;
     this.makeClTrid = options?.makeClTrid;
+    this.store = options?.store;
   }
 
   /** テスト・デモリセット用に失敗モードを切り替える。 */
@@ -202,11 +168,99 @@ export class MockRegistryAdapter implements RegistryAdapter {
   }
 
   /**
+   * ストアから状態を読み込む（#46）。ストア未設定なら何もしない。
+   *
+   * 公開メソッドの入口で毎回読み直すので、別インスタンス・別リクエストで
+   * 書かれた状態が見える。**読み込み単位はスナップショット全体**（デモ用途で
+   * 扱う件数が小さいため、部分読み出しの複雑さを持ち込まない）。
+   */
+  async hydrate(): Promise<void> {
+    if (!this.store) {
+      return;
+    }
+    const snapshot = await this.store.load();
+    this.domains.clear();
+    this.pollQueues.clear();
+    this.contacts.clear();
+    if (snapshot === null) {
+      this.nextMessageId = 1;
+      return;
+    }
+    for (const domain of snapshot.domains) {
+      this.domains.set(domain.name, domain);
+    }
+    for (const [registrarId, queue] of Object.entries(snapshot.queues)) {
+      this.pollQueues.set(registrarId, queue);
+    }
+    for (const [id, profile] of Object.entries(snapshot.contacts)) {
+      this.contacts.set(id, profile);
+    }
+    this.nextMessageId = snapshot.nextMessageId;
+  }
+
+  /**
+   * 現在の状態のスナップショット（永続化とその差分判定に使う）。
+   * 空のキューは落として正規化する: `poll()` は読むだけでもキューの入れ物を作るので、
+   * そのまま比べると参照系が「変更あり」に見えてしまう。
+   */
+  private snapshot(): MockStateSnapshot {
+    return {
+      domains: [...this.domains.values()],
+      queues: Object.fromEntries(
+        [...this.pollQueues].filter(([, queue]) => queue.length > 0),
+      ),
+      contacts: Object.fromEntries(this.contacts),
+      nextMessageId: this.nextMessageId,
+    };
+  }
+
+  /**
+   * 現在の状態をストアに書き戻す（#46）。ストア未設定なら何もしない。
+   *
+   * `seedForeignDomain` / `simulate*`（レジストリ操作ではないシミュレーション API）は
+   * 同期関数なので自動では永続化されない。ストアを使う場合は呼び出し後にこれを await する。
+   */
+  async persist(): Promise<void> {
+    if (!this.store) {
+      return;
+    }
+    await this.store.save(this.snapshot());
+  }
+
+  /**
    * 公開メソッド 1 回 = 1 レコードで観測フックを呼ぶ（FR-15）。
    * 実レジストリと違い HTTP 往復が無いため、補助コマンド行は発行せず svTrid は null。
    * observer の失敗はレジストリ操作の成否に影響させない。
+   *
+   * ストアがある場合は、この単位で状態を読み込み → 実行 → 書き戻す（#46）。
+   * **失敗した場合も書き戻す**: mock は失敗の途中で状態を変えることがあり
+   * （`timeout_after_write` 等）、破棄すると実レジストリとの乖離が大きくなるため。
    */
   private async recorded<T>(
+    command: OperationCommand,
+    domainName: string | null,
+    request: unknown,
+    fn: () => Promise<T>,
+    toResponse: (result: T) => unknown = (result) => result,
+  ): Promise<T> {
+    if (this.store) {
+      await this.hydrate();
+      // 参照系（check / info / hello / poll の空振り）は状態を変えないので書き戻さない。
+      // /health は定期的に叩かれるため、変わっていないのに毎回書くと無駄が積み上がる。
+      // 変更の有無はスナップショットの比較で見る（変更点を各所で追うより崩れにくい）
+      const before = JSON.stringify(this.snapshot());
+      try {
+        return await this.record(command, domainName, request, fn, toResponse);
+      } finally {
+        if (JSON.stringify(this.snapshot()) !== before) {
+          await this.persist();
+        }
+      }
+    }
+    return this.record(command, domainName, request, fn, toResponse);
+  }
+
+  private async record<T>(
     command: OperationCommand,
     domainName: string | null,
     request: unknown,

@@ -6,6 +6,7 @@ import {
   type RegistrySet,
 } from "@dopamin/registry";
 import { SUPPORTED_TLDS } from "@dopamin/shared";
+import { createDbMockStateStore } from "../services/mock-state.service";
 import {
   buildOperationLogConsoleLine,
   buildOperationLogRow,
@@ -99,6 +100,12 @@ export function getRegistrySet(): RegistrySet {
         ? { mockForeignRegistrarId: env.MOCK_FOREIGN_REGISTRAR_ID }
         : {}),
       mockAutoApproveMs: env.MOCK_TRANSFER_AUTO_APPROVE_MS,
+      // #46: mock の状態を DB に逃がす。Vercel Functions ではプロセス内 Map が
+      // インスタンス跨ぎで消え、create したドメインが次の info で 2303 になるため。
+      // DB が使えない場合は黙ってプロセス内 Map のまま動く（デモ用途の割り切り）
+      ...(env.REGISTRY_MODE === "mock"
+        ? { mockStore: createDbMockStateStore("mock") }
+        : {}),
       // 操作ログ（FR-15）: 全レジストリ呼び出しを記録する
       onCall: handleRegistryCall,
       makeClTrid: nextClTrid,

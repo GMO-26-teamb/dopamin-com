@@ -1,6 +1,7 @@
 // Drizzle スキーマ（docs/requirements.md §9）。テーブルごとにファイルを分け、ここから re-export する。
 export * from "./contacts";
 export * from "./domains";
+export * from "./mock-registry-state";
 export * from "./operation-logs";
 export * from "./passkey-credentials";
 export * from "./sessions";

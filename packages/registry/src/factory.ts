@@ -4,6 +4,7 @@ import { RegistryError } from "./errors";
 import type { KitaqAdapterConfig } from "./http";
 import { createKitaqAdapter } from "./kitaq";
 import { type MockFailMode, MockRegistryAdapter } from "./mock";
+import type { MockStateStore } from "./mock-store";
 import type { ClTridFactory, RegistryCallObserver } from "./observer";
 import { registryIdForTld, SUPPORTED_TLDS } from "./routing";
 
@@ -26,6 +27,11 @@ export interface RegistrySetConfig {
    * 未指定なら 20 分（`TRANSFER_AUTO_APPROVE_MS`）。
    */
   mockAutoApproveMs?: number;
+  /**
+   * mode=mock のときの状態の永続化（#46）。渡すと Vercel Functions の
+   * インスタンス跨ぎでも create したドメインが残る。未指定はプロセス内 Map。
+   */
+  mockStore?: MockStateStore;
   /**
    * 操作ログ（FR-15）用の観測フック。real / mock どちらのアダプタにも配線される。
    * `adapters` で構築済みアダプタを渡した場合は適用されない（各アダプタ側で設定する）。
@@ -68,6 +74,7 @@ export class RegistrySet {
           ...(config.mockAutoApproveMs === undefined
             ? {}
             : { autoApproveMs: config.mockAutoApproveMs }),
+          ...(config.mockStore ? { store: config.mockStore } : {}),
           onCall: config.onCall,
           makeClTrid: config.makeClTrid,
         }),

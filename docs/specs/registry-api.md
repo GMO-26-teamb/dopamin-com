@@ -130,7 +130,20 @@ result code ごとの**ユーザー向け理由文**は `packages/shared/src/reg
     `payload` は `z.unknown()` で受けて後段で緩く読む（想定外の形で Poll ごと落とさないため）。
     `id` は int64 → string に正規化し、ack で URL に埋める直前に整数表記かを検証する
     （非整数は `REGISTRY_SPEC_MISMATCH`。ADR-0002 決定 8）。
-13. **mock は相手レジストラを持つ**（#45）。`seedForeignDomain(name, authInfo)` で相手保有の
+13. **mock の状態は注入したストアに逃がせる**（#46）。`MockRegistryAdapter` に
+    `store: MockStateStore`（`load` / `save` でスナップショット全体を往復）を渡すと、
+    公開メソッドの単位で「読み込み → 実行 → 書き戻し」を行う。Vercel Functions では
+    プロセス内 Map がインスタンス跨ぎ・コールドスタートで消え、`REGISTRY_MODE=mock` の
+    本番デモが「create したのに次の info が 2303」になるため。
+    `apps/api` は `mock_registry_state`（レジストリ 1 つ = 1 行の jsonb）を使う実装を渡す。
+    `domains` を流用しないのは、アプリの保有情報（`ownership` 込み）とレジストリの状態を
+    混ぜるとデモリセットや所有権判定が壊れるから。
+    **状態が変わらなかった操作（check / info / hello / 空の poll）は書き戻さない**
+    （/health のたびに書かない）。同時実行は後勝ちで、トランザクションは張らない。
+    DB が使えないときは黙ってプロセス内 Map のまま動く（デモの再現であって、
+    ここで API を落とす価値は無い）。`seedForeignDomain` / `simulate*` は同期関数なので
+    自動保存されない —— ストア利用時は `await adapter.persist()` を呼ぶ。
+14. **mock は相手レジストラを持つ**（#45）。`seedForeignDomain(name, authInfo)` で相手保有の
     ドメインを投入でき、`transferRequest` は**相手保有のドメインにしか出せない**
     （自保有への申請は暫定 2304。実レジストリの応答は【要確認: §21.2 #15】）。
     approve / reject は対応側、cancel は申請側だけが実行でき、役割違いは 2201。
@@ -141,13 +154,13 @@ result code ごとの**ユーザー向け理由文**は `packages/shared/src/reg
     で起こす（レジストリ操作ではないので操作ログは出さない）。Poll 通知は「行為者以外の当事者」に積み、
     サーバ自動承認だけが双方に届く。設定は `MOCK_FOREIGN_REGISTRAR_ID` /
     `MOCK_TRANSFER_AUTO_APPROVE_MS`（§17）→ `RegistrySetConfig` 経由でアダプタへ。
-14. **更新系タイムアウト時は再送せず参照系で結果を照合する**（AC-06-2 / AC-18-2）。
+15. **更新系タイムアウト時は再送せず参照系で結果を照合する**（AC-06-2 / AC-18-2）。
     `apps/api/src/lib/reconcile.ts` の `reconcileOnTimeout` が `REGISTRY_TIMEOUT` を捕捉し、
     `info`（transfer は `transferQuery`）で反映を確認できた場合のみ成功として返す
     （create=存在確認 / renew=期限延長 / update=要求変更の全反映 / delete=RGP 入りまたは消滅 /
     restore=RGP 離脱 / transfer=pendingTransfer）。確認できない場合は元の 504 を返す。
     `rotate-auth-info` は `info` で照合できない（authInfo が resData に含まれない）ため対象外。
-15. **参照系だけを自動再試行する**（#60。§11.6 (e) / FR-18）。`apps/api/src/lib/retry.ts` の
+16. **参照系だけを自動再試行する**（#60。§11.6 (e) / FR-18）。`apps/api/src/lib/retry.ts` の
     `withReadRetry` が `REGISTRY_TIMEOUT` / `REGISTRY_UNAVAILABLE` のときだけ
     最大 2 回、300ms → 600ms の指数バックオフで再試行する。適用先は
     `POST /domains/check` / `info`（詳細・sync）/ `transferQuery`（移管の照会）/ `hello`（/health）。
@@ -156,7 +169,7 @@ result code ごとの**ユーザー向け理由文**は `packages/shared/src/reg
     そちらは `reconcileOnTimeout` が担当し、`confirm` の中の参照系も再試行しない
     ＝ 照合は 1 回きり）。Bridge 層ではなく API 層に置いたのは mock でも挙動を検証できるようにするため。
     再試行した分だけ `operation_logs` の行も増える（FR-15 は「全レジストリ呼び出し」を残す方針）。
-16. **詳細レスポンスの契約は `packages/shared` が持ち、導出値は載せない**（#53）。
+17. **詳細レスポンスの契約は `packages/shared` が持ち、導出値は載せない**（#53）。
     `domainDetailResponseSchema`（`packages/shared/src/domains.ts`）が `GET /domains/:name` と
     更新系の応答形の SSOT で、`apps/web` も同じスキーマで検証する（旧: web 側に同じ形の
     別定義があった）。issue #53 が挙げていた `displayStatus` / `transferEligibleAt` は**入れない**:
@@ -164,7 +177,7 @@ result code ごとの**ユーザー向け理由文**は `packages/shared/src/reg
     （`packages/shared`）が導出の SSOT。API も計算済みの値を返すと 2 系統になり、
     片方だけ直る事故になる（`domainSummarySchema` が表示ステータスを持たないのと同じ理由）。
     `pendingTransfer` は導出できないので `summary.transfer`（`{ direction, actByAt }`）として返す。
-17. **照合できない操作はタイムアウトで確定させない**（#57）。移管の承認 / 拒否 / 取消のうち、
+18. **照合できない操作はタイムアウトで確定させない**（#57）。移管の承認 / 拒否 / 取消のうち、
     `transferQuery` + `info` から成立を証明できるのは**承認だけ**（trDate が申請の窓の中で動く）。
     「`pendingTransfer` が消えた」は承認 / 拒否 / 取消・相手の取下げ・サーバ自動承認のどれでも起きるので、
     それを根拠に要求どおりの結果を書くと「拒否したのに移管されていた」「取り消したのに実は

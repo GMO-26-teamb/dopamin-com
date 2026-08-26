@@ -27,6 +27,13 @@ export { createKitaqAdapter } from "./kitaq";
 export type { MockFailMode } from "./mock";
 export { MockRegistryAdapter } from "./mock";
 export type {
+  MockDomainState,
+  MockPollMessage,
+  MockStateSnapshot,
+  MockStateStore,
+} from "./mock-store";
+export { createInMemoryMockStore } from "./mock-store";
+export type {
   ClTridFactory,
   RegistryCallObserver,
   RegistryCallRecord,

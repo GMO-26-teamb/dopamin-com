@@ -8,6 +8,8 @@ import { createTestDb, resetTestDb } from "./db";
 const EXPECTED_TABLES = [
   "contacts",
   "domains",
+  // mock レジストリの状態（§11.1 / #46）。REGISTRY_MODE=mock のときだけ使う
+  "mock_registry_state",
   "operation_logs",
   "passkey_credentials",
   "sessions",
