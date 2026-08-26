@@ -51,10 +51,23 @@ URL の `?mock=<scenario>` で状態を切り替える（`apps/web/lib/api/mock/
    - `VERCEL_TOKEN` — Vercel のアクセストークン
    - `VERCEL_ORG_ID` — チーム/個人の ID（`vercel link` 後の `.vercel/project.json` の `orgId`）
    - `VERCEL_PROJECT_ID_WEB` / `VERCEL_PROJECT_ID_API` — 各プロジェクトの `projectId`
-   - `DIRECT_DATABASE_URL` — マイグレーション用の接続文字列。Supabase の **Supavisor session mode（ポート 5432）** を使う（`postgresql://postgres.<project-ref>:<password>@aws-<n>-<region>.pooler.supabase.com:5432/postgres`）。直結ホスト（`db.<project-ref>.supabase.co`）は IPv6 のみで Actions ランナーから届かない
 
-   `DIRECT_DATABASE_URL` は DB のパスワードを含むので、リポジトリ Secrets ではなく `production` environment の Secrets に置くことを推奨する（全ジョブが `environment: production` を指定しているため、どちらに置いても `secrets.DIRECT_DATABASE_URL` で解決される）。
+デプロイは `api` → `web` の順に走る。
 
-デプロイは `migrate`（`pnpm --filter @dopamin/db migrate`）→ `api` → `web` の順に走り、マイグレーションが失敗した場合はデプロイしない。
+### マイグレーションの適用
 
-`migrate` ジョブは `drizzle-kit migrate` の前に接続先ホスト/ポート（パスワードは伏せる）をログに出し、直結ホスト・名前解決失敗・TCP 到達不可を検出したら理由付きで落とす。`drizzle-kit` は接続に失敗しても理由を出さずに終了するため、原因の切り分けはこのプリフライトのログを見る。
+**CI では自動適用しない**（`docs/requirements.md` §16.2）。スキーマを変更した PR は、次の順で担当者が手で当てる。
+
+1. PR を `main` にマージする
+2. ローカルで `main` を pull する
+3. 本番 DB の接続文字列を渡して適用する（`drizzle.config.ts` は `.env` を読まないので環境変数で渡す）
+
+   ```bash
+   DIRECT_DATABASE_URL='postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres' pnpm db:migrate
+   ```
+
+4. `drizzle.__drizzle_migrations` の件数が `packages/db/drizzle/meta/_journal.json` のエントリ数と一致することを確認する
+
+**マージ前のブランチから当ててはいけない。** drizzle は `_journal.json` の `when`（タイムスタンプ）で適用済みかを判定するため、当てたあとに `db:generate` をやり直して `when` が変わると同じ DDL が二重適用されて落ちる。
+
+スキーマ変更を含む PR は、マージ後の適用が終わるまで本番が古いスキーマのままになる（API のデプロイは先に完了する）。後方互換のない変更は、適用後にデプロイをやり直すこと。

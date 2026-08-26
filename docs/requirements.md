@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.1.12（2026-08-26） |
+| 版 | v0.1.13（2026-08-26） |
 | プロダクト | ドパ民.com / dopamin.com — Z世代向けドメイン管理プラットフォーム（疑似レジストラ） |
 | チーム | チームドパ民（Team B）: 佐々木 琢登・星 はるか・上原 拓也 |
 | 位置づけ | GMO Internet Internship in kitaQ Webアプリケーションコース（2026/08/24–28）成果物 |
@@ -1145,23 +1145,30 @@ export function resolveEmbeddingModel() { /* EMBEDDING_PROVIDER / EMBEDDING_MODE
 3. `pnpm turbo run typecheck test build`（Turborepo のキャッシュで未変更パッケージはスキップ）
 
 **`deploy.yml`**（`main` push → 本番のみ。PR プレビューは行わない。`apps/**`・`packages/**`・lockfile 変更時のみ）
-- 1 ワークフロー・3 ジョブで **migrate → api → web の順**に実行する（`api` は `needs: migrate`、`web` は `needs: api`）。`apps/web/next.config.ts` の rewrites はビルド時に `API_ORIGIN` を読む（Vercel プロジェクトに設定した固定値）。PR の動作確認はローカル（`pnpm dev`）で行う。
+- 1 ワークフロー・2 ジョブで **api → web の順**に実行する（`web` は `needs: api`）。`apps/web/next.config.ts` の rewrites はビルド時に `API_ORIGIN` を読む（Vercel プロジェクトに設定した固定値）。PR の動作確認はローカル（`pnpm dev`）で行う。**DB マイグレーションはこのワークフローでは行わない**（後述）。
 - 各ジョブの手順（リポジトリルートで実行。Root Directory は Vercel プロジェクト設定から `vercel pull` が取り込む）:
   1. `pnpm install --frozen-lockfile`
   2. `vercel pull --yes --environment=production --token=$VERCEL_TOKEN`（`VERCEL_ORG_ID` / `VERCEL_PROJECT_ID` を env に）
   3. `vercel build --prod`
   4. `vercel deploy --prebuilt --prod --meta originalSha=<github.sha>`
 - **commit author の書き換え**: Vercel Hobby チームは commit author がチーム所有者（上原）でないとデプロイが `BLOCKED` になり、CLI は `BLOCKED` を終端として扱わないため Deploy ステップが固まる（他メンバーが author の squash マージで発生）。`api` / `web` ジョブはチェックアウト直後に `git commit --amend --no-edit --reset-author`（`user.name` / `user.email` を所有者に指定）で **CI 上のコピーだけ** author を所有者に書き換えてから `vercel build` / `vercel deploy` する。リポジトリの履歴は変えない。Vercel 上の commit SHA は書き換え後のものになるため、元の SHA は `--meta originalSha` で残す。両ジョブに `timeout-minutes: 10` を付け、固着時は 6 時間待たずに失敗させる。恒久解は Pro プランでメンバーを追加すること。
-- GitHub Secrets: `VERCEL_TOKEN` / `VERCEL_ORG_ID` / `VERCEL_PROJECT_ID_WEB` / `VERCEL_PROJECT_ID_API` / `DIRECT_DATABASE_URL`。アプリの環境変数（§17）は Vercel プロジェクト側で管理する。
-- マイグレーション: `migrate` ジョブが `pnpm --filter @dopamin/db migrate`（`DIRECT_DATABASE_URL`）を実行し、`api` / `web` はその成功を待つ（失敗時はデプロイしない）。
-  - drizzle は `drizzle.__drizzle_migrations` の最新 `created_at` **より新しい** journal エントリだけを 1 トランザクションで適用する（判定はハッシュではなくタイムスタンプ）。差分の無い push では何もしない。
-  - このため、**マイグレーションを本番へ手で当てない**（`migrate` ジョブに任せる）。マージ前のブランチから手動適用すると、その後 `db:generate` をやり直して `_journal.json` の `when` が変わった場合に同じ DDL が二重適用されて落ちる。手で当ててしまった場合は、当てた SQL と `_journal.json` の内容をそのままマージすること。
+- GitHub Secrets: `VERCEL_TOKEN` / `VERCEL_ORG_ID` / `VERCEL_PROJECT_ID_WEB` / `VERCEL_PROJECT_ID_API`。アプリの環境変数（§17）は Vercel プロジェクト側で管理する。
+- **マイグレーションは CI で自動適用しない。担当者がローカルから手で当てる**（v0.1.13。それまでは `migrate` ジョブが自動適用していた）。
+  - 経緯: `migrate` ジョブは `DIRECT_DATABASE_URL` の値が直結ホストのままだと必ず失敗し、`api` / `web` が `needs` で `skipped` になって**デプロイ全体が止まる**。発表（8/28）までの復旧速度を優先し、デプロイと DB 適用を切り離した。
+  - 手順（**必ずこの順で行う**）:
+    1. マイグレーションを含む PR を **`main` にマージする**
+    2. ローカルで `main` を pull する
+    3. 本番 DB の接続文字列を渡して `DIRECT_DATABASE_URL='<本番の接続文字列>' pnpm db:migrate` を実行する（`packages/db/drizzle.config.ts` は `.env` を読まないので環境変数で渡す）
+    4. 適用後に `drizzle.__drizzle_migrations` の件数が `packages/db/drizzle/meta/_journal.json` のエントリ数と一致することを確認する
+  - **マージ前のブランチから当ててはいけない**。drizzle は `drizzle.__drizzle_migrations` の最新 `created_at` **より新しい** journal エントリだけを 1 トランザクションで適用する（判定はハッシュではなくタイムスタンプ）ため、当てたあとに `db:generate` をやり直して `_journal.json` の `when` が変わると、同じ DDL が二重適用されて落ちる。当ててしまった場合は、当てた SQL と `_journal.json` の内容をそのままマージすること。
+  - スキーマ変更を含む PR は、**マージ後の適用が終わるまで本番が古いスキーマのまま**になる。API のデプロイは先に完了するので、後方互換のない変更は適用を待ってからデプロイをやり直す（空 commit を push するか Vercel で Redeploy）。
+  - 自動適用に戻す場合は、GitHub Secrets の `DIRECT_DATABASE_URL` を Supavisor session mode の URL（§16.3）にしたうえで `deploy.yml` に `migrate` ジョブを復活させるか、`workflow_dispatch` の手動ワークフローとして切り出す。
 
 ### 16.3 Supabase
 
 - プロジェクト 1 つ（Free）。`vector` 拡張を有効化。
-- 接続文字列: 実行時は Supavisor（transaction mode, ポート 6543）、マイグレーションは Supavisor（session mode, ポート 5432）。
-  - session mode を使うのは、直結ホスト（`db.<project-ref>.supabase.co`）が IPv6 のみで GitHub Actions ランナーから到達できないため。ローカルから直結する場合は同じ用途の `DIRECT_DATABASE_URL` に直結の URL を入れてよい（どちらもプリペアドステートメントと DDL が使える）。
+- 接続文字列: 実行時は Supavisor（transaction mode, ポート 6543）、マイグレーションは直結（`db.<project-ref>.supabase.co`, ポート 5432）または Supavisor（session mode, ポート 5432）。どちらもプリペアドステートメントと DDL が使える。
+  - マイグレーションはローカルから手で当てる運用（§16.2）なので、`DIRECT_DATABASE_URL` は**直結の URL でよい**。IPv6 で到達できない環境（GitHub Actions ランナーが該当。直結ホストは IPv6 のみで公開されている）から当てる場合だけ Supavisor session mode の URL（`postgresql://postgres.<project-ref>:<password>@aws-<n>-<region>.pooler.supabase.com:5432/postgres`）を使う。
 - Supabase Auth / RLS / Storage / Edge Functions は使わない。
 
 ### 16.4 環境
@@ -1187,7 +1194,7 @@ export function resolveEmbeddingModel() { /* EMBEDDING_PROVIDER / EMBEDDING_MODE
 | 変数 | 用途 |
 |---|---|
 | `DATABASE_URL` | Supavisor（6543）接続文字列 |
-| `DIRECT_DATABASE_URL` | マイグレーション用（session mode / 直結の 5432。§16.3） |
+| `DIRECT_DATABASE_URL` | マイグレーション用（直結 / session mode の 5432。§16.3）。ローカルからの手動適用で使う（§16.2） |
 | `WEBAUTHN_RP_ID` / `WEBAUTHN_RP_NAME` / `WEBAUTHN_ORIGIN` | WebAuthn RP 設定 |
 | `KITAQSIGN_BASE_URL` / `KITAQNIC_BASE_URL` | EPP API のオリジン（`https://epp.kitaqsign.com` / `https://epp.kitaqnic.com`）。`docs.*` は Swagger UI の URL であって API のホストではない |
 | `KITAQSIGN_GATE_USER` / `KITAQSIGN_GATE_PASSWORD` | 共通 Basic ゲート（認証 1 段目）。kitaqnic も同名で `KITAQNIC_*` |
@@ -1205,9 +1212,9 @@ export function resolveEmbeddingModel() { /* EMBEDDING_PROVIDER / EMBEDDING_MODE
 
 ### GitHub Actions Secrets
 
-`VERCEL_TOKEN` `VERCEL_ORG_ID` `VERCEL_PROJECT_ID_WEB` `VERCEL_PROJECT_ID_API` `DIRECT_DATABASE_URL`
+`VERCEL_TOKEN` `VERCEL_ORG_ID` `VERCEL_PROJECT_ID_WEB` `VERCEL_PROJECT_ID_API`
 
-`DIRECT_DATABASE_URL` は Supavisor session mode（5432）の URL を登録する（§16.3）。DB パスワードを含むため `production` environment の Secrets に置く（`VERCEL_*` はリポジトリ Secrets。全ジョブが `environment: production` なのでどちらでも解決される）。
+`DIRECT_DATABASE_URL` は v0.1.13 で `deploy.yml` から `migrate` ジョブを外したため **CI では使わない**（マイグレーションはローカルから手で当てる。§16.2）。登録済みの Secret は消さなくてよいが、参照するワークフローは無い。自動適用に戻すときは Supavisor session mode（5432）の URL を `production` environment の Secrets に置く（`VERCEL_*` はリポジトリ Secrets。全ジョブが `environment: production` なのでどちらでも解決される）。
 
 ローカルは `.env.example` を各 app に置き、`.env.local` は git 管理外。
 
@@ -1392,4 +1399,5 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | v0.1.11 | 2026-08-26 | **FR-19 決済（モック）を追加**。§2.2 / §21.1 の「決済・課金・料金表示は非スコープ」を「**実**決済・課金は非スコープ、モックのお支払い画面と固定ダミー価格はスコープ」に改訂。FR-06 / FR-08 の実行順にお支払いステップを挿入（決済成立時のみ `create` / `renew`）、§3.1 / §3.3 / §15.1 / §15.2 を追随。価格の SSOT は `packages/shared/src/pricing.ts`（TLD 別の固定年額 + 消費税 10%、`RESTORE_FEE` は FR-11 のダミー費用と共通）。決済 API・DB テーブルは追加しない（AC-19-5）。画面は `docs/specs/payment-mock.md` / `docs/specs/ui-screens.md` の S-29 / D-11 |
 | v0.1.10 | 2026-08-26 | §16.2: `deploy.yml` に `migrate` ジョブ（`pnpm --filter @dopamin/db migrate`）を追加し、**migrate → api → web** の 3 ジョブ構成に変更。マイグレーション適用の【要確認】を解消し、drizzle の適用判定（`drizzle.__drizzle_migrations` の最新 `created_at` より新しい journal エントリのみ）と手動適用を避ける運用を明記。§16.3 / §17: `DIRECT_DATABASE_URL` を Supavisor session mode（5432）に変更（直結ホストは IPv6 のみで GitHub Actions から到達できないため）。INFRA-01 |
 | v0.1.11 | 2026-08-26 | §16.2: Vercel Hobby の「commit author = チーム所有者」制約で他メンバー author のデプロイが `BLOCKED` になり固着する問題への対策として、`deploy.yml` の `api` / `web` ジョブでチェックアウト上の author を所有者に書き換えてから deploy する運用（`--meta originalSha` で元 SHA を保持、`timeout-minutes: 10`）を明記 |
+| v0.1.13 | 2026-08-26 | §16.2: `deploy.yml` から `migrate` ジョブを削除し、**api → web** の 2 ジョブ構成に戻した（v0.1.10 で入れた自動適用を撤回）。`DIRECT_DATABASE_URL` に直結ホストが登録されたままで `migrate` が必ず失敗し、`needs` で `api` / `web` が `skipped` になって本番デプロイが全面停止したため、発表までの復旧速度を優先して DB 適用とデプロイを切り離した。マイグレーションは **main にマージしてからローカルで `pnpm db:migrate`** を当てる運用に戻し、二重適用の罠・スキーマ変更を含む PR の注意点・自動適用に戻す手順を §16.2 に明記。§16.3 / §17: `DIRECT_DATABASE_URL` は CI で使わなくなり、ローカル用途では直結 URL でよいことを明記。GitHub Secrets 一覧から削除。#150 |
 | v0.1.12 | 2026-08-26 | §11.1: 正規化型を実装に合わせて確定。`TransferResult.status` に `'none'`（`transferQuery` の「移管中でない」）を追加し、`registrarId` 語彙・`reDate` / `acDate` のレジストリ差・`raw` の扱いを明記。`DomainInfo.sponsoringRegistrarId` は両 OpenAPI に clID が無いため当面 null（§6.5 / §9.1 に追随）。`PollMessage` の未確定点を `msgType` / `payload` に限定（§21.2 #13）。判断は ADR-0002 |
