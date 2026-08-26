@@ -21,6 +21,10 @@ next-env.d.ts
 *.log
 coverage/
 
+# playwright（apps/web/playwright.config.ts が出力する）
+playwright-report/
+test-results/
+
 # claude code (personal overrides)
 .claude/settings.local.json
 .claude/worktrees/

@@ -18,3 +18,47 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm turbo run typecheck test build
+
+  # FR-01 の e2e（Playwright + CDP Virtual Authenticator。docs/testing.md §3）。
+  # check とは独立に走らせ、必須にはしない（Playwright の step だけ continue-on-error）。
+  # ジョブ全体ではなく step に付けているのは、失敗を ::warning:: で Summary に残すため。turbo の test には含めない。
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # playwright.config.ts が api に渡す接続先 / drizzle-kit migrate の接続先
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+      DIRECT_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @dopamin/db migrate
+      - run: pnpm --filter @dopamin/web exec playwright install --with-deps chromium
+      - id: e2e
+        run: pnpm --filter @dopamin/web e2e
+        continue-on-error: true
+      - if: ${{ steps.e2e.outcome == 'failure' }}
+        run: echo "::warning title=e2e failed::FR-01 e2e（Playwright）が失敗しました。playwright-report アーティファクトのトレース / スクリーンショットを確認してください（必須チェックではありません）。"
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report
+          retention-days: 7

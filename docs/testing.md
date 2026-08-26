@@ -98,7 +98,53 @@ REGISTRY_CONNECT_TEST=1 pnpm --filter @dopamin/api exec vitest run test/connect/
 REGISTRY_CONNECT_TEST=1 pnpm --filter @dopamin/api exec vitest run test/connect/kitaqnic.connect.test.ts
 ```
 
-## 3. mock レジストリのエラーシミュレーション（§11.6）
+## 3. e2e（Playwright + CDP Virtual Authenticator、FR-01）
+
+`apps/web/e2e/passkey.spec.ts` が、実ブラウザ（Chromium）でサインアップ → ログアウト → ログイン →
+パスキーの追加 / 削除 → 未認証リダイレクト（AC-01-1〜3）を通しで検証する。WebAuthn の生体認証は
+CDP の `WebAuthn.addVirtualAuthenticator` で肩代わりするので、ダイアログは出ない。
+
+web は `NEXT_PUBLIC_API_MODE=http`（`next build && next start`、:3000）、api は `REGISTRY_MODE=mock` +
+Postgres（:8787）で、`apps/web/playwright.config.ts` の `webServer` から自動起動する。
+**実レジストリ・Supabase には接続しない**（`apps/api/.env.local` は読まない）。
+
+### 初回だけ
+
+```sh
+pnpm --filter @dopamin/web e2e:install      # Chromium を取得
+docker run --name dopamin-e2e-pg -e POSTGRES_PASSWORD=postgres -p 54329:5432 -d postgres:17
+DIRECT_DATABASE_URL=postgres://postgres:postgres@localhost:54329/postgres pnpm --filter @dopamin/db migrate
+```
+
+2 回目以降は `docker start dopamin-e2e-pg`。マイグレーションを増やしたら migrate を再実行する。
+
+### 実行
+
+```sh
+pnpm --filter @dopamin/web e2e              # ヘッドレス
+pnpm --filter @dopamin/web e2e --headed     # ブラウザを見ながら（pnpm は `--` なしで引数を渡す）
+pnpm --filter @dopamin/web e2e --ui         # Playwright UI
+```
+
+### 注意
+
+- RP ID が `localhost` 固定なので baseURL は `http://localhost:3000`。`127.0.0.1` では動かない（FR-01 spec §6）。
+- api（:8787）は既存プロセスを**再利用しない**（`reuseExistingServer: false`）。`pnpm dev` の api は
+  `apps/api/.env.local`（Supabase / 実レジストリ）を読んでいる可能性があり、掴むと signup やパスキー追加・削除が
+  共有 DB に書き込んでしまうため。:8787 が使用中だと Playwright が「is already used」で即失敗するので、
+  `pnpm dev` を止めてから実行する。
+- web（:3000）だけは既存プロセスを再利用する（`next build` を省くため）。`pnpm dev` の web（mock モード）を掴むと
+  最初のテスト（AC-01-3 のリダイレクト）が失敗する。e2e が起動した web は次回の実行で再利用されるので、
+  2 回目以降は `next build` を待たずに済む（web のコードを変えたら :3000 を止めて再ビルドさせる）。
+- DB の接続先は環境変数 `DATABASE_URL`（未設定なら上の docker の 54329）。表示名は毎回ユニークにしているので、
+  同じ DB で繰り返し実行できる。
+- `next build` は `next/font/google` のフォント取得でネットワークを使う。
+- CI は `.github/workflows/ci.yml` の `e2e` ジョブ（`services: postgres`）。Playwright の step に `continue-on-error: true` を
+  付けて必須にはしていない（check run は緑のまま）。失敗時は Summary に `::warning::` が出て、`playwright-report`
+  アーティファクトにトレース / スクリーンショットが残る。
+- turbo の `test` には含めない（`pnpm test` / `pnpm check` は e2e を走らせない）。
+
+## 4. mock レジストリのエラーシミュレーション（§11.6）
 
 `apps/api/.env.local` で `REGISTRY_MODE=mock` のまま `MOCK_REGISTRY_FAIL_MODE` を
 `timeout` / `5xx` / `reject` / `spec_mismatch` に切り替えると、API がエラー応答
