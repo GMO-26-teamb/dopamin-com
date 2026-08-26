@@ -1,14 +1,27 @@
 "use client";
 
-import type { PasskeySummary } from "@dopamin/shared";
-import { KeyRound, Plus } from "lucide-react";
-import { useState } from "react";
+import { type PasskeySummary, passkeyNameSchema } from "@dopamin/shared";
+import { KeyRound, Pencil, Plus } from "lucide-react";
+import {
+  type FormEvent,
+  type KeyboardEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorCard } from "@/components/ui/error-card";
+import { IconButton } from "@/components/ui/icon-button";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useAddPasskey, useDeletePasskey, usePasskeys } from "@/lib/api/hooks";
+import {
+  useAddPasskey,
+  useDeletePasskey,
+  usePasskeys,
+  useRenamePasskey,
+} from "@/lib/api/hooks";
 import { toErrorCopy } from "@/lib/error-messages";
 import { DeletePasskeyDialog } from "./delete-passkey-dialog";
 import { formatPasskeyMeta, passkeyName } from "./format";
@@ -16,12 +29,17 @@ import type { NotifySettings } from "./notice";
 
 /**
  * Figma: S-70 `85:6709`（Card kicker「パスキー管理」）/ D-09 `85:6745`
- * FR-01 のパスキー一覧・追加・削除。最後の 1 つは削除ボタンを Disabled にする
- * （API も 409 を返す。ui-screens §2.8）。
+ * FR-01 のパスキー一覧・追加・名前変更・削除。
+ * - 名前変更は行のインライン編集（鉛筆 Icon Button → Input + 保存 / キャンセル、1〜32 文字。
+ *   spec §8。Figma フレームは無く、S-70 の行に Input `46:110` を差し込む）
+ * - 最後の 1 つは削除ボタンを Disabled にする（API も 409 を返す。ui-screens §2.8）
  */
 
 /** 骨組みの行数（fixtures のパスキー 2 件に合わせる） */
 const SKELETON_ROWS = ["passkey-1", "passkey-2"] as const;
+
+/** クライアント側のバリデーション文言（ui-screens §4「バリデーション」。サーバーも同じ制約で弾く） */
+export const PASSKEY_NAME_ERROR = "1〜32 文字で入力してください";
 
 export interface PasskeySectionProps {
   onNotify: NotifySettings;
@@ -31,10 +49,21 @@ export function PasskeySection({ onNotify }: PasskeySectionProps) {
   const passkeys = usePasskeys();
   const addPasskey = useAddPasskey();
   const deletePasskey = useDeletePasskey();
+  const renamePasskey = useRenamePasskey();
   const [target, setTarget] = useState<PasskeySummary | null>(null);
+  /** 編集中の行（同時に 1 行だけ） */
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  /** 別の操作を始めるときに前の Error Card を消す */
+  const resetMutations = () => {
+    addPasskey.reset();
+    deletePasskey.reset();
+    renamePasskey.reset();
+  };
 
   const handleAdd = () => {
     deletePasskey.reset();
+    renamePasskey.reset();
     addPasskey.mutate(undefined, {
       onSuccess: (created) => {
         onNotify({
@@ -71,6 +100,26 @@ export function PasskeySection({ onNotify }: PasskeySectionProps) {
     });
   };
 
+  const handleRename = (passkey: PasskeySummary, name: string) => {
+    const previous = passkeyName(passkey);
+    renamePasskey.mutate(
+      { id: passkey.id, name },
+      {
+        onSuccess: (renamed) => {
+          setEditingId(null);
+          onNotify({
+            tone: "ok",
+            title: "パスキーの名前を変更しました",
+            body: `${previous} を ${passkeyName(renamed)} に変更しました。`,
+          });
+        },
+        // 失敗は編集中のまま Error Card を出す（直して再送できる。ui-screens §4「更新系エラー」）
+      },
+    );
+  };
+
+  const busy = deletePasskey.isPending || renamePasskey.isPending;
+
   const addButton = (
     <Button
       leadingIcon={<Plus />}
@@ -103,19 +152,33 @@ export function PasskeySection({ onNotify }: PasskeySectionProps) {
         <>
           {passkeys.data.map((passkey) => (
             <PasskeyRow
-              busy={deletePasskey.isPending}
+              busy={busy}
+              editing={editingId === passkey.id}
               isLast={passkeys.data.length === 1}
               key={passkey.id}
+              onCancelEdit={() => {
+                renamePasskey.reset();
+                setEditingId(null);
+              }}
               onDelete={() => {
-                addPasskey.reset();
-                deletePasskey.reset();
+                resetMutations();
+                setEditingId(null);
                 setTarget(passkey);
               }}
+              onEdit={() => {
+                resetMutations();
+                setEditingId(passkey.id);
+              }}
+              onRename={(name) => handleRename(passkey, name)}
               passkey={passkey}
+              saving={renamePasskey.isPending && editingId === passkey.id}
             />
           ))}
           {deletePasskey.error ? (
             <ErrorCard error={deletePasskey.error} />
+          ) : null}
+          {renamePasskey.error ? (
+            <ErrorCard error={renamePasskey.error} />
           ) : null}
           <div className="flex w-full">{addButton}</div>
         </>
@@ -149,20 +212,55 @@ interface PasskeyRowProps {
   passkey: PasskeySummary;
   isLast: boolean;
   busy: boolean;
+  editing: boolean;
+  saving: boolean;
+  onEdit: () => void;
+  onCancelEdit: () => void;
+  onRename: (name: string) => void;
   onDelete: () => void;
 }
 
-function PasskeyRow({ passkey, isLast, busy, onDelete }: PasskeyRowProps) {
+function PasskeyRow({
+  passkey,
+  isLast,
+  busy,
+  editing,
+  saving,
+  onEdit,
+  onCancelEdit,
+  onRename,
+  onDelete,
+}: PasskeyRowProps) {
   const name = passkeyName(passkey);
   // 同名の「削除」が並ぶので名前で区別する。Disabled の理由も読み上げに残す
   const label = isLast
     ? `${name} のパスキーを削除（最後の1つは不可）`
     : `${name} のパスキーを削除`;
 
+  if (editing) {
+    // 行ごとに mount し直すことで下書き・エラーを毎回リセットする
+    return (
+      <PasskeyNameEditor
+        initialName={name}
+        onCancel={onCancelEdit}
+        onSave={onRename}
+        saving={saving}
+      />
+    );
+  }
+
   return (
     <div className="flex w-full items-center gap-2">
       <KeyRound aria-hidden="true" className="size-3.5 shrink-0 text-ink" />
       <span className="shrink-0 text-body-sm text-ink">{name}</span>
+      <IconButton
+        aria-label={`${name} の名前を変更`}
+        disabled={busy}
+        icon={<Pencil />}
+        onClick={onEdit}
+        size="sm"
+        variant="subtle"
+      />
       <span className="min-w-0 flex-1 truncate text-caption text-muted">
         {formatPasskeyMeta(passkey)}
       </span>
@@ -176,5 +274,74 @@ function PasskeyRow({ passkey, isLast, busy, onDelete }: PasskeyRowProps) {
         {isLast ? "削除（最後の1つは不可）" : "削除"}
       </Button>
     </div>
+  );
+}
+
+interface PasskeyNameEditorProps {
+  initialName: string;
+  saving: boolean;
+  onSave: (name: string) => void;
+  onCancel: () => void;
+}
+
+/** 行のインライン編集。Enter で保存、Escape でキャンセル。1〜32 文字はサーバーと同じ zod で弾く */
+function PasskeyNameEditor({
+  initialName,
+  saving,
+  onSave,
+  onCancel,
+}: PasskeyNameEditorProps) {
+  const [draft, setDraft] = useState(initialName);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // 鉛筆を押した直後に入力できるようフォーカスを移す（autoFocus は a11y lint で弾かれる）
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const parsed = passkeyNameSchema.safeParse(draft);
+    if (!parsed.success) {
+      setError(PASSKEY_NAME_ERROR);
+      return;
+    }
+    onSave(parsed.data);
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onCancel();
+    }
+  };
+
+  return (
+    <form className="flex w-full items-start gap-2" onSubmit={handleSubmit}>
+      <KeyRound
+        aria-hidden="true"
+        className="mt-[11px] size-3.5 shrink-0 text-ink"
+      />
+      <Input
+        aria-label="パスキーの名前"
+        disabled={saving}
+        error={error}
+        onChange={(event) => {
+          setDraft(event.target.value);
+          setError(undefined);
+        }}
+        onKeyDown={handleKeyDown}
+        ref={inputRef}
+        value={draft}
+      />
+      <Button loading={saving} type="submit" variant="solid">
+        保存
+      </Button>
+      <Button disabled={saving} onClick={onCancel} variant="subtle">
+        キャンセル
+      </Button>
+    </form>
   );
 }

@@ -1,4 +1,5 @@
 import {
+  passkeyRenameRequestSchema,
   passkeyVerifyRequestSchema,
   registerOptionsRequestSchema,
 } from "@dopamin/shared";
@@ -16,6 +17,7 @@ import {
   createRegistrationOptions,
   deletePasskey,
   listPasskeys,
+  renamePasskey,
   verifyAddPasskey,
   verifyAuthentication,
   verifyRegistration,
@@ -125,4 +127,18 @@ export const auth = new Hono()
   .delete("/passkeys/:id", requireSession, async (c) => {
     await deletePasskey(getDb(), c.get("user").id, c.req.param("id"));
     return c.json({ ok: true });
-  });
+  })
+  .patch(
+    "/passkeys/:id",
+    requireSession,
+    json(passkeyRenameRequestSchema),
+    async (c) => {
+      const passkey = await renamePasskey(
+        getDb(),
+        c.get("user").id,
+        c.req.param("id"),
+        c.req.valid("json").name,
+      );
+      return c.json({ passkey });
+    },
+  );
