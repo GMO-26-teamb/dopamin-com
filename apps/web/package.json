@@ -11,6 +11,8 @@
     "start": "next start",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
+    "e2e": "playwright test",
+    "e2e:install": "playwright install chromium",
     "tokens": "tsx scripts/gen-tokens.ts"
   },
   "dependencies": {
@@ -32,6 +34,7 @@
   "devDependencies": {
     "@dopamin/api": "workspace:*",
     "@dopamin/tsconfig": "workspace:*",
+    "@playwright/test": "1.62.1",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.2",
