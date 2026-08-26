@@ -5,6 +5,7 @@ import { requestContext } from "./middleware/request-context";
 import { requestId } from "./middleware/request-id";
 import { ai } from "./routes/ai";
 import { auth } from "./routes/auth";
+import { demo } from "./routes/demo";
 import { domains } from "./routes/domains";
 import { health } from "./routes/health";
 import { logs } from "./routes/logs";
@@ -29,7 +30,8 @@ const app = new Hono<AppEnv>()
   .route("/transfers", transfers)
   .route("/registry", registry)
   .route("/logs", logs)
-  .route("/ai", ai);
+  .route("/ai", ai)
+  .route("/demo", demo);
 
 app.onError(errorHandler);
 app.notFound(notFoundHandler);

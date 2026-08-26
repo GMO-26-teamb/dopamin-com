@@ -117,6 +117,28 @@ export function createDbDomainStore(db: Db): DomainStore {
   };
 }
 
+/**
+ * `domains.rgp_until` を直接書く（FR-16 のデモ投入専用）。
+ *
+ * 通常経路（`upsertDomainFromInfo` → `toDomainValues`）はこの列を書かない。
+ * 両レジストリの `info` が猶予期限を返さないためで、画面も §11.4 の目安日数から
+ * 自前で計算している。デモでは「残日数つきの RGP バッジ」を見せたいので、
+ * ここだけ目安日数を実データとして入れる。
+ *
+ * `DomainStore` の口にはしない: インメモリ実装（`DomainRecord`）が `rgpUntil` を
+ * 持っておらず、デモ以外に使い道が無いため。
+ */
+export async function setDomainRgpUntil(
+  db: Db,
+  domainId: string,
+  rgpUntil: Date,
+): Promise<void> {
+  await db
+    .update(schema.domains)
+    .set({ rgpUntil })
+    .where(eq(schema.domains.id, domainId));
+}
+
 /** テスト用のインメモリ実装（DB を立てずにルートの認可・永続化を検証する）。 */
 export function createInMemoryDomainStore(
   seed: DomainRecord[] = [],
