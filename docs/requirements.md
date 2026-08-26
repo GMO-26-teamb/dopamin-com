@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.1.7（2026-08-26） |
+| 版 | v0.1.8（2026-08-26） |
 | プロダクト | ドパ民.com / dopamin.com — Z世代向けドメイン管理プラットフォーム（疑似レジストラ） |
 | チーム | チームドパ民（Team B）: 佐々木 琢登・星 はるか・上原 拓也 |
 | 位置づけ | GMO Internet Internship in kitaQ Webアプリケーションコース（2026/08/24–28）成果物 |
@@ -163,7 +163,7 @@
   - サインアップ: 表示名（1〜32文字）を入力 → `registration options` 取得 → ブラウザのパスキー作成 → 検証成功でユーザー作成 + セッション発行。
   - ログイン: ユーザー名入力なし。Discoverable Credential（Resident Key）でブラウザがパスキーを選択 → 検証成功でセッション発行。
   - ログアウト: セッションを失効させる。
-  - パスキー管理（設定画面）: 登録済みパスキーの一覧（名前・作成日・最終利用日）、追加登録、削除（最後の1つは削除不可）。
+  - パスキー管理（設定画面）: 登録済みパスキーの一覧（名前・作成日・最終利用日）、追加登録、名前の変更（1〜32 文字）、削除（最後の1つは削除不可）。名前の初期値は AAGUID から認証器名（iCloud キーチェーン / Google パスワードマネージャー / Windows Hello 等）を推定し、不明なら「このデバイス」/「同期パスキー」とする。
 - **AC**:
   - AC-01-1: 対応ブラウザ（Chrome / Safari / Edge 最新）でサインアップ〜ログアウト〜再ログインが完了する。
   - AC-01-2: ログイン画面にテキスト入力欄が存在しない（ボタン1つ）。
@@ -356,13 +356,13 @@
 - **概要**: 発表・検証用に、ログインユーザーの DB 上のデータを既定のデモ状態に戻す。
 - **振る舞い**: ユーザーのドメイン・設計・ログを削除し、デモ用ドメイン（各状態のサンプル: Active / RGP / 期限間近 / 移管中）を投入する。レジストリ側の状態はリセットできないため、デモ用ドメインは `dopamin-demo-<短いランダム>` 命名でレジストリに実登録するか、`mock` レジストリ（§11.1）に紐付ける【要確認: レジストリ側にテスト用ドメインの削除・再利用制約があるか】。「移管中」サンプル（IN 申請中・受信した OUT 申請）は 20 分でサーバ自動承認され実レジストリでは維持できないため、`mock` レジストリでのみ投入する。
 - **AC**:
-  - AC-16-1: `DEMO_RESET_ENABLED=true` の環境でのみ実行可能。
+  - AC-16-1: `DEMO_RESET_ENABLED=true` の環境でのみ実行可能。値は `GET /auth/me` の `features.demoReset` でクライアントに伝え、false のときは設定画面にリセット UI を出さない。
   - AC-16-2: リセット後、デモシナリオ（§3.3）の 6〜8 が再現できる。
 
 ### FR-17 AI 設定【P2】
 
 - **概要**: 設定画面から使用する LLM プロバイダ / モデルをユーザー単位で切り替える（Vercel AI SDK による抽象化を UI に露出）。
-- **振る舞い**: 選択肢は環境変数で有効化されたプロバイダのみ（`google` / `anthropic`）。API キーはサーバー側のみ保持し、ユーザー入力は受け付けない。
+- **振る舞い**: 選択肢は環境変数で有効化されたプロバイダのみ（`google` / `anthropic`）。API キーはサーバー側のみ保持し、ユーザー入力は受け付けない。現在の実効値（ユーザー設定 `users.ai_provider / ai_model` → 環境変数の既定の順）と選択肢は `GET /auth/me` の `ai` で配り、`PATCH /settings/ai` は有効化されていないプロバイダを `VALIDATION_ERROR` で拒否する。
 - **AC**: 切替後の AI 呼び出しが AI ログ上で選択したモデル名になっている。
 
 ### FR-18 エラー表示・レジストリ障害時の挙動【P0】
@@ -755,10 +755,11 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。すべてのテーブル
 | POST | `/auth/passkey/login/options` | 不要 | 認証オプション（allowCredentials 空） | FR-01 |
 | POST | `/auth/passkey/login/verify` | 不要 | assertion 検証 → セッション | FR-01 |
 | POST | `/auth/logout` | 要 | セッション失効 | FR-01 |
-| GET | `/auth/me` | 要 | ユーザー情報 | FR-01 |
+| GET | `/auth/me` | 要 | `{ user, features: { demoReset }, ai: { provider, model, providers[] } }`。画面の起動時に必要な「ユーザー + 有効な機能 + AI 設定の実効値と選択肢」をまとめて返す | FR-01 / FR-16 / FR-17 |
 | GET | `/auth/passkeys` | 要 | パスキー一覧 | FR-01 |
 | POST | `/auth/passkeys/register/options` `/verify` | 要 | 追加登録（excludeCredentials 指定） | FR-01 |
-| DELETE | `/auth/passkeys/:id` | 要 | 削除（最後の 1 件は 409） | FR-01 |
+| DELETE | `/auth/passkeys/:id` | 要 | 削除（最後の 1 件は 409 `LAST_PASSKEY`） | FR-01 |
+| PATCH | `/auth/passkeys/:id` | 要 | `{ name }` 名前の変更（1〜32 文字） | FR-01 |
 | GET | `/domains` | 要 | 保有一覧（DB） | FR-02 |
 | POST | `/domains/sync` | 要 | 全保有ドメインを `info` で再同期し、Poll を消化する | FR-02/12 |
 | POST | `/domains/check` | 要 | `{ sld, tlds[] }` または `{ names[] }` → 各結果（空き・レジストリ・スコア） | FR-03/05 |
@@ -816,7 +817,7 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。すべてのテーブル
 | `UNAUTHORIZED` | 401 | 未ログイン / セッション失効 |
 | `FORBIDDEN` | 403 | 所有権なし / Origin 不一致 |
 | `NOT_FOUND` | 404 | |
-| `CONFLICT` | 409 | 取得済み・最後のパスキー削除など |
+| `CONFLICT` | 409 | 取得済みなど（最後のパスキー削除は `LAST_PASSKEY`） |
 | `OPERATION_NOT_ALLOWED` | 409 | EPP ステータスにより不可（`details.statuses`） |
 | `REGISTRY_REJECTED` | 422 | レジストリが拒否（`registryCode` 付き） |
 | `REGISTRY_TIMEOUT` | 504 | |
@@ -825,6 +826,10 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。すべてのテーブル
 | `AI_UNAVAILABLE` | 503 | AI プロバイダエラー / タイムアウト |
 | `RATE_LIMITED` | 429 | AI・GitHub のレート制限 |
 | `INTERNAL` | 500 | |
+| `CHALLENGE_NOT_FOUND` | 400 | WebAuthn チャレンジが不明・期限切れ・使用済み（FR-01） |
+| `VERIFICATION_FAILED` | 401 | attestation / assertion の検証失敗、signature counter 後退、userHandle 不一致（FR-01） |
+| `CREDENTIAL_NOT_FOUND` | 401 | ログイン時に credential ID が未登録（別環境で作ったパスキー等。FR-01） |
+| `LAST_PASSKEY` | 409 | 最後の 1 件のパスキーを削除しようとした（FR-01） |
 
 移管系の `registryCode` はいずれも `REGISTRY_REJECTED` に載せ、コードごとにメッセージを出し分ける: 2202（AuthCode 不一致）/ 2300・2301（`pendingTransfer` 中の重複申請）/ 2304（ステータスにより不可 = 移管ロック等）/ 2106（移管対象外）/ 2303（未登録）【要確認: 実際に返るコード、§21.2 #16】。
 
@@ -1348,3 +1353,4 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | v0.1.5 | 2026-08-26 | FR-04 の入力を「ニックネームまたはアプリ名」に変更（API は `nickname` のまま）。FR-13 をアプリ内の疑似 DNS ゾーンへの「反映」まで拡張（差分確認 → `dns_records` へ upsert、ドパ民 DNS への NS 切替、反映状態バッジ、AC-13-4〜7）。§2.2 / §3 / §9.1（`dns_records`、`subdomain_plans.applied_at`）/ §10.1（`apply`・`dns`）/ §15 / §21 を追随 |
 | v0.1.7 | 2026-08-26 | §9.1 operation_logs.command: レジストリアダプタが実際に発行する補助コマンド 4 種（`hello` / `host_info` / `host_create` / `contact_create`）を enum に追加。`hello` は親コマンドを持たず、NS・コンタクトの自動作成は主コマンドの内部で個別に失敗し得るため、親名に寄せず独立した値で記録する（AC-15-1）。正は `packages/shared/src/operation-log.ts` の `OPERATION_COMMANDS` で、`packages/registry` の `command` もこの語彙に統一（`host:info` → `host_info`、`rotate-auth-info` → `auth_info` 等） |
 | v0.1.6 | 2026-08-26 | §8 / §11.2: 対応 TLD の定数を `packages/shared/src/tlds.ts` に一本化し、`packages/registry` のルーティングと `apps/web` の TLD 選択肢は shared を参照する形に統一（`@dopamin/registry` は `node:crypto` 依存でブラウザから import できない） |
+| v0.1.8 | 2026-08-26 | FR-01 周辺の仕上げ: `GET /auth/me` を `{ user, features.demoReset, ai }` に拡張（`docs/specs/ui-screens.md` §7 要確認 #2 / #3 を確定。FR-16 / FR-17 に追随）、`PATCH /auth/passkeys/:id`（名前変更）と AAGUID からの名前推定を FR-01 に追加、§10.3 に FR-01 の 4 エラーコード（`CHALLENGE_NOT_FOUND` / `VERIFICATION_FAILED` / `CREDENTIAL_NOT_FOUND` / `LAST_PASSKEY`）を追記。実装計画は `docs/specs/passkey-auth.md` §12 |

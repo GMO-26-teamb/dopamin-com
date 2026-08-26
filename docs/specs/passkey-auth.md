@@ -134,6 +134,7 @@ sequenceDiagram
 ### 3.4 削除・ログアウト
 
 - `DELETE /auth/passkeys/:id`: 自分のものでなければ 404。残り 1 件なら 409（`LAST_PASSKEY`）。
+- `PATCH /auth/passkeys/:id { name }`: 自分のものでなければ 404。名前は 1〜32 文字（`passkeyNameSchema` = `displayNameSchema` と同じ制約）。更新後の `PasskeySummary` を返す。
 - `POST /auth/logout`: `sessions` から該当行を削除し、Cookie を `Max-Age=0` で消す。
 
 ---
@@ -149,11 +150,12 @@ sequenceDiagram
 | POST | `/auth/passkey/login/options` | 不要 | `{}` | `{ challengeId, options: PublicKeyCredentialRequestOptionsJSON }` |
 | POST | `/auth/passkey/login/verify` | 不要 | `{ challengeId, response: AuthenticationResponseJSON }` | `{ user }` + Set-Cookie |
 | POST | `/auth/logout` | 要 | — | `{ ok: true }` + Cookie 削除 |
-| GET | `/auth/me` | 要 | — | `{ user }` |
+| GET | `/auth/me` | 要 | — | `{ user, features: { demoReset }, ai: { provider, model, providers: [{ id, models[] }] } }`（`meResponseSchema`。requirements v0.1.8 §10.1） |
 | GET | `/auth/passkeys` | 要 | — | `{ passkeys: [{ id, name, deviceType, backedUp, createdAt, lastUsedAt }] }` |
 | POST | `/auth/passkeys/register/options` | 要 | `{}` | 登録 options（`excludeCredentials` 付き） |
 | POST | `/auth/passkeys/register/verify` | 要 | `{ challengeId, response }` | `{ passkey }` |
 | DELETE | `/auth/passkeys/:id` | 要 | — | `{ ok: true }` |
+| PATCH | `/auth/passkeys/:id` | 要 | `{ name: string(1..32) }` | `{ passkey }` |
 
 `*JSON` 型は `@simplewebauthn/types` のものをそのまま使う。zod スキーマは `packages/shared/src/schemas/auth.ts` に置き、`response` は最低限 `{ id: string, rawId: string, type: 'public-key', response: object }` の形を検証してから SimpleWebAuthn に渡す。
 
@@ -240,8 +242,8 @@ verifyAuthenticationResponse({
 - `passkey_credentials.id`: SimpleWebAuthn が返す base64url 文字列をそのまま PK にする。
 - `passkey_credentials.public_key`: `Uint8Array` を `bytea` に保存。**更新しない**（改竄検出）。
 - `passkey_credentials.counter`: `bigint`。多くのプラットフォーム認証器は常に 0 を返すので、**「保存値 > 0 かつ newCounter ≤ 保存値」のときだけ拒否**する（両方 0 は正常）。
-- `passkey_credentials.name`: 初期値は AAGUID から推定（不明なら `deviceType` に応じて「このデバイス」/「同期パスキー」）。ユーザーが設定画面で変更可。
-- `webauthn_challenges`: 検証成功時に必ず削除。期限切れ行は verify 時に `expires_at < now()` を掃除するか、DELETE を cron に任せる（P2）。
+- `passkey_credentials.name`: 初期値は AAGUID から推定（`apps/api/src/lib/aaguid.ts` に主要な認証器の対応表を同梱。不明なら `deviceType` に応じて「このデバイス」/「同期パスキー」）。ユーザーが設定画面で変更可（`PATCH /auth/passkeys/:id`）。
+- `webauthn_challenges`: 検証成功時（および検証失敗時も）に必ず削除。期限切れ行は options 発行時に `expires_at < now()` を opportunistic に DELETE する（cron は持たない）。
 - `sessions.id`: `crypto.getRandomValues` 32 byte → base64url。Cookie 値そのもの。7 日、残り 3 日を切ったらアクセス時に延長（§10.2）。
 
 ---
@@ -252,7 +254,7 @@ verifyAuthenticationResponse({
 |---|---|
 | `/login` | ボタン 1 つ「パスキーでログイン」＋「初めての方はこちら」リンク。**テキスト入力欄なし**（AC-01-2）。非対応ブラウザは案内文に差し替え |
 | `/signup` | 表示名入力（1〜32 文字、zod で共有）→「パスキーを作成」 |
-| `/settings/passkeys` | 一覧（名前 / 作成日 / 最終利用日 / 同期の有無）、「パスキーを追加」、各行の削除。1 件のときは削除ボタン無効＋説明 |
+| `/settings/passkeys` | 一覧（名前 / 作成日 / 最終利用日 / 同期の有無）、「パスキーを追加」、各行の名前変更（インライン編集、1〜32 文字）と削除。1 件のときは削除ボタン無効＋説明 |
 
 未認証で `/dashboard` 以下へ来た場合は `proxy.ts`（旧 middleware）で Cookie の有無だけ見て `/login` へリダイレクト。実際の有効性検証は API 側（AC-01-3）。
 
@@ -262,13 +264,13 @@ verifyAuthenticationResponse({
 
 | 種別 | 内容 |
 |---|---|
-| unit（api） | challenge 期限切れ → 400 / counter 後退 → 401 + ログ / userHandle 不一致 → 401 / 最後の 1 件削除 → 409 |
+| unit（api） | challenge 期限切れ → 400 / counter 後退 → 401 + ログ / userHandle 不一致 → 401 / 最後の 1 件削除 → 409 / 他人のパスキーの名前変更 → 404 / 名前 0・33 文字 → 400 |
 | unit（shared） | `displayName` 0 文字・33 文字・空白のみ → reject |
-| 契約 | SimpleWebAuthn の `verify*` はモックし、API ルートが DB を正しく更新することを検証（`users`・`passkey_credentials`・`sessions` の行数、challenge 削除） |
+| 契約 | SimpleWebAuthn の `verify*` はモックし、API ルートが DB を正しく更新することを検証（`users`・`passkey_credentials`・`sessions` の行数、challenge 削除）。DB は `@electric-sql/pglite` + `drizzle-orm/pglite` に `packages/db/drizzle` のマイグレーションを適用したテスト用インスタンス（`apps/api/test/helpers/db.ts`）を `setDbForTesting` で注入する |
 | 手動（AC-01-1） | Chrome / Safari / Edge 最新で サインアップ → ログアウト → 再ログイン。`localhost` で実施 |
 | 手動（AC-01-4） | 同一 credential で counter を DB 上で手動で大きくしてからログイン → 拒否されることを確認 |
 
-WebAuthn の実ブラウザ動作は自動化しない（Playwright の virtual authenticator は P2）。
+WebAuthn の実ブラウザ動作は Playwright + CDP Virtual Authenticator で自動化する（`apps/web/e2e/passkey.spec.ts`: サインアップ → ログアウト → ログイン → パスキー追加 → 削除）。API は mock レジストリ + Postgres（ローカルは docker、CI は `services: postgres`）で起動し、CI では必須にしない別ジョブとして実行する。
 
 ---
 
@@ -285,4 +287,66 @@ WebAuthn の実ブラウザ動作は自動化しない（Playwright の virtual 
 ## 11. 未確定・要確認
 
 - 本番の RP ID（独自ドメインを取るか）【要確認】— 取る場合は登録済みパスキーが全て無効になるため、デモ前に確定する。
-- AAGUID → 名前の対応表をどこまで持つか（`passkeydeveloper/passkey-authenticator-aaguids` の JSON を同梱するか、最小限にするか）。
+- ~~AAGUID → 名前の対応表をどこまで持つか~~ → 解決（2026-08-26）: 主要な認証器（iCloud キーチェーン / Google パスワードマネージャー / Windows Hello / Chrome on Mac / 1Password / Bitwarden / Dashlane / Proton Pass / Samsung Pass / KeePassXC 等）だけを `apps/api/src/lib/aaguid.ts` に同梱する。全量 JSON は持たない。
+
+---
+
+## 12. 周辺機能の仕上げ（2026-08-26 実装計画）
+
+§1〜§10 のコア（サインアップ / ログイン / ログアウト / パスキー一覧・追加・削除、`/login` `/signup` `/settings`）は main に実装済み。残っていたギャップを以下の 4 トラックに分け、それぞれ別 worktree・別 PR で並列に進める。マージ後に Wave 2 でエラーコードを統合する。
+
+### 12.1 ギャップと対応
+
+| # | ギャップ | 対応トラック | issue |
+|---|---|---|---|
+| 1 | `/domains*` `/transfers*` が認証なし（AC-01-3 違反） | A | #50 |
+| 2 | FR-01 サービスの unit / 契約テストが無い。テスト DB 基盤も無い | A | #40 |
+| 3 | 期限切れ `webauthn_challenges` の掃除なし | A | — |
+| 4 | `GET /auth/me` が `{ user }` のみで、web の `meResponseSchema` を満たさない（http モードで AppShell・設定画面が動かない） | B | ui-screens §7 #2 / #3 |
+| 5 | `PATCH /settings/ai`（FR-17）未実装 | B | #73 |
+| 6 | web http モードの `settings.me / updateAi` が `NOT_IMPLEMENTED`、`signed-in-redirect` が `fetchMe` 回避策 | B | — |
+| 7 | パスキー名が「このデバイス / 同期パスキー」固定。名前変更 API / UI が無い | D | — |
+| 8 | `apps/web/lib/webauthn.ts` が API 応答を zod 検証していない | D | — |
+| 9 | 実ブラウザでの signup → login の自動検証が無い | E | #41（FR-01 部分） |
+| 10 | エラーコード・例外クラスの二重定義 | Wave 2 | #30 |
+
+### 12.2 トラック A — 認証の堅牢化（`feat/fr-01-auth-hardening`）
+
+- `apps/api/src/lib/db.ts` に `setDbForTesting(db | null)` を追加（`setRegistrySetForTesting` と同じ流儀）。`Db` 型は `drizzle-orm/postgres-js` 由来なので、pglite の drizzle インスタンスは `Db` 互換として注入する（構造的に同じクエリビルダ）。
+- `apps/api/test/helpers/db.ts`: pglite を起動し `packages/db/drizzle/*.sql` を順に適用する `createTestDb()`。`apps/api/test/helpers/session.ts`: `users` + `sessions` を INSERT して Cookie ヘッダ文字列を返す `createTestSession(db, { displayName })`。
+- `AppEnv.Variables` を `AuthVariables`（`user` / `sessionId`）と統合し、`domains` / `transfers` ルーターの先頭で `requireSession` を適用する。既存の `test/routes/*.test.ts` はセッション注入ヘルパーで認証済みにする。
+- `services/auth.ts` の unit / 契約テスト（§9 の表）。SimpleWebAuthn の `verify*` は `vi.mock` で差し替える。
+- `insertChallenge` の前に `expires_at < now()` を DELETE（掃除）。
+- `docs/specs/registry-api.md` §1 の「全ルート認証なし」記述と `docs/testing.md` §1 を更新。
+
+### 12.3 トラック B — `/auth/me` 拡張と AI 設定（`feat/fr-17-settings-me`）
+
+- `apps/api/src/services/settings.ts`: `resolveAiSettings(user, env)` — 有効プロバイダ（`GOOGLE_GENERATIVE_AI_API_KEY` / `ANTHROPIC_API_KEY` の有無）と各プロバイダの候補モデル（`AI_MODEL` を先頭に、既知モデルの短いリスト）を返し、ユーザー設定 → env 既定の順で実効値を決める。どのキーも無い場合は `AI_PROVIDER` を唯一の選択肢として返す（ローカル開発で画面が空にならないように）。
+- `GET /auth/me` を `meResponseSchema` の形に。`features.demoReset = DEMO_RESET_ENABLED`。
+- `routes/settings.ts`: `PATCH /settings/ai`（`aiSettingsUpdateRequestSchema`）。有効化されていないプロバイダは `VALIDATION_ERROR`。`users.ai_provider / ai_model` を更新して実効値を返す。
+- web: `http-services.ts` の `settings.me()` / `updateAi()` を Hono RPC + `unwrap(…, meResponseSchema / aiSettingsResponseSchema)` で実装。`signed-in-redirect.tsx` は http でも `useMe` を使う形に統一し `fetchMe` を削除。`demoReset` は API 未実装のため `NOT_IMPLEMENTED` のまま。
+
+### 12.4 トラック D — パスキー管理の仕上げ（`feat/fr-01-passkey-mgmt`）
+
+- `apps/api/src/lib/aaguid.ts`: AAGUID → 表示名の対応表と `passkeyNameFromAaguid(aaguid, deviceType)`。登録時の初期名に使う。
+- `PATCH /auth/passkeys/:id`（§3.4 / §4）。`packages/shared/src/auth.ts` に `passkeyNameSchema` / `passkeyRenameRequestSchema` を追加。
+- web: `AuthService.renamePasskey(id, name)`（mock / http 両実装）、`useRenamePasskey`、設定画面の行にインライン編集（鉛筆アイコン → Input + 保存 / キャンセル）。
+- `lib/webauthn.ts` の `request()` を zod 検証付きにし、`authUserSchema` / `passkeySummarySchema` / options は `z.object({ challengeId: z.uuid(), options: z.record(...) })` で最低限の形を検証する。
+
+### 12.5 トラック E — e2e（`feat/fr-01-e2e-passkey`）
+
+- `apps/web/playwright.config.ts` と `apps/web/e2e/passkey.spec.ts`。`context.newCDPSession(page)` → `WebAuthn.enable` → `WebAuthn.addVirtualAuthenticator({ protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true })`。
+- シナリオ: `/signup` で表示名入力 → パスキー作成 → `/dashboard` 到達 → ログアウト → `/login` でボタン 1 つ → 再ログイン → `/settings` でパスキー追加 → 2 件になったら 1 件削除 → 最後の 1 件は削除ボタン Disabled。
+- 起動: web は `NEXT_PUBLIC_API_MODE=http`、api は `REGISTRY_MODE=mock` + `DATABASE_URL`（ローカル docker `postgres:17`、CI は `services: postgres`）。`pnpm --filter @dopamin/web e2e` で web / api を `webServer` から起動する。
+- CI: `.github/workflows/ci.yml` に `e2e` ジョブを追加（`continue-on-error: true`、必須にしない）。
+
+### 12.6 Wave 2 — エラーコード統合（`fix/error-code-unify`、#30）
+
+A / B / D のマージ後に main から着手する。`packages/shared/src/errors.ts` を正として `api.ts` の `API_ERROR_CODES` / `apiErrorBodySchema` を削除（re-export で後方互換）、`apps/api` の `ApiError` を `ApiException` に寄せ、`error-handler.ts` を単一経路にする。
+
+### 12.7 マージ順と衝突の見込み
+
+1. 本書と requirements v0.1.8（docs PR）
+2. A → B → D（`routes/auth.ts` の `/me` と `/passkeys/:id` は近接編集だが別ハンドラ。`index.ts` の `.route()` 追加は B のみ）
+3. E（A の requireSession 適用後の挙動で検証したいので最後）
+4. Wave 2

@@ -268,8 +268,8 @@ Figma **Prototype / Screens** にプロトタイプ接続を設定済み（Prese
 | # | 事項 | 本書の仮置き | 選択肢 |
 |---|---|---|---|
 | 1 | S-00 のお試しスコアが `POST /domains/check`（認証要）を未認証で呼べない | 「ログイン後に利用可」と表示し、入力欄は Disabled | (a) 未認証可の `POST /uniqueness/preview`（レート制限付き）を §10.1 に追加 (b) お試しスコアを削除 |
-| 2 | FR-17 の選択肢（有効プロバイダ / モデル）を取得する API が §10.1 にない | `GET /auth/me` に `ai: { providers[], current }` を含める前提 | `GET /settings/ai` を追加 / `GET /auth/me` に含める |
-| 3 | FR-16 `DEMO_RESET_ENABLED` をクライアントが知る手段 | `GET /auth/me` に `features.demoReset` を含める前提。false ならカード非表示 | 常時表示して 403 で Error Card |
+| 2 | ~~FR-17 の選択肢（有効プロバイダ / モデル）を取得する API が §10.1 にない~~ → 解決（requirements v0.1.8）: `GET /auth/me` の `ai: { provider, model, providers[] }` で配る | `GET /auth/me` に含める | 済 |
+| 3 | ~~FR-16 `DEMO_RESET_ENABLED` をクライアントが知る手段~~ → 解決（requirements v0.1.8）: `GET /auth/me` の `features.demoReset`。false ならカード非表示 | `GET /auth/me` に含める | 済 |
 | 4 | §15.2「移管 OUT はドメイン名再入力」の適用範囲 | 承認（D-06）で再入力、AuthCode 発行（D-05）は不要 | D-05 にも再入力を課す |
 | 5 | FR-10 AGP 即時削除後の DB 行の扱い | 行を削除し S-10 へ（詳細 URL は S-80） | `pendingDelete` 表示で残す |
 | 6 | NFR-09 / §15.4 のモバイル対応 | 本書はデスクトップ 1120px のみ（ハッカソン期間） | 要件をデスクトップ限定に改訂 / 375px の主要 4 画面を追加 |
