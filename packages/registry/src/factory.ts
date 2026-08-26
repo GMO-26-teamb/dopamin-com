@@ -17,6 +17,16 @@ export interface RegistrySetConfig {
   /** mode=mock のときのエラーシミュレーション。 */
   mockFailMode?: MockFailMode;
   /**
+   * mode=mock のときの移管の相手レジストラ ID（§17 `MOCK_FOREIGN_REGISTRAR_ID`）。
+   * 未指定なら mock 既定の `MOCK-FOREIGN`。
+   */
+  mockForeignRegistrarId?: string;
+  /**
+   * mode=mock のときの自動承認までのミリ秒（§17 `MOCK_TRANSFER_AUTO_APPROVE_MS`）。
+   * 未指定なら 20 分（`TRANSFER_AUTO_APPROVE_MS`）。
+   */
+  mockAutoApproveMs?: number;
+  /**
    * 操作ログ（FR-15）用の観測フック。real / mock どちらのアダプタにも配線される。
    * `adapters` で構築済みアダプタを渡した場合は適用されない（各アダプタ側で設定する）。
    */
@@ -52,6 +62,12 @@ export class RegistrySet {
         "mock",
         new MockRegistryAdapter({
           failMode: config.mockFailMode,
+          ...(config.mockForeignRegistrarId
+            ? { foreignRegistrarId: config.mockForeignRegistrarId }
+            : {}),
+          ...(config.mockAutoApproveMs === undefined
+            ? {}
+            : { autoApproveMs: config.mockAutoApproveMs }),
           onCall: config.onCall,
           makeClTrid: config.makeClTrid,
         }),

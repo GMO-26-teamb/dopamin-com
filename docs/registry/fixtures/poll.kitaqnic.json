@@ -1,0 +1,20 @@
+{
+  "result": { "code": 1000, "message": "Command completed successfully" },
+  "resData": {
+    "count": 1,
+    "message": {
+      "id": 2087,
+      "msgType": "transferApproved",
+      "payload": {
+        "domain": "example.xyz",
+        "status": "clientApproved",
+        "gainingRegistrar": "REG-DOPAMIN",
+        "losingRegistrar": "REG-OTHER",
+        "reDate": "2026-08-26T10:00:00Z",
+        "acDate": "2026-08-26T10:20:00Z"
+      },
+      "qdate": "2026-08-26T10:05:00Z"
+    }
+  },
+  "trID": { "clTRID": "dp-fixture-0009", "svTRID": "KQNIC-20260825-000006" }
+}

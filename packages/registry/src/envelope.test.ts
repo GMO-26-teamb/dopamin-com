@@ -3,7 +3,11 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { interpretEppResponse, parseResData } from "./envelope";
 import { RegistryError } from "./errors";
-import { checkResDataSchema, domainResDataSchema } from "./kitaq";
+import {
+  checkResDataSchema,
+  domainResDataSchema,
+  pollResDataSchema,
+} from "./kitaq";
 
 /** 契約テストの fixture は docs/registry/fixtures/ に置く（CLAUDE.md）。 */
 function loadFixture(name: string): unknown {
@@ -173,6 +177,43 @@ describe("parseResData（contract: fixture → 本番 resData スキーマの検
     expect(resData.results).toHaveLength(2);
     expect(resData.results[0]?.avail).toBe(true);
     expect(resData.results[1]?.reason).toBe("in use");
+  });
+
+  it("poll fixture が resData スキーマを通過する（両レジストリで同一の形）", () => {
+    for (const fixture of ["poll.kitaqsign.json", "poll.kitaqnic.json"]) {
+      const { envelope } = interpretEppResponse({
+        registry: "kitaqsign",
+        command: "poll",
+        httpStatus: 200,
+        json: loadFixture(fixture),
+      });
+      const resData = parseResData(
+        "kitaqsign",
+        "poll",
+        envelope,
+        pollResDataSchema,
+      );
+      expect(resData.message?.id).toEqual(expect.any(Number));
+      expect(resData.message?.msgType).toEqual(expect.any(String));
+      expect(resData.message?.qdate).toEqual(expect.any(String));
+    }
+  });
+
+  it("poll-empty fixture は message を持たない（未読なし）", () => {
+    const { envelope } = interpretEppResponse({
+      registry: "kitaqnic",
+      command: "poll",
+      httpStatus: 200,
+      json: loadFixture("poll-empty.json"),
+    });
+    const resData = parseResData(
+      "kitaqnic",
+      "poll",
+      envelope,
+      pollResDataSchema,
+    );
+    expect(resData.count).toBe(0);
+    expect(resData.message ?? null).toBeNull();
   });
 
   it("必須フィールド欠落は REGISTRY_SPEC_MISMATCH", () => {
