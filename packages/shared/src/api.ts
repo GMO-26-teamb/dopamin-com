@@ -8,6 +8,7 @@ import {
 import { errorCodeSchema } from "./errors";
 import {
   clientStatusSchema,
+  registrantProfileSchema,
   registryIdSchema,
   type TransferResult,
   transferStatusSchema,
@@ -123,9 +124,27 @@ export const domainUpdateRequestSchema = z
         remove: z.array(clientStatusSchema).optional(),
       })
       .optional(),
+    /**
+     * コンタクトの変更（FR-09）。値はレジストリのコンタクト ID ではなく
+     * **プロファイルそのもの**を受け取り、ID の用意（作成 or 更新）は API 側で行う
+     * （`contact.service.ts`。ユーザー × レジストリで 1 件を使い回す）。
+     * Admin / Billing は扱わない（ICANN Registration Data Policy）。
+     */
+    contacts: z
+      .object({
+        registrant: registrantProfileSchema.optional(),
+        tech: registrantProfileSchema.optional(),
+      })
+      .refine((v) => v.registrant !== undefined || v.tech !== undefined, {
+        message: "変更するコンタクトを 1 つ以上指定してください",
+      })
+      .optional(),
   })
   .refine(
-    (v) => v.nameservers !== undefined || v.clientStatuses !== undefined,
+    (v) =>
+      v.nameservers !== undefined ||
+      v.clientStatuses !== undefined ||
+      v.contacts !== undefined,
     {
       message: "変更内容を 1 つ以上指定してください",
     },

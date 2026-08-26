@@ -5,6 +5,7 @@ import type {
   DomainInfo,
   HelloResult,
   PollMessage,
+  RegistrantProfile,
   RegistryId,
   RenewInput,
   TransferResult,
@@ -59,6 +60,20 @@ export interface RegistryAdapter {
    * `rotate-auth-info`（再生成）で取得する。呼ぶたびに値が変わる点に注意。
    */
   authCode(name: string): Promise<string>;
+  /**
+   * コンタクトの作成（`contact:create`）。採番したレジストリ側 ID を返す。
+   *
+   * ドメインの登録者・各ロールは既存コンタクト ID の参照でしか指定できないため、
+   * `create` / `update` の前にこれで用意する。ID の採番はアダプタの責務
+   * （レジストラ内で一意・3〜16 文字などの制約がレジストリ固有のため）。
+   */
+  createContact(profile: RegistrantProfile): Promise<string>;
+  /**
+   * コンタクトの更新（`contact:update`）。ID は据え置きで内容だけを差し替える。
+   * 同じ ID を参照しているドメインすべてに反映されるので、
+   * ユーザー × レジストリで 1 件を使い回す前提（`contacts` テーブル）と噛み合う。
+   */
+  updateContact(id: string, profile: RegistrantProfile): Promise<void>;
   /**
    * 非同期通知の取得。最古の未 ack メッセージを 1 件返し、無ければ null。
    *

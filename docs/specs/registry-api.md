@@ -42,7 +42,7 @@
 | POST | `/domains/sync` | ✅ | Poll を消化してから保有ドメイン（`ownership = 'owned'` のみ）を `info` で再同期する（#58）。`info` の `pendingTransfer` から受信中の申請を拾って `transfers(out)` を作り、`sponsoringRegistrarId` が自レジストラと違えば `transferred_out` に倒す（clID が取れるまで後者は効かない。【要確認 §21.2 #12】）。応答は `domainSyncWithPollResponseSchema`（`domains` / `failures` + `pollProcessed`）。順序が Poll → 同期なのは、先に消化しないと移管 OUT 済みの行がこの応答の保有一覧に残ってしまうため（AC-02-4） |
 | GET | `/domains/:name` | ✅ | `info` で最新化して DB キャッシュに write-through。応答の契約は `domainDetailResponseSchema`（#53）。レジストリに繋がらない（`REGISTRY_TIMEOUT` / `REGISTRY_UNAVAILABLE` / `REGISTRY_SPEC_MISMATCH`）ときは DB キャッシュを `stale: true` + `syncedAt` + `error`（理由）付きで返す（AC-07-2、#129）。`NOT_FOUND` や拒否応答はそのまま返す。**`ownership = 'transferred_out'` の行はレジストリに問い合わせずキャッシュを返す**（#57。自レジストラが非スポンサーで `info` を信頼できず、`upsertDomainFromInfo` が常に `owned` で書くため部分一意インデックスをすり抜けて保有行が復活する） |
 | POST | `/domains/:name/renew` | ✅ | `{period}`。curExpDate は API 側で `info` から取得。10 年上限ガード（AC-08-2） |
-| PATCH | `/domains/:name` | ✅ | `{nameservers?（全量指定→差分変換）, clientStatuses?{add,remove}}`。コンタクト変更は未対応 |
+| PATCH | `/domains/:name` | ✅ | `{nameservers?（全量指定→差分変換）, clientStatuses?{add,remove}, contacts?{registrant?, tech?}}`。`contacts` はコンタクト ID ではなく**プロファイル**を受け取り、ID の用意（作成 or 更新）は API 側で行う（#72）。Admin / Billing は扱わない |
 | DELETE | `/domains/:name` | ✅ | 削除ロック中 409（AC-10-2）。削除後の状態（RGP）を返す |
 | POST | `/domains/:name/restore` | ✅ | `redemptionPeriod` 中のみ（AC-11-2） |
 | POST | `/domains/:name/auth-code` | ✅ | `rotate-auth-info` を実行（取得のたびに authInfo が変わる）。再発行という副作用があるため GET ではなく POST（§10.2 の Origin 検証を通すため） |
@@ -80,9 +80,17 @@ result code ごとの**ユーザー向け理由文**は `packages/shared/src/reg
    照会は `info` の `pendingTransfer` から導出する。approved / rejected / cancelled は区別できないため、
    状態遷移の検知は Poll 通知に寄せる（ADR-0002）。
 4. **`renew` は `curExpDate`（YYYY-MM-DD）必須**。API は直前の `info` から取得して渡す。
-5. **`domain:create` の registrant は既存コンタクト ID 必須**。アダプタの `create` が
-   ダミー PII（レジストリの許可パターンに一致する固定値）でコンタクトを都度作成する。
-   ユーザーごとのコンタクト再利用は DB 導入時（contacts テーブル）に移行する。
+5. **`domain:create` の registrant は既存コンタクト ID 必須**。アダプタに
+   `createContact` / `updateContact` を公開し、**ユーザー × レジストリ × ロールで 1 件**の
+   コンタクトを `contacts` テーブル（§9.1）に持って使い回す（#72。`apps/api` の
+   `services/contact.service.ts`）。以前は `create` のたびに使い捨てのコンタクトを
+   作っていたため、同じユーザーのドメインごとに別の登録者が並び、修正のたびに増えていた。
+   プロファイルが変わったときは ID 据え置きで `contact:update`（同じ ID を参照している
+   全ドメインに反映される）。PII は許可ダミー値のみで、値域は
+   `registrantProfileSchema`（`packages/shared`）が正 —— 両レジストリの OpenAPI の
+   pattern の写しで、**レジストリに送る前に 400 で弾く**（2xxx で気付くのでは
+   操作ログに実在しうる値が残るし、ユーザーに理由が伝わらない）。
+   移管 IN で取り込んだドメインのコンタクト差し替えは【要確認 §21.2 #14】待ちで未実装。
 6. **RegistryAdapter に `hello()` を追加**（§11.1 の 8 操作 + transferQuery + authCode に加えて）。
    `/health` の疎通確認と TLD 一覧取得に使う。
 7. タイムアウト: 参照系 5 秒 / 更新系 15 秒（`AbortSignal.timeout`）。更新系の自動再試行はしない（NFR-02）。

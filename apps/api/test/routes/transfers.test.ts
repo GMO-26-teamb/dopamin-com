@@ -13,6 +13,10 @@ import app from "../../src/index";
 import { setRegistrySetForTesting } from "../../src/lib/registries";
 import { setRetrySleepForTesting } from "../../src/lib/retry";
 import {
+  createInMemoryContactStore,
+  setContactStoreForTesting,
+} from "../../src/services/contact.service";
+import {
   createInMemoryDomainStore,
   type DomainStore,
   setDomainStoreForTesting,
@@ -69,6 +73,8 @@ beforeEach(() => {
   setDomainStoreForTesting(domainStore);
   transferStore = createInMemoryTransferStore();
   setTransferStoreForTesting(transferStore);
+  // 登録・情報修正はユーザー × レジストリのコンタクトを引く（#72）
+  setContactStoreForTesting(createInMemoryContactStore());
   installTestSession();
   vi.spyOn(console, "error").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -80,6 +86,7 @@ afterEach(() => {
   setRegistrySetForTesting(null);
   setDomainStoreForTesting(null);
   setTransferStoreForTesting(null);
+  setContactStoreForTesting(null);
   clearTestSession();
   vi.restoreAllMocks();
 });

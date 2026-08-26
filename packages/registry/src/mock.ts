@@ -10,6 +10,7 @@ import {
   operationLogStatusFromErrorCode,
   type PollMessage,
   type PollMessageType,
+  type RegistrantProfile,
   type RegistryId,
   type RenewInput,
   TRANSFER_AUTO_APPROVE_MS,
@@ -143,6 +144,8 @@ export class MockRegistryAdapter implements RegistryAdapter {
   /** 放置された移管申請をサーバが自動承認するまでのミリ秒（§17 MOCK_TRANSFER_AUTO_APPROVE_MS）。 */
   private readonly autoApproveMs: number;
   private readonly domains = new Map<string, MockDomainState>();
+  /** レジストリ側に作られたコンタクト（ID → プロファイル）。 */
+  private readonly contacts = new Map<string, RegistrantProfile>();
   /**
    * レジストラ ID ごとの Poll キュー（FIFO）。相手レジストラ側のキューも持つ:
    * `poll()` からは読めないが、「申請が相手に届いた」状態を表現するために積む。
@@ -458,7 +461,9 @@ export class MockRegistryAdapter implements RegistryAdapter {
       });
     }
     const nowIso = this.now().toISOString();
-    const registrant = `mock-${randomUUID().slice(0, 8)}`;
+    // 呼び出し側が用意したコンタクトがあれば参照する（#72 の再利用）
+    const registrant =
+      input.registrantContactId ?? `mock-${randomUUID().slice(0, 8)}`;
     const state: MockDomainState = {
       name,
       sponsoringRegistrarId: this.registrarId,
@@ -615,6 +620,14 @@ export class MockRegistryAdapter implements RegistryAdapter {
       statusSet.delete(status);
     }
     state.clientStatuses = [...statusSet];
+
+    // 登録者は置換（EPP の chg.registrant）、ロール別コンタクトは差分（add.contacts）
+    if (input.registrant !== undefined) {
+      state.registrant = input.registrant;
+    }
+    if (input.contacts) {
+      state.contacts = { ...state.contacts, ...input.contacts };
+    }
     state.upDate = this.now().toISOString();
     return this.toInfo(state);
   }
@@ -984,6 +997,52 @@ export class MockRegistryAdapter implements RegistryAdapter {
       pendingTransfer: state.pendingTransfer !== null,
       statuses: deriveStatuses(state),
     };
+  }
+
+  /**
+   * コンタクトの作成（§11.1）。実レジストリと同じく ID はアダプタが採番する。
+   * 内容は保持するだけで、mock のドメイン状態（`registrant` / `contacts`）は
+   * ID で参照する。
+   */
+  async createContact(profile: RegistrantProfile): Promise<string> {
+    return this.recorded("contact_create", null, { profile }, () =>
+      this.doCreateContact(profile),
+    );
+  }
+
+  private async doCreateContact(profile: RegistrantProfile): Promise<string> {
+    this.gate("contact:create");
+    const id = `C-${randomUUID().slice(0, 8)}`;
+    this.contacts.set(id, { ...profile });
+    return id;
+  }
+
+  async updateContact(id: string, profile: RegistrantProfile): Promise<void> {
+    return this.recorded("contact_update", null, { id, profile }, () =>
+      this.doUpdateContact(id, profile),
+    );
+  }
+
+  private async doUpdateContact(
+    id: string,
+    profile: RegistrantProfile,
+  ): Promise<void> {
+    this.gate("contact:update");
+    if (!this.contacts.has(id)) {
+      throw new RegistryError({
+        code: "NOT_FOUND",
+        registry: this.id,
+        message: `contact:update: コンタクト ${id} は存在しません`,
+        registryCode: 2303,
+      });
+    }
+    this.contacts.set(id, { ...profile });
+  }
+
+  /** テスト用: 保持しているコンタクトの内容を覗く（レジストリ操作ではない）。 */
+  peekContact(id: string): RegistrantProfile | undefined {
+    const stored = this.contacts.get(id);
+    return stored ? { ...stored } : undefined;
   }
 
   async authCode(name: string): Promise<string> {

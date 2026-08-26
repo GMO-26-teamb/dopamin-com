@@ -14,6 +14,7 @@ import {
   getDefaultPreparedCorpus,
   isOperationAllowed,
   isRestorable,
+  REGISTRY_CONTACT_KEY,
   type RegistryId,
   scoreDistinctiveness,
   splitDomainName,
@@ -28,6 +29,7 @@ import { registryErrorMessage } from "../lib/registry-message";
 import { withReadRetry } from "../lib/retry";
 import { jsonValidator } from "../lib/validator";
 import { requireSession } from "../middleware/session";
+import { ensureRegistryContact } from "../services/contact.service";
 import {
   listDomainSummaries,
   pendingTransfersByDomain,
@@ -304,6 +306,14 @@ export const domains = new Hono<AuthedEnv>()
       );
     }
 
+    // FR-06「登録者プロファイルを自動適用」: ユーザー × レジストリで 1 件のコンタクトを
+    // 用意して使い回す（未作成なら contact:create）。#72
+    const registrantContactId = await ensureRegistryContact(
+      c.get("user").id,
+      adapter,
+      "registrant",
+    );
+
     // AC-06-2: create タイムアウト時は再送せず info で存在確認して結果を確定する
     const domain = await reconcileOnTimeout(
       () =>
@@ -314,6 +324,7 @@ export const domains = new Hono<AuthedEnv>()
             ? { nameservers: body.nameservers }
             : {}),
           authInfo: generateAuthInfo(),
+          registrantContactId,
         }),
       () => adapter.info(body.name),
     );
@@ -470,12 +481,34 @@ export const domains = new Hono<AuthedEnv>()
     if (body.clientStatuses?.remove && body.clientStatuses.remove.length > 0) {
       input.removeStatuses = body.clientStatuses.remove;
     }
+    // FR-09: コンタクトは ID の参照でしか指定できないので、先に用意して ID に変換する。
+    // 同じ ID を使い回すため、内容だけが変わった場合はレジストリ側で contact:update になる
+    if (body.contacts?.registrant) {
+      input.registrant = await ensureRegistryContact(
+        userId,
+        adapter,
+        "registrant",
+        body.contacts.registrant,
+      );
+    }
+    if (body.contacts?.tech) {
+      input.contacts = {
+        [REGISTRY_CONTACT_KEY.tech]: await ensureRegistryContact(
+          userId,
+          adapter,
+          "tech",
+          body.contacts.tech,
+        ),
+      };
+    }
 
     const hasChanges =
       (input.addNameservers?.length ?? 0) > 0 ||
       (input.removeNameservers?.length ?? 0) > 0 ||
       (input.addStatuses?.length ?? 0) > 0 ||
-      (input.removeStatuses?.length ?? 0) > 0;
+      (input.removeStatuses?.length ?? 0) > 0 ||
+      input.registrant !== undefined ||
+      input.contacts !== undefined;
     if (!hasChanges) {
       const unchanged = await upsertDomainFromInfo(userId, current);
       return c.json(detailResponse(unchanged, false));

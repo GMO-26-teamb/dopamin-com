@@ -46,9 +46,11 @@ export const AUXILIARY_OPERATION_COMMANDS = [
   "host_info",
   "host_create",
   "contact_create",
+  // コンタクトの再利用（#72）で、プロファイル変更時に単独で発行される
+  "contact_update",
 ] as const;
 
-/** `operation_logs.command` に入り得る値のすべて（主 15 種 + 補助 4 種）。 */
+/** `operation_logs.command` に入り得る値のすべて（主 15 種 + 補助 5 種）。 */
 export const OPERATION_COMMANDS = [
   ...PRIMARY_OPERATION_COMMANDS,
   ...AUXILIARY_OPERATION_COMMANDS,

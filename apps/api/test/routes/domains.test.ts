@@ -27,6 +27,10 @@ import app from "../../src/index";
 import { setRegistrySetForTesting } from "../../src/lib/registries";
 import { setRetrySleepForTesting } from "../../src/lib/retry";
 import {
+  createInMemoryContactStore,
+  setContactStoreForTesting,
+} from "../../src/services/contact.service";
+import {
   createInMemoryDomainStore,
   type DomainStore,
   setDomainStoreForTesting,
@@ -98,6 +102,8 @@ beforeEach(() => {
   setDomainStoreForTesting(store);
   // 一覧・詳細は移管バッジ（§10.4 `transfer`）のために transfers も読む（#53）
   setTransferStoreForTesting(createInMemoryTransferStore());
+  // 登録・情報修正はユーザー × レジストリのコンタクトを引く（#72）
+  setContactStoreForTesting(createInMemoryContactStore());
   installTestSession();
   setRegistrySetForTesting(
     createRegistrySet({
@@ -115,6 +121,7 @@ afterEach(() => {
   setRegistrySetForTesting(null);
   setDomainStoreForTesting(null);
   setTransferStoreForTesting(null);
+  setContactStoreForTesting(null);
   clearTestSession();
   vi.restoreAllMocks();
 });
@@ -452,6 +459,78 @@ describe("POST /api/v1/domains/:name/renew（FR-08 更新）", () => {
   });
 });
 
+describe("FR-06 / FR-09: コンタクトの再利用（#72）", () => {
+  const PROFILE = {
+    name: "Hanako Test",
+    email: "hanako.test@example.net",
+    street: "Redacted for Privacy",
+    city: "Redacted for Privacy",
+    countryCode: "US",
+  } as const;
+
+  it("同じユーザーの 2 件目の登録は同じ登録者コンタクトを参照する", async () => {
+    await createDomain("one.com");
+    await createDomain("two.com");
+
+    const first = (await kitaqsign.info("one.com")).registrant;
+    const second = (await kitaqsign.info("two.com")).registrant;
+    expect(first).toBeTruthy();
+    // 使い捨てのコンタクトを毎回作らない（§9.1 contacts の再利用）
+    expect(second).toBe(first);
+  });
+
+  it("PATCH で登録者プロファイルを変えても同じ ID のまま中身が差し替わる", async () => {
+    await createDomain("edit.com");
+    const contactId = (await kitaqsign.info("edit.com")).registrant;
+
+    const res = await sendJson(
+      "/domains/edit.com",
+      { contacts: { registrant: PROFILE } },
+      "PATCH",
+    );
+    expect(res.status).toBe(200);
+
+    // ドメインが参照する ID は変わらず、レジストリ側のコンタクトの内容だけが変わる
+    expect((await kitaqsign.info("edit.com")).registrant).toBe(contactId);
+    expect(kitaqsign.peekContact(contactId)).toEqual(PROFILE);
+  });
+
+  it("tech コンタクトは登録者とは別の ID になる", async () => {
+    await createDomain("tech.com");
+    const res = await sendJson(
+      "/domains/tech.com",
+      { contacts: { tech: PROFILE } },
+      "PATCH",
+    );
+    expect(res.status).toBe(200);
+
+    const info = await kitaqsign.info("tech.com");
+    expect(info.contacts.TECH).toBeTruthy();
+    expect(info.contacts.TECH).not.toBe(info.registrant);
+    expect(kitaqsign.peekContact(String(info.contacts.TECH))).toEqual(PROFILE);
+  });
+
+  it("許可されていないダミー値は 400 VALIDATION_ERROR（レジストリに送る前に弾く）", async () => {
+    await createDomain("pii.com");
+    for (const contacts of [
+      { registrant: { ...PROFILE, name: "山田 太郎" } },
+      { registrant: { ...PROFILE, email: "real.person@gmail.com" } },
+      { registrant: { ...PROFILE, street: "1-2-3 Chiyoda" } },
+      { registrant: { ...PROFILE, countryCode: "FR" } },
+    ]) {
+      const res = await sendJson("/domains/pii.com", { contacts }, "PATCH");
+      expect(res.status).toBe(400);
+      expect((await parseError(res)).error.code).toBe("VALIDATION_ERROR");
+    }
+  });
+
+  it("contacts が空オブジェクトなら 400（変更内容が無い）", async () => {
+    await createDomain("empty.com");
+    const res = await sendJson("/domains/empty.com", { contacts: {} }, "PATCH");
+    expect(res.status).toBe(400);
+  });
+});
+
 describe("PATCH /api/v1/domains/:name（FR-09 情報修正）", () => {
   it("NS 全量指定が add/rem 差分に変換される", async () => {
     await createDomain("ns.com");
@@ -776,6 +855,8 @@ describe("エラー変換（§10.3: RegistryError → 統一エラー形式）",
       check: async () => fail(),
       info: async () => fail(),
       create: async () => fail(),
+      createContact: async () => fail(),
+      updateContact: async () => fail(),
       renew: async () => fail(),
       update: async () => fail(),
       delete: async () => fail(),
@@ -1209,6 +1290,8 @@ describe("廃止後に info が引けないときの扱い", () => {
       transferReject: (name) => base.transferReject(name),
       transferCancel: (name) => base.transferCancel(name),
       authCode: (name) => base.authCode(name),
+      createContact: (profile) => base.createContact(profile),
+      updateContact: (id, profile) => base.updateContact(id, profile),
       poll: () => base.poll(),
       ackMessage: (id) => base.ackMessage(id),
     };
@@ -1357,6 +1440,8 @@ describe("sync で info が NOT_FOUND のとき（AC-02-4 は #33 / #56 待ち�
       transferReject: (name) => base.transferReject(name),
       transferCancel: (name) => base.transferCancel(name),
       authCode: (name) => base.authCode(name),
+      createContact: (profile) => base.createContact(profile),
+      updateContact: (id, profile) => base.updateContact(id, profile),
       poll: () => base.poll(),
       ackMessage: (id) => base.ackMessage(id),
     };

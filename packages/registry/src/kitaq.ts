@@ -8,6 +8,7 @@ import {
   type HelloResult,
   type PollMessage,
   type PollMessageType,
+  type RegistrantProfile,
   type RenewInput,
   type TransferResult,
   type TransferStatus,
@@ -491,13 +492,14 @@ class KitaqRegistryAdapter implements RegistryAdapter {
     return info;
   }
 
-  async create(input: CreateInput): Promise<DomainInfo> {
-    // registrant は既存コンタクト ID の参照が必須のため、先にダミー PII でコンタクトを作る。
-    // ネームサーバも update と同様にホストオブジェクトを先に用意しておく。
-    if (input.nameservers && input.nameservers.length > 0) {
-      await this.ensureHosts(input.nameservers, input.name);
-    }
-    const contact = input.contact ?? DEFAULT_REGISTRANT_PROFILE;
+  /**
+   * `contact:create`。レジストラ内で一意な ID を採番して返す。
+   * `domainName` は操作ログ（FR-15）の紐付け先で、登録の一部として呼ばれた場合に渡す。
+   */
+  async createContact(
+    profile: RegistrantProfile,
+    domainName?: string,
+  ): Promise<string> {
     const contactId = newContactId();
     await this.client.command({
       method: "POST",
@@ -505,22 +507,63 @@ class KitaqRegistryAdapter implements RegistryAdapter {
       body: {
         id: contactId,
         postalInfo: {
-          name: contact.name,
+          name: profile.name,
           addr: {
-            street: contact.street,
-            city: contact.city,
-            cc: contact.countryCode,
+            street: profile.street,
+            city: profile.city,
+            cc: profile.countryCode,
           },
         },
-        email: contact.email,
+        email: profile.email,
         authInfo: randomUUID(),
       },
       kind: "write",
       command: "contact_create",
-      // コンタクト操作だが、操作ログでは登録対象のドメインに紐づける
-      domainName: input.name,
+      ...(domainName === undefined ? {} : { domainName }),
       resDataSchema: unitResDataSchema,
     });
+    return contactId;
+  }
+
+  /**
+   * `contact:update`（`PUT /contacts/{id}`）。指定した項目だけを差し替える。
+   * `authInfo` は省略すると現在値が維持される（Swagger）ので送らない。
+   */
+  async updateContact(id: string, profile: RegistrantProfile): Promise<void> {
+    await this.client.command({
+      method: "PUT",
+      path: `/contacts/${encodeURIComponent(id)}`,
+      body: {
+        postalInfo: {
+          name: profile.name,
+          addr: {
+            street: profile.street,
+            city: profile.city,
+            cc: profile.countryCode,
+          },
+        },
+        email: profile.email,
+      },
+      kind: "write",
+      command: "contact_update",
+      resDataSchema: unitResDataSchema,
+    });
+  }
+
+  async create(input: CreateInput): Promise<DomainInfo> {
+    // registrant は既存コンタクト ID の参照が必須のため、先にダミー PII でコンタクトを作る。
+    // ネームサーバも update と同様にホストオブジェクトを先に用意しておく。
+    if (input.nameservers && input.nameservers.length > 0) {
+      await this.ensureHosts(input.nameservers, input.name);
+    }
+    // 呼び出し側が用意済みのコンタクト ID を渡していればそれを使い回す
+    // （ユーザー × レジストリで 1 件。`apps/api` の contact.service.ts）
+    const contactId =
+      input.registrantContactId ??
+      (await this.createContact(
+        input.contact ?? DEFAULT_REGISTRANT_PROFILE,
+        input.name,
+      ));
 
     await this.client.command({
       method: "POST",
@@ -579,6 +622,15 @@ class KitaqRegistryAdapter implements RegistryAdapter {
     if (input.removeStatuses && input.removeStatuses.length > 0) {
       rem.statuses = input.removeStatuses;
     }
+    // ロール別コンタクトは差分（add）で指定する（Swagger の DomainChangeSet.contacts）
+    if (input.contacts && Object.keys(input.contacts).length > 0) {
+      add.contacts = input.contacts;
+    }
+    // 登録者は差分ではなく置換（chg）。EPP のドメインは registrant を 1 つしか持たない
+    const chg: Record<string, unknown> = {};
+    if (input.registrant !== undefined) {
+      chg.registrant = input.registrant;
+    }
 
     // レスポンス resData は kitaqsign が DomainResponse、kitaqnic が Unit（空）
     // （Swagger で確認済みの差分）。ドメイン情報が返ればそれを使い、無ければ info で取り直す。
@@ -588,6 +640,7 @@ class KitaqRegistryAdapter implements RegistryAdapter {
       body: {
         ...(Object.keys(add).length > 0 ? { add } : {}),
         ...(Object.keys(rem).length > 0 ? { rem } : {}),
+        ...(Object.keys(chg).length > 0 ? { chg } : {}),
       },
       kind: "write",
       command: "update",
