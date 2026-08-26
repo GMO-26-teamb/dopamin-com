@@ -6,7 +6,12 @@
  * EPP ステータスの再解釈は UI 側では行わない（`deriveDisplayStatus` が SSOT）。
  */
 
-import type { ApiErrorBody, AuthUser, DisplayStatus } from "@dopamin/shared";
+import type {
+  ApiErrorBody,
+  ApiErrorCode,
+  AuthUser,
+  DisplayStatus,
+} from "@dopamin/shared";
 
 export type Ownership = "owned" | "transferred_out";
 
@@ -47,6 +52,33 @@ export interface DomainDetail extends DomainSummary {
   gracePeriods: GracePeriod[];
   transferableFrom: string | null;
   subdomainPlan: { hosts: number; applied: number } | null;
+}
+
+/**
+ * `POST /domains/sync` で同期できなかった 1 件（S-13 / AC-18-1）。
+ *
+ * `code` は API の `domainSyncFailureSchema` と同じ §10.3 の統一コード。
+ * `registry` は名前の TLD から引いた「落ちた相手」で、Banner の見出しを
+ * 具体名（「Kitaqsign が応答しません」）にするために使う。
+ */
+export interface SyncFailure {
+  name: string;
+  code: ApiErrorCode;
+  message: string;
+  /** 未対応 TLD なら null（レジストリを名指しできない）。 */
+  registry: Exclude<DomainSummary["registry"], "mock"> | null;
+}
+
+/**
+ * `POST /domains/sync` の結果。
+ *
+ * 部分失敗は例外にせずここに載せる。画面は `domains` を必ずキャッシュに書き込み、
+ * 失敗した行だけを stale として描く（S-13 は「カード単位」で出す仕様）。
+ * 例外になるのはリクエスト自体が失敗したときだけ（401 / 5xx / ネットワーク）。
+ */
+export interface SyncResult {
+  domains: DomainSummary[];
+  failures: SyncFailure[];
 }
 
 /**

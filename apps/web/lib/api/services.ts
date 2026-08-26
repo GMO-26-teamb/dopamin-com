@@ -23,6 +23,7 @@ import type {
   OperationLog,
   SearchResult,
   SubdomainPlan,
+  SyncResult,
   Transfer,
 } from "./types";
 
@@ -49,8 +50,8 @@ export interface AuthService {
 export interface DomainService {
   /** GET /domains（未実装 → NOT_IMPLEMENTED） */
   list(): Promise<DomainSummary[]>;
-  /** POST /domains/sync */
-  sync(): Promise<DomainSummary[]>;
+  /** POST /domains/sync（部分失敗は例外にせず `failures` に載せて返す・S-13） */
+  sync(): Promise<SyncResult>;
   /** GET /domains/:name */
   get(name: string): Promise<DomainDetail>;
   /** POST /domains/check */
