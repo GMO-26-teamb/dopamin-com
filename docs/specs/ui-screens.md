@@ -2,8 +2,8 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.2（2026-08-26） |
-| 対応要件 | `docs/requirements.md` v0.1.5 §4 FR-01〜18、§9.2、§10.3、§11.3 / 11.4、§15 |
+| 版 | v0.4（2026-08-26） |
+| 対応要件 | `docs/requirements.md` v0.1.11 §4 FR-01〜19、§9.2、§10.3、§11.3 / 11.4、§15 |
 | Figma | `UI Design (Team B)` — ページ **Prototype / Screens**（全画面・全状態、Standard、Present で遷移可）/ **Prototype / Screens (極ドパ)** / **Prototype / Flow**（遷移図）。コンポーネントは同ファイルのデザインシステム（Getting Started 参照） |
 | アセット | `docs/ui-design/*.png`（抜粋スクリーンショット） |
 | 目的 | 実装者が「どのルートで・どの状態のとき・何を出すか」を迷わないための SSOT。API 契約は requirements §10、エラー形式は §10.3 |
@@ -77,10 +77,11 @@
 | S-22 | `/domains/new` | 候補表示 | Candidate Card ×6。各カード: ドメイン名（TLD はブランド色）/ Rarity / Score Gauge（クリックで最も近い既存名 3 件と類似度を展開 = Similarity Row ×3）/ 理由（40 字、Caption）/ 空きバッジ / 操作。「登録へ」→ S-25、「もう一回考える」→ S-21（前回候補を除外）、「自分で入力して探す」→ S-24 | Candidate Card, Score Gauge, Similarity Row |
 | S-23 | `/domains/new` | AI エラー（AC-04-2） | Banner Warn。`REGISTRY_TIMEOUT`→「AI が 10 秒以内に応答しませんでした」、`AI_UNAVAILABLE`→「AI が利用できません。手入力で探せます」、`RATE_LIMITED`→「利用上限に達しました。n 秒後に再試行」。直接検索へ誘導。AI ログに記録 | Banner |
 | S-24 | `/domains/new?q=` | 直接検索の結果 | 入力は `SLD + TLD 複数選択` または FQDN（`.` を含む場合は FQDN として 1 件で check）。結果は Search Result Row（Available / Taken / Error）。読み込み中は行ごとに Skeleton + レジストリ名。部分失敗は「確認不可」+ 注記（AC-03-2）。「登録へ」→ S-25、「代替を見る」→ 別 TLD・綴り違いを展開、「再試行」→ 当該レジストリのみ再 check | Search Result Row, Score Gauge, Rarity |
-| S-25 | `/domains/new`（dialog） | 登録ダイアログ | Dialog / Register：空き（再確認済み）+ スコア + レア度（ゲージクリックで内訳）→ 期間 Select → NS・コンタクトは既定値表示 → 「登録する」。直前に check 再実行 | Dialog / Register |
-| S-26 | `/domains/new`（dialog） | 登録成功 | Dialog / Success：「サブドメイン設計に進む」→ S-40（登録直後は設計なし）、「詳細を見る」→ S-30。閉じた場合は元の S-22 / S-24 に戻り、当該カードは Taken（「取得しました → 詳細」）に更新。一覧は即時反映（AC-06-1） | Dialog / Success |
+| S-25 | `/domains/new`（dialog） | 登録ダイアログ | Dialog / Register：空き（再確認済み）+ スコア + レア度（ゲージクリックで内訳）→ 期間 Select（helper に税込合計）→ NS・コンタクトは既定値表示 → 「お支払いへ」→ S-29。直前に check 再実行 | Dialog / Register |
+| S-29 | `/domains/new`（dialog） | お支払い（FR-19・モック） | 同じ Dialog 内でステップ切替。ご注文内容（Card + Key Value Row：品目 / 期間 / 単価 / 小計 / 消費税 10% / 税込合計 + Badge「固定ダミー価格」）→ カード入力（番号 / 有効期限 / CVC / 名義。デモ用カードが入力済み・AC-19-4）。「¥n を支払って登録する」→ 決済成立で `create` → S-26 /「戻る」→ S-25。入力エラーは欄ごとの warn helper、拒否は Banner Warn「お支払いに失敗しました」でダイアログは開いたまま（AC-19-3。`create` は呼ばない）。末尾 `0002` のカードで拒否を再現 | Dialog / Form, Card, Key Value Row, Input, Banner, Badge |
+| S-26 | `/domains/new`（dialog） | 登録成功 | Dialog / Success：状態・有効期限に加えお支払いの控え（金額・ブランド・下 4 桁・受付番号・モックである旨）。「サブドメイン設計に進む」→ S-40（登録直後は設計なし）、「詳細を見る」→ S-30。閉じた場合は元の S-22 / S-24 に戻り、当該カードは Taken（「取得しました → 詳細」）に更新。一覧は即時反映（AC-06-1） | Dialog / Success |
 | S-27 | `/domains/new`（dialog） | 取得済み（CONFLICT 409） | 汎用 Dialog：直前の再確認で他者取得。代替候補 3 件を本文に列挙、「代替候補を見る」→ S-24 | Dialog |
-| S-28 | `/domains/new`（dialog） | create タイムアウト（AC-06-2） | 汎用 Dialog：再送せず `info` で照合。結果 4 分岐: 登録済み → S-30 / 空きのまま → S-25 に戻り Banner Info「登録は行われていません」（再送可）/ 他者取得 → S-27 / 照合失敗 → S-28 のまま Error Card + 「もう一度確認」 | Dialog, Error Card |
+| S-28 | `/domains/new`（dialog） | create タイムアウト（AC-06-2） | 汎用 Dialog：再送せず `info` で照合。結果 4 分岐: 登録済み → S-30 / 空きのまま → S-25 に戻り Banner Info「登録は行われていません」（本文は「お支払いは確定していません。もう一度お支払いに進めば再送できます」・再送可）/ 他者取得 → S-27 / 照合失敗 → S-28 のまま Error Card + 「もう一度確認」 | Dialog, Error Card |
 
 **Rarity とスコアラベルの対応（FR-05）**
 
@@ -108,10 +109,11 @@
 | S-37 | `/domains/[name]` | 停止中（`clientHold` / `serverHold`） | バッジ Warn「停止中」、Banner Warn「名前解決されません。運営の案内を確認」。更新・情報修正は可 | Banner, Badge |
 | S-38 | `/domains/[name]` | NS 未設定（`inactive`） | バッジ「NS 未設定」、Banner Info + CTA「NS を設定」→ D-02。NS カードは「—（未設定）」 | Banner, Button |
 | S-39 | `/domains/[name]` | コンタクト未移行（移管 IN 後） | Banner Warn「登録者情報が旧レジストラのままです」+ CTA「情報修正」（登録者プロファイルへ差し替えを再実行）。要確認 #14 が解決するまでの暫定表示 | Banner |
-| D-01 | dialog | 更新（FR-08） | Dialog / Form：期間 Select + Helper に新しい有効期限。合計 10 年超は送信前に弾く（AC-08-2）。成功 → 元画面を再取得 + Banner Ok | Dialog / Form, Input |
+| D-01 | dialog | 更新（FR-08） | Dialog / Form：期間 Select + Helper に新しい有効期限と税込合計。合計 10 年超は送信前に弾く（AC-08-2）。「お支払いへ」→ D-11 | Dialog / Form, Input |
+| D-11 | dialog | 更新のお支払い（FR-19・モック） | S-29 と同じ構成（ご注文内容 + カード入力）。「¥n を支払って延長する」→ 決済成立で `renew` → S-30 + Banner Ok（金額・受付番号つき）/「戻る」→ D-01。拒否時は `renew` を呼ばずダイアログ内に Banner Warn（AC-19-3）。レジストリ側の失敗は従来どおり D-07 | Dialog / Form, Card, Key Value Row, Input, Banner, Badge |
 | D-02 | dialog | 情報修正（FR-09） | Dialog / Form：NS 2〜13 件（追加行）。コンタクト（登録者必須・技術任意）は同ダイアログのセクション。成功 → S-30 + Banner Ok | Dialog / Form |
 | D-03 | dialog | 廃止（FR-10） | Dialog / Danger：ドメイン名再入力が一致するまで「廃止する」Disabled。AGP 内（登録後 5 日）は見出し・本文を「無課金で取消扱い」に切替。成功 → RGP 入り: S-33 / 即時削除: S-10 + Banner Ok「example.com を取り消しました」 | Dialog / Danger |
-| D-04 | dialog | 復旧（FR-11） | 汎用 Dialog：費用（ダミー）と復旧後の状態を明示。成功 → S-30 + Banner Ok | Dialog |
+| D-04 | dialog | 復旧（FR-11） | 汎用 Dialog：費用（ダミー、`RESTORE_FEE`）と復旧後の状態を明示。お支払いステップは挟まない（`docs/specs/payment-mock.md` §8 #2）。成功 → S-30 + Banner Ok | Dialog |
 | D-05 | dialog | AuthCode 発行（FR-12） | Dialog / Form：Code Block + コピー、「再発行」。注意文「発行すると以前のコードは使えなくなります」。値は保存せず操作ログはマスク。再入力は不要（§7-4） | Dialog / Form, Code Block |
 | D-06 | dialog | 移管承認 / 拒否 | 承認: Dialog / Danger（ドメイン名再入力で解錠、§15.2）。本文に自動承認までの残り時間。承認 → S-34 + Banner Ok / 拒否 → S-30 + Banner Ok「拒否しました」。期限超過後は Error Card「既に自動承認されました」→ S-34 | Dialog / Danger, Dialog |
 | D-07 | 画面内 | レジストリ拒否 | Error Card（`OPERATION_NOT_ALLOWED` / `REGISTRY_REJECTED`）をメイン先頭に。Server ステータス優先の理由を本文に | Error Card |
@@ -189,12 +191,15 @@ Figma **Prototype / Screens** にプロトタイプ接続を設定済み（Prese
 ドメイン取得
   S-20 ─候補を考える─▶ S-21 ─(≤10s)─▶ S-22 / ─(timeout・AI_UNAVAILABLE・RATE_LIMITED)─▶ S-23
   S-20 / S-23 ─空きを確認─▶ S-24
-  S-22 / S-24 ─登録へ─▶ S-25 ─登録する─▶ S-26 ─設計に進む─▶ S-40 / ─詳細を見る─▶ S-30 / ─閉じる─▶ 元画面（カードは Taken）
-                              └─409─▶ S-27 ─代替候補を見る─▶ S-24
-                              └─timeout─▶ S-28 ─▶ S-30（登録済み）/ S-25（空きのまま）/ S-27（他者取得）/ S-28（照合失敗）
+  S-22 / S-24 ─登録へ─▶ S-25 ─お支払いへ─▶ S-29 ─支払って登録する─▶ S-26 ─設計に進む─▶ S-40 / ─詳細を見る─▶ S-30 / ─閉じる─▶ 元画面（カードは Taken）
+                                    │              └─決済拒否─▶ S-29（Banner Warn。create は呼ばない）
+                                    └─戻る─▶ S-25
+                                                   └─409─▶ S-27 ─代替候補を見る─▶ S-24
+                                                   └─timeout─▶ S-28 ─▶ S-30（登録済み）/ S-25（空きのまま）/ S-27（他者取得）/ S-28（照合失敗）
 
 ドメイン詳細
-  S-30 ─更新─▶ D-01 / ─情報修正─▶ D-02 / ─廃止─▶ D-03 / ─移管OUT─▶ D-05 / ─開く─▶ S-43（設計あり）or S-40（なし）
+  S-30 ─更新─▶ D-01 ─お支払いへ─▶ D-11 ─支払って延長する─▶ S-30 + Banner Ok / ─決済拒否─▶ D-11 / ─戻る─▶ D-01
+       ─情報修正─▶ D-02 / ─廃止─▶ D-03 / ─移管OUT─▶ D-05 / ─開く─▶ S-43（設計あり）or S-40（なし）
        ─再同期─▶ S-35 ─▶ S-30（失敗: S-31）
   D-03 ─廃止する─▶ S-33（RGP）/ S-10 + Banner Ok（AGP 即時削除）
   S-32 ─承認─▶ D-06 ─承認する─▶ S-34 + Banner Ok      S-32 ─拒否─▶ D-06（拒否）─▶ S-30 + Banner Ok
@@ -282,3 +287,4 @@ Figma **Prototype / Screens** にプロトタイプ接続を設定済み（Prese
 | v0.1 | 2026-08-26 | 初版。requirements v0.1.5 の全 FR を画面 × 状態（54 フレーム）に展開し、Figma Prototype ページと対応付け |
 | v0.2 | 2026-08-26 | 網羅性レビュー（38 件）を反映: Domain Card の Status を §9.2 と 1:1 化、S-36〜39 / S-02c / S-53 / S-40b / S-63 / S-70b を追加、Rarity ↔ FR-05 ラベル対応表、直接検索の複数 TLD / FQDN、S-26 → S-40、S-28 / D-03 / D-06 の分岐、認証リダイレクト規則、エラーコード表に 5 コード追加、§7 要確認 7 件 |
 | v0.3 | 2026-08-26 | S-13 を `POST /domains/sync` の部分失敗契約（200 + `failures[]`、PR #136）に合わせて更新。§7 #2 / #3 は requirements v0.1.8 で解決 |
+| v0.4 | 2026-08-26 | FR-19（requirements v0.1.11）のモック決済を反映: **S-29**（登録のお支払い）/ **D-11**（更新のお支払い）を追加、S-25 / D-01 の主ボタンを「お支払いへ」に変更、S-26 の本文に支払い控え、S-28 の Banner 本文を支払い前提に更新、D-04 に `RESTORE_FEE` 参照を明記、遷移図に決済分岐を追加。詳細は `docs/specs/payment-mock.md` |

@@ -17,6 +17,7 @@ import {
   uniquenessLabel,
 } from "@dopamin/shared";
 import { ApiClientError, type ErrorOrigin } from "../errors";
+import { createMockPaymentService } from "../payments/mock-gateway";
 import type { Services } from "../services";
 import type {
   Candidate,
@@ -941,5 +942,8 @@ export function createMockServices(
         resetMockStore();
       },
     },
+
+    /** 決済モック（FR-19）。受付時刻は fixtures の「現在時刻」で決定的にする */
+    payments: createMockPaymentService({ delayMs, now: nowIso }),
   };
 }

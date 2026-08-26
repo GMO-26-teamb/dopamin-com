@@ -8,7 +8,11 @@ import {
 } from "@/lib/api/mock/mock-services";
 import { AppProviders } from "@/lib/api/query-client";
 import type { Services } from "@/lib/api/services";
-import type { DomainDetail, SearchResult } from "@/lib/api/types";
+import type {
+  DomainDetail,
+  PaymentReceipt,
+  SearchResult,
+} from "@/lib/api/types";
 import {
   RegisterConflictDialog,
   RegisterSuccessDialog,
@@ -82,22 +86,38 @@ function servicesWith(overrides: {
 
 afterEach(() => resetMockStore());
 
+/** S-29 のモック決済の控え（FR-19）。 */
+const RECEIPT: PaymentReceipt = {
+  id: "pay_ABCD1234",
+  paidAt: "2026-08-26T00:00:00.000Z",
+  amount: 1_628,
+  currency: "JPY",
+  brand: "Visa",
+  last4: "4242",
+  description: "takutaku.com 新規登録 1 年",
+};
+
 describe("RegisterSuccessDialog（S-26）", () => {
-  it("状態・有効期限と次の一手を出す", async () => {
+  it("状態・有効期限・お支払いの控えと次の一手を出す", async () => {
     const onGoToSubdomains = vi.fn();
     const onGoToDetail = vi.fn();
     render(
       <RegisterSuccessDialog
-        domain={DOMAIN}
         onGoToDetail={onGoToDetail}
         onGoToSubdomains={onGoToSubdomains}
         onOpenChange={() => {}}
+        success={{ domain: DOMAIN, receipt: RECEIPT }}
       />,
     );
 
     expect(screen.getByText("取得できました")).toBeInTheDocument();
     expect(screen.getByText("takutaku.com")).toBeInTheDocument();
     expect(screen.getByText(/有効期限 2027-08-26/)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /お支払い ¥1,628（Visa •••• 4242・受付 pay_ABCD1234・モック）/,
+      ),
+    ).toBeInTheDocument();
 
     await userEvent.click(
       screen.getByRole("button", { name: "サブドメイン設計に進む" }),

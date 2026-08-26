@@ -21,6 +21,8 @@ import type {
   DomainSummary,
   Me,
   OperationLog,
+  PaymentChargeInput,
+  PaymentResult,
   SearchResult,
   SubdomainPlan,
   SyncResult,
@@ -115,6 +117,14 @@ export interface SettingsService {
   demoReset(): Promise<void>;
 }
 
+/**
+ * 決済（FR-19）。API にルートは無く、mock / http どちらの実装もブラウザ内のモック
+ * （`payments/mock-gateway.ts`）を使う。拒否は例外ではなく `PaymentResult` で返す。
+ */
+export interface PaymentService {
+  charge(input: PaymentChargeInput): Promise<PaymentResult>;
+}
+
 export interface Services {
   auth: AuthService;
   domains: DomainService;
@@ -123,4 +133,5 @@ export interface Services {
   transfers: TransferService;
   logs: LogService;
   settings: SettingsService;
+  payments: PaymentService;
 }

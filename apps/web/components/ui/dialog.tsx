@@ -196,6 +196,11 @@ export interface FormDialogProps {
   onPrimary: () => void | Promise<void>;
   primaryVariant?: "primary" | "solid" | "outline";
   secondaryLabel?: string;
+  /**
+   * 指定すると副ボタンはダイアログを閉じず、これを呼ぶ（多段ダイアログの「戻る」など）。
+   * 未指定なら従来どおり閉じる（キャンセル）。
+   */
+  onSecondary?: () => void;
   busy?: boolean;
   primaryDisabled?: boolean;
 }
@@ -211,6 +216,7 @@ export function FormDialog({
   onPrimary,
   primaryVariant = "primary",
   secondaryLabel = "キャンセル",
+  onSecondary,
   busy = false,
   primaryDisabled = false,
 }: FormDialogProps) {
@@ -225,11 +231,17 @@ export function FormDialog({
         </DialogHeader>
         <div className="flex w-full flex-col gap-3">{children}</div>
         <DialogFooter>
-          <DialogClose asChild>
-            <Button disabled={busy} variant="subtle">
+          {onSecondary === undefined ? (
+            <DialogClose asChild>
+              <Button disabled={busy} variant="subtle">
+                {secondaryLabel}
+              </Button>
+            </DialogClose>
+          ) : (
+            <Button disabled={busy} onClick={onSecondary} variant="subtle">
               {secondaryLabel}
             </Button>
-          </DialogClose>
+          )}
           <Button
             disabled={primaryDisabled}
             loading={busy}

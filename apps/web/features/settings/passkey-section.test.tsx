@@ -56,6 +56,7 @@ function createServices(auth: AuthOverrides): Services {
     transfers: {} as Services["transfers"],
     logs: {} as Services["logs"],
     settings: {} as Services["settings"],
+    payments: {} as Services["payments"],
   };
 }
 
