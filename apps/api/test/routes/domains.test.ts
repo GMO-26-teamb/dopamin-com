@@ -24,6 +24,7 @@ import app from "../../src/index";
 import { setRegistrySetForTesting } from "../../src/lib/registries";
 import {
   createInMemoryDomainStore,
+  type DomainRecord,
   type DomainStore,
   setDomainStoreForTesting,
 } from "../../src/services/domain-store";
@@ -117,12 +118,13 @@ async function api(path: string, init?: RequestInit): Promise<Response> {
 async function seedDomain(
   name: string,
   userId: string = TEST_USER.id,
+  ownership: DomainRecord["ownership"] = "owned",
 ): Promise<void> {
   await store.upsert({
     userId,
     name,
     registry: "kitaqsign",
-    ownership: "owned",
+    ownership,
     info: {
       name,
       registry: "kitaqsign",
@@ -161,6 +163,18 @@ async function createDomain(name: string, period = 1): Promise<DomainPayload> {
 
 async function parseError(res: Response): Promise<ApiErrorBody> {
   return apiErrorBodySchema.parse(await res.json());
+}
+
+/**
+ * 保有中の行を移管 OUT 済み（`ownership = transferred_out`）に遷移させる。
+ * 本来は移管の永続化（#56 / #57）と Poll 消化（#58）が行う遷移を、DB 行だけで再現する。
+ */
+async function markTransferredOut(name: string): Promise<void> {
+  const record = await store.find(name);
+  if (!record) {
+    throw new Error(`markTransferredOut: ${name} の行がありません`);
+  }
+  await store.upsert({ ...record, ownership: "transferred_out" });
 }
 
 describe("POST /api/v1/domains/check（FR-03）", () => {
@@ -812,6 +826,57 @@ describe("AC-01-3 / NFR-04: 認証と所有権", () => {
     expect(write.status).toBe(403);
   });
 
+  it.each([
+    [
+      "更新（renew）",
+      () => sendJson("/domains/someone-else.com/renew", { period: 1 }),
+    ],
+    [
+      "情報修正（update）",
+      () =>
+        sendJson(
+          "/domains/someone-else.com",
+          { nameservers: ["ns1.example.com", "ns2.example.com"] },
+          "PATCH",
+        ),
+    ],
+    [
+      "廃止（delete）",
+      () => api("/domains/someone-else.com", { method: "DELETE" }),
+    ],
+    [
+      "復旧（restore）",
+      () => api("/domains/someone-else.com/restore", { method: "POST" }),
+    ],
+    [
+      "AuthCode 発行",
+      () => api("/domains/someone-else.com/auth-code", { method: "POST" }),
+    ],
+  ])(
+    "他ユーザーのドメインへの %s は 403 FORBIDDEN",
+    async (_label, request) => {
+      // レジストリには存在するが、DB 上は別ユーザーの保有になっている状態
+      await createDomain("someone-else.com");
+      await seedDomain("someone-else.com", OTHER_USER.id);
+      const info = vi.spyOn(kitaqsign, "info");
+
+      const res = await request();
+      expect(res.status).toBe(403);
+      expect((await parseError(res)).error.code).toBe("FORBIDDEN");
+      // 所有権が無いドメインの状態はレジストリに問い合わせない
+      expect(info).not.toHaveBeenCalled();
+    },
+  );
+
+  it("他ユーザーの移管 OUT 済みの行も 403（所有権を書き込み可否より先に見る）", async () => {
+    await seedDomain("their-moved.com", OTHER_USER.id, "transferred_out");
+
+    const res = await sendJson("/domains/their-moved.com/renew", { period: 1 });
+    // 409（移管済み）ではなく 403。他ユーザーの行の状態は理由として明かさない
+    expect(res.status).toBe(403);
+    expect((await parseError(res)).error.code).toBe("FORBIDDEN");
+  });
+
   it("保有していないドメインは 404 NOT_FOUND（レジストリには問い合わせない）", async () => {
     const res = await api("/domains/unknown.com");
     expect(res.status).toBe(404);
@@ -819,6 +884,97 @@ describe("AC-01-3 / NFR-04: 認証と所有権", () => {
     expect(body.error.code).toBe("NOT_FOUND");
     // requireOwnedDomain で止まるのでレジストリ情報は載らない
     expect(body.error.registry).toBeUndefined();
+  });
+});
+
+describe("AC-12-5: 移管 OUT 完了後は表示のみ（ownership = transferred_out）", () => {
+  const NAME = "moved-out.com";
+
+  /** レジストリには存在したまま、DB 行だけ移管 OUT 済みにする。 */
+  async function transferredOutDomain(): Promise<void> {
+    await createDomain(NAME);
+    await markTransferredOut(NAME);
+  }
+
+  it.each([
+    ["更新（renew）", () => sendJson(`/domains/${NAME}/renew`, { period: 1 })],
+    [
+      "情報修正（update）",
+      () =>
+        sendJson(
+          `/domains/${NAME}`,
+          { nameservers: ["ns1.example.com", "ns2.example.com"] },
+          "PATCH",
+        ),
+    ],
+    ["廃止（delete）", () => api(`/domains/${NAME}`, { method: "DELETE" })],
+    [
+      "復旧（restore）",
+      () => api(`/domains/${NAME}/restore`, { method: "POST" }),
+    ],
+    [
+      "AuthCode 発行",
+      () => api(`/domains/${NAME}/auth-code`, { method: "POST" }),
+    ],
+  ])("%s は 409 OPERATION_NOT_ALLOWED", async (_label, request) => {
+    await transferredOutDomain();
+
+    const res = await request();
+    expect(res.status).toBe(409);
+    const body = await parseError(res);
+    expect(body.error.code).toBe("OPERATION_NOT_ALLOWED");
+    // EPP ステータス由来ではない理由（移管済み）を reason で区別する
+    expect(body.error.details).toMatchObject({
+      reason: "transferred_out",
+      statuses: ["transferred_out"],
+    });
+    expect(body.error.retryable).toBe(false);
+  });
+
+  it("レジストリに問い合わせる前に止める", async () => {
+    await transferredOutDomain();
+    const info = vi.spyOn(kitaqsign, "info");
+    const renew = vi.spyOn(kitaqsign, "renew");
+
+    expect(
+      (await sendJson(`/domains/${NAME}/renew`, { period: 1 })).status,
+    ).toBe(409);
+    expect(info).not.toHaveBeenCalled();
+    expect(renew).not.toHaveBeenCalled();
+  });
+
+  it("参照（詳細表示）は 200 のまま。ownership も戻さない（S-34）", async () => {
+    await transferredOutDomain();
+    const info = vi.spyOn(kitaqsign, "info");
+
+    const res = await api(`/domains/${NAME}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      summary: { ownership: string; stale: boolean };
+    };
+    expect(body.summary.ownership).toBe("transferred_out");
+    // 非スポンサーの info は当てにならないので引かない（要確認 §21.2 #12）
+    expect(info).not.toHaveBeenCalled();
+    // 書き込み禁止が外れていないことまで確認する
+    expect(
+      (await sendJson(`/domains/${NAME}/renew`, { period: 1 })).status,
+    ).toBe(409);
+  });
+
+  it("sync でも ownership を owned に戻さない", async () => {
+    await transferredOutDomain();
+
+    const res = await api("/domains/sync", { method: "POST" });
+    expect(res.status).toBe(200);
+    const body = domainSyncResponseSchema.parse(await res.json());
+    expect(body.failures).toEqual([]);
+    expect(body.domains[0]).toMatchObject({
+      name: NAME,
+      ownership: "transferred_out",
+    });
+    expect((await api(`/domains/${NAME}`, { method: "DELETE" })).status).toBe(
+      409,
+    );
   });
 });
 

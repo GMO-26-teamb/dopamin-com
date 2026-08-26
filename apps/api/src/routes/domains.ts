@@ -271,6 +271,13 @@ export const domains = new Hono<AuthedEnv>()
     const adapter = adapterForDomain(name);
     const cached = await requireOwnedDomain(userId, name);
 
+    // AC-12-5 / S-34: 移管 OUT 済みは「表示のみ」。自レジストラがスポンサーではないので
+    // info の応答が当てにならず（要確認 §21.2 #12）、write-through で ownership を
+    // owned に戻してしまうため、レジストリには問い合わせずキャッシュを返す
+    if (cached.ownership !== "owned") {
+      return c.json(detailResponse(cached, false));
+    }
+
     try {
       const info = await adapter.info(name);
       const record = await upsertDomainFromInfo(userId, info);
@@ -300,7 +307,7 @@ export const domains = new Hono<AuthedEnv>()
     const { period } = c.req.valid("json");
     const userId = c.get("user").id;
     const adapter = adapterForDomain(name);
-    const owned = await requireOwnedDomain(userId, name);
+    const owned = await requireOwnedDomain(userId, name, { forWrite: true });
 
     const current = await adapter.info(name);
     const opCheck = isOperationAllowed("renew", current.statuses, {
@@ -351,7 +358,7 @@ export const domains = new Hono<AuthedEnv>()
     const body = c.req.valid("json");
     const userId = c.get("user").id;
     const adapter = adapterForDomain(name);
-    const owned = await requireOwnedDomain(userId, name);
+    const owned = await requireOwnedDomain(userId, name, { forWrite: true });
 
     const current = await adapter.info(name);
     // ロック解除だけの要求は clientUpdateProhibited 中でも許可する（解除経路を残す）
@@ -424,7 +431,7 @@ export const domains = new Hono<AuthedEnv>()
     const name = parseDomainNameParam(c.req.param("name"));
     const userId = c.get("user").id;
     const adapter = adapterForDomain(name);
-    const owned = await requireOwnedDomain(userId, name);
+    const owned = await requireOwnedDomain(userId, name, { forWrite: true });
 
     const current = await adapter.info(name);
     const opCheck = isOperationAllowed("delete", current.statuses, {
@@ -487,7 +494,7 @@ export const domains = new Hono<AuthedEnv>()
     const name = parseDomainNameParam(c.req.param("name"));
     const userId = c.get("user").id;
     const adapter = adapterForDomain(name);
-    await requireOwnedDomain(userId, name);
+    await requireOwnedDomain(userId, name, { forWrite: true });
 
     const current = await adapter.info(name);
     if (!isRestorable(current.rgpStatuses, current.statuses)) {
@@ -520,7 +527,9 @@ export const domains = new Hono<AuthedEnv>()
   .post("/:name/auth-code", async (c) => {
     const name = parseDomainNameParam(c.req.param("name"));
     const adapter = adapterForDomain(name);
-    const owned = await requireOwnedDomain(c.get("user").id, name);
+    const owned = await requireOwnedDomain(c.get("user").id, name, {
+      forWrite: true,
+    });
 
     const current = await adapter.info(name);
     const opCheck = isOperationAllowed("authCode", current.statuses, {

@@ -1,11 +1,13 @@
 import { RegistryError } from "@dopamin/registry";
-import type {
-  ApiErrorCode,
-  DomainInfo,
-  DomainSummary,
-  DomainSyncResponse,
+import {
+  type ApiErrorCode,
+  type DomainInfo,
+  type DomainOperation,
+  type DomainSummary,
+  type DomainSyncResponse,
+  isOperationAllowed,
+  splitDomainName,
 } from "@dopamin/shared";
-import { splitDomainName } from "@dopamin/shared";
 import { ApiException } from "../lib/errors";
 import { adapterForDomain } from "../lib/registries";
 import { registryErrorMessage } from "../lib/registry-message";
@@ -36,14 +38,28 @@ export async function removeDomain(name: string): Promise<void> {
   await getDomainStore().remove(name);
 }
 
+export interface RequireOwnedDomainOptions {
+  /**
+   * 書き込み系（renew / update / delete / restore / auth-code など）の入り口か。
+   * true のとき `ownership = 'transferred_out'` の行を 409 で止める（AC-12-5）。
+   * 参照系（詳細表示）は移管済みでも通す（「表示のみ」の S-34）。
+   */
+  forWrite?: boolean;
+}
+
 /**
- * 所有権チェック（NFR-04 / AC-02-1）。すべてのドメイン操作の入り口で呼ぶ。
+ * 所有権チェック（NFR-04 / AC-02-1 / AC-12-5）。すべてのドメイン操作の入り口で呼ぶ。
  * - 行が無い: 404（このアプリで保有していないドメイン）
  * - 他ユーザーの行: 403（§10.3 の FORBIDDEN = 所有権なし）
+ * - 移管 OUT 済みの行への書き込み: 409（`forWrite` 指定時のみ）
+ *
+ * レジストリに問い合わせる前に呼ぶ。移管 OUT 済みのドメインは自レジストラがスポンサーでは
+ * ないため、`info` の応答が当てにならない（要確認 §21.2 #12）。
  */
 export async function requireOwnedDomain(
   userId: string,
   name: string,
+  options: RequireOwnedDomainOptions = {},
 ): Promise<DomainRecord> {
   const record = await getDomainStore().find(name);
   if (!record) {
@@ -58,7 +74,66 @@ export async function requireOwnedDomain(
       "このドメインを操作する権限がありません。",
     );
   }
+  if (options.forWrite) {
+    assertWritableOwnership(record);
+  }
   return record;
+}
+
+/**
+ * 移管系（FR-12）の所有権チェック。
+ *
+ * 移管 IN の対象ドメインは承認を検知するまで `domains` 行を持たない（§FR-12）ので、
+ * 行が無いことは正常として通す（ここで 404 にすると移管 IN そのものができない）。
+ * 止めるのは他ユーザーが保有中の行への操作だけ。他ユーザーの `transferred_out` 行は
+ * 既に自レジストラのスポンサー下に無く、誰が移管 IN しても構わないため通す。
+ */
+export async function requireNotOwnedByOtherUser(
+  userId: string,
+  name: string,
+): Promise<DomainRecord | null> {
+  const record = await getDomainStore().find(name);
+  if (record && record.ownership === "owned" && record.userId !== userId) {
+    throw new ApiException(
+      "FORBIDDEN",
+      "このドメインを操作する権限がありません。",
+    );
+  }
+  return record;
+}
+
+/**
+ * 所有権由来の可否だけを判定するための代表操作。
+ * `transferred_out` は判定順 1 で早期 return されるため操作によらず不可になる。
+ * `owned` 側で素通しさせたいので、対象の申請が無いと不可になる移管フロー操作
+ * （`transferApprove` / `transferReject` / `transferCancel`）と、RGP が前提の `restore` は使えない。
+ */
+const OWNERSHIP_GUARD_OPERATION: DomainOperation = "update";
+
+/**
+ * ステータス由来の可否は各ルートがレジストリの最新 `info` で判定する（キャッシュでは判定しない）。
+ * ここに空配列を渡すことで、判定を所有権だけに限定する。
+ */
+const NO_STATUSES: readonly string[] = [];
+
+/**
+ * AC-12-5: 移管 OUT が完了した行は表示のみで、書き込み系は 409 `OPERATION_NOT_ALLOWED`。
+ * 可否の SSOT は `@dopamin/shared` の `isOperationAllowed`（#24）に委譲する。
+ */
+function assertWritableOwnership(record: DomainRecord): void {
+  const check = isOperationAllowed(OWNERSHIP_GUARD_OPERATION, NO_STATUSES, {
+    ownership: record.ownership,
+  });
+  if (check.allowed) {
+    return;
+  }
+  throw new ApiException(
+    "OPERATION_NOT_ALLOWED",
+    "移管が完了したドメインのため操作できません（表示のみ）。",
+    // `statuses` は §10.3 の OPERATION_NOT_ALLOWED 共通形（UI がそのまま表示する）。
+    // `reason` は EPP ステータスではない理由（移管済み）を区別するため。
+    { reason: record.ownership, statuses: check.blockedBy },
+  );
 }
 
 /**
@@ -141,6 +216,11 @@ export async function syncDomains(userId: string): Promise<DomainSyncResponse> {
 
   const domains = await Promise.all(
     records.map(async (record): Promise<DomainSummary> => {
+      // AC-12-5: 移管 OUT 済みの行は再同期しない。info を引いて write-through すると
+      // ownership が owned に戻り、書き込み禁止（#54）が外れてしまう
+      if (record.ownership !== "owned") {
+        return toDomainSummary(record, false);
+      }
       try {
         const info = await adapterForDomain(record.name).info(record.name);
         const updated = await upsertDomainFromInfo(userId, info);

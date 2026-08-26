@@ -5,12 +5,15 @@ import app from "../../src/index";
 import { setRegistrySetForTesting } from "../../src/lib/registries";
 import {
   createInMemoryDomainStore,
+  type DomainStore,
   setDomainStoreForTesting,
 } from "../../src/services/domain-store";
 import {
   clearTestSession,
   installTestSession,
+  OTHER_USER,
   SESSION_COOKIE_HEADER,
+  TEST_USER,
 } from "../helpers/session";
 import { TimeoutMockAdapter } from "../helpers/timeout-mock";
 
@@ -29,6 +32,8 @@ interface TransferPayload {
   };
 }
 
+let store: DomainStore;
+
 beforeEach(() => {
   setRegistrySetForTesting(
     createRegistrySet({
@@ -39,7 +44,8 @@ beforeEach(() => {
       ],
     }),
   );
-  setDomainStoreForTesting(createInMemoryDomainStore());
+  store = createInMemoryDomainStore();
+  setDomainStoreForTesting(store);
   installTestSession();
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -83,6 +89,18 @@ async function createDomainWithAuthCode(name: string): Promise<string> {
   expect(res.status).toBe(200);
   const { authCode } = (await res.json()) as { authCode: string };
   return authCode;
+}
+
+/** 保有行の所有者・所有権だけを差し替える（移管の永続化 #56 / #57 の代わり）。 */
+async function updateDomainRow(
+  name: string,
+  patch: { userId?: string; ownership?: "owned" | "transferred_out" },
+): Promise<void> {
+  const record = await store.find(name);
+  if (!record) {
+    throw new Error(`updateDomainRow: ${name} の行がありません`);
+  }
+  await store.upsert({ ...record, ...patch });
 }
 
 describe("POST /api/v1/transfers（FR-12 移管 IN）", () => {
@@ -245,5 +263,54 @@ describe("AC-01-3: 移管ルートの認証", () => {
     const res = await app.request(path, { method });
     expect(res.status).toBe(401);
     expect((await parseError(res)).error.code).toBe("UNAUTHORIZED");
+  });
+});
+
+describe("NFR-04: 移管ルートの所有権", () => {
+  it("他ユーザーが保有中のドメインへの移管 IN 申請は 403 FORBIDDEN", async () => {
+    const authCode = await createDomainWithAuthCode("theirs.com");
+    await updateDomainRow("theirs.com", { userId: OTHER_USER.id });
+
+    const res = await sendJson("/transfers", { name: "theirs.com", authCode });
+    expect(res.status).toBe(403);
+    expect((await parseError(res)).error.code).toBe("FORBIDDEN");
+    // 申請をレジストリに送っていないので、移管中にもなっていない
+    await updateDomainRow("theirs.com", { userId: TEST_USER.id });
+    const queried = await api("/transfers/theirs.com");
+    const { transfer } = (await queried.json()) as TransferPayload;
+    expect(transfer.status).toBe("none");
+  });
+
+  it("他ユーザーが保有中のドメインの状態照会は 403 FORBIDDEN", async () => {
+    await createDomainWithAuthCode("query-theirs.com");
+    await updateDomainRow("query-theirs.com", { userId: OTHER_USER.id });
+
+    const res = await api("/transfers/query-theirs.com");
+    expect(res.status).toBe(403);
+    expect((await parseError(res)).error.code).toBe("FORBIDDEN");
+  });
+
+  it("domains 行が無いドメインは通す（移管 IN 申請中は行を持たない）", async () => {
+    // レジストリには存在するが本アプリには行が無い状態（移管 IN の申請中と同じ）
+    await createDomainWithAuthCode("incoming.com");
+    await store.remove("incoming.com");
+
+    const res = await api("/transfers/incoming.com");
+    expect(res.status).toBe(200);
+    const { transfer } = (await res.json()) as TransferPayload;
+    expect(transfer.status).toBe("none");
+  });
+
+  it("AC-12-5: 自分が移管 OUT 済みのドメインは再び移管 IN できる（出戻り）", async () => {
+    const authCode = await createDomainWithAuthCode("comeback.com");
+    await updateDomainRow("comeback.com", { ownership: "transferred_out" });
+
+    const res = await sendJson("/transfers", {
+      name: "comeback.com",
+      authCode,
+    });
+    expect(res.status).toBe(202);
+    const { transfer } = (await res.json()) as TransferPayload;
+    expect(transfer.status).toBe("pending");
   });
 });
