@@ -5,7 +5,6 @@ import {
   type DomainInfo,
   domainCheckRequestSchema,
   domainCreateRequestSchema,
-  domainNameSchema,
   domainRenewRequestSchema,
   domainUpdateRequestSchema,
   isOperationAllowed,
@@ -15,6 +14,7 @@ import {
 } from "@dopamin/shared";
 import { Hono } from "hono";
 import { ApiException } from "../lib/errors";
+import { parseDomainNameParam } from "../lib/params";
 import { reconcileOnTimeout } from "../lib/reconcile";
 import { adapterForDomain } from "../lib/registries";
 import { registryErrorMessage } from "../lib/registry-message";
@@ -39,14 +39,6 @@ import type { AuthedEnv } from "../types";
 /** 登録時の authInfo を自動生成する（RFC 9154: 128bit 以上のエントロピー推奨）。 */
 function generateAuthInfo(): string {
   return randomBytes(24).toString("base64url");
-}
-
-function parseDomainNameParam(raw: string): string {
-  const parsed = domainNameSchema.safeParse(raw);
-  if (!parsed.success) {
-    throw new ApiException("VALIDATION_ERROR", "ドメイン名の形式が不正です。");
-  }
-  return parsed.data;
 }
 
 /** AC-08-2: 合計の有効期間が上限（10 年）を超える更新要求は送信前に弾く。 */

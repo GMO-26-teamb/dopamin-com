@@ -10,6 +10,7 @@ import { health } from "./routes/health";
 import { logs } from "./routes/logs";
 import { registry } from "./routes/registry";
 import { settings } from "./routes/settings";
+import { subdomainPlan } from "./routes/subdomain-plan";
 import { transfers } from "./routes/transfers";
 import type { AppEnv } from "./types";
 
@@ -22,6 +23,8 @@ const app = new Hono<AppEnv>()
   .route("/health", health)
   .route("/auth", auth)
   .route("/domains", domains)
+  // FR-13 は関心が違うので別ファイルにし、同じ /domains に重ねてマウントする
+  .route("/domains", subdomainPlan)
   .route("/settings", settings)
   .route("/transfers", transfers)
   .route("/registry", registry)
