@@ -1,16 +1,16 @@
 /**
  * 画面用の ViewModel（fe-ui 設計 §4.1）。
  *
- * `packages/shared` の `DomainInfo` / `AuthUser` / `PasskeySummary` / `ApiErrorBody` を再利用し、
+ * `packages/shared` の `DomainInfo` / `AuthUser` / `PasskeySummary` / `ApiError` を再利用し、
  * 画面が必要とする導出済みの値（`displayStatus` / 残日数の元になる日付 / 反映状態）だけを足す。
  * EPP ステータスの再解釈は UI 側では行わない（`deriveDisplayStatus` が SSOT）。
  */
 
 import type {
-  ApiErrorBody,
-  ApiErrorCode,
+  ApiError,
   AuthUser,
   DisplayStatus,
+  ErrorCode,
   OrderQuote,
 } from "@dopamin/shared";
 
@@ -64,7 +64,7 @@ export interface DomainDetail extends DomainSummary {
  */
 export interface SyncFailure {
   name: string;
-  code: ApiErrorCode;
+  code: ErrorCode;
   message: string;
   /** 未対応 TLD なら null（レジストリを名指しできない）。 */
   registry: Exclude<DomainSummary["registry"], "mock"> | null;
@@ -127,7 +127,7 @@ export interface SearchResult {
   availability: Availability;
   uniqueness: UniquenessScore | null;
   alternatives: string[];
-  error: ApiErrorBody["error"] | null;
+  error: ApiError["error"] | null;
 }
 
 export type ApplyStatus = "applied" | "changed" | "pending";

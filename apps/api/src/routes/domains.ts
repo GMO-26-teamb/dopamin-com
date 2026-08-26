@@ -1,7 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { type RegistryAdapter, RegistryError } from "@dopamin/registry";
 import {
-  type ApiErrorCode,
   type DomainAvailability,
   type DomainDetailResponse,
   type DomainInfo,
@@ -11,6 +10,7 @@ import {
   domainNameSchema,
   domainRenewRequestSchema,
   domainUpdateRequestSchema,
+  type ErrorCode,
   getDefaultPreparedCorpus,
   isOperationAllowed,
   isRestorable,
@@ -50,7 +50,7 @@ interface DomainCheckItem {
   availability: DomainAvailability;
   reason?: string;
   uniqueness: DomainUniqueness | null;
-  error?: { code: ApiErrorCode; message: string };
+  error?: { code: ErrorCode; message: string };
 }
 
 /**

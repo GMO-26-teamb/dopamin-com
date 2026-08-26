@@ -1,7 +1,7 @@
 import { createRegistrySet, MockRegistryAdapter } from "@dopamin/registry";
 import {
-  type ApiErrorBody,
-  apiErrorBodySchema,
+  type ApiError,
+  apiErrorSchema,
   type ClientStatus,
   pollConsumeResultSchema,
   type TransferSummary,
@@ -111,8 +111,8 @@ function sendJson(
   });
 }
 
-async function parseError(res: Response): Promise<ApiErrorBody> {
-  return apiErrorBodySchema.parse(await res.json());
+async function parseError(res: Response): Promise<ApiError> {
+  return apiErrorSchema.parse(await res.json());
 }
 
 /**
@@ -233,7 +233,7 @@ describe("POST /api/v1/transfers（FR-12 移管 IN）", () => {
     });
     expect(res.status).toBe(422);
     const text = await res.text();
-    const body = apiErrorBodySchema.parse(JSON.parse(text));
+    const body = apiErrorSchema.parse(JSON.parse(text));
     expect(body.error).toMatchObject({
       code: "REGISTRY_REJECTED",
       registry: "kitaqsign",

@@ -16,21 +16,6 @@ import {
 import { pollConsumeResultSchema } from "./transfers";
 import { type UniquenessResult, uniquenessLabel } from "./uniqueness";
 
-/**
- * 統一エラー（docs/requirements.md §10.3）の定義は `./errors.ts` が正（issue #30）。
- * 以下は後方互換の別名。新しいコードは `ERROR_CODES` / `errorCodeSchema` / `ErrorCode` /
- * `apiErrorSchema` / `ApiError` を直接使うこと。
- */
-export type {
-  ApiError as ApiErrorBody,
-  ErrorCode as ApiErrorCode,
-} from "./errors";
-export {
-  apiErrorSchema as apiErrorBodySchema,
-  ERROR_CODES as API_ERROR_CODES,
-  errorCodeSchema as apiErrorCodeSchema,
-} from "./errors";
-
 /** `POST /domains/check` の入力（FR-03）。SLD + TLD 群、または FQDN 群のどちらか。 */
 export const domainCheckRequestSchema = z.union([
   z.object({

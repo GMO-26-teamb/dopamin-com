@@ -1,9 +1,9 @@
 import { RegistryError } from "@dopamin/registry";
 import type {
-  ApiErrorCode,
   DomainInfo,
   DomainSummary,
   DomainSyncResponse,
+  ErrorCode,
 } from "@dopamin/shared";
 import { isOperationAllowed, splitDomainName } from "@dopamin/shared";
 import { ApiException } from "../lib/errors";
@@ -182,7 +182,7 @@ function toSyncFailure(
   if (err instanceof RegistryError) {
     return {
       name,
-      code: err.code as ApiErrorCode,
+      code: err.code as ErrorCode,
       message: registryErrorMessage(err),
     };
   }

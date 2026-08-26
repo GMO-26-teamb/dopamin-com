@@ -5,9 +5,8 @@ import { registryIdSchema } from "./registry";
  * 統一エラーコード（docs/requirements.md §10.3 v0.1.8: 基本 13 種 + FR-01 の 4 種）。
  * API のエラーレスポンスは必ずこの形で返す。
  *
- * ここが唯一の定義（issue #30）。`api.ts` の `API_ERROR_CODES` / `apiErrorCodeSchema` /
- * `apiErrorBodySchema` / `ApiErrorCode` / `ApiErrorBody` は後方互換の別名で、
- * 新しいコードは本ファイルの名前を使う。
+ * ここが唯一の定義（issue #30 / #141）。`api.ts` にあった `ApiError*` 系の
+ * 後方互換の別名 re-export は削除済みで、利用側はここの名前を直接使う。
  */
 export const ERROR_CODES = [
   "VALIDATION_ERROR",

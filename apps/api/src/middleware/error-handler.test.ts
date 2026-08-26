@@ -1,3 +1,4 @@
+import { RegistryError } from "@dopamin/registry";
 import { apiErrorSchema } from "@dopamin/shared";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -80,6 +81,59 @@ describe("errorHandler（§10.3 単一経路）", () => {
       retryable: false,
       requestId: "req_test",
     });
+  });
+
+  it("RegistryError は正規化コード・registry・registryCode 付きで返す", async () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const { res, body } = await boom(() => {
+      throw new RegistryError({
+        code: "REGISTRY_TIMEOUT",
+        registry: "kitaqsign",
+        message: "info: レジストリが 5000ms 以内に応答しませんでした",
+        reason: "socket hang up",
+      });
+    });
+
+    // ステータスは ERROR_STATUS 由来（§10.3。REGISTRY_ERROR_HTTP はそこから導出）
+    expect(res.status).toBe(504);
+    expect(body.error).toMatchObject({
+      code: "REGISTRY_TIMEOUT",
+      registry: "kitaqsign",
+      // 繋がらない系は再送してよい
+      retryable: true,
+      requestId: "req_test",
+    });
+    // FR-18 / NFR-03: レジストリの生メッセージ・reason はサーバーログにだけ残す
+    const text = JSON.stringify(body);
+    expect(text).not.toContain("socket hang up");
+    expect(text).not.toContain("5000ms");
+    expect(consoleError).toHaveBeenCalledTimes(1);
+  });
+
+  it("RegistryError の result code は文字列の registryCode として載る", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { res, body } = await boom(() => {
+      throw new RegistryError({
+        code: "REGISTRY_REJECTED",
+        registry: "kitaqnic",
+        message: "transfer:request: AuthCode が一致しません",
+        registryCode: 2202,
+        command: "transfer_request",
+      });
+    });
+
+    expect(res.status).toBe(422);
+    expect(body.error).toMatchObject({
+      code: "REGISTRY_REJECTED",
+      registry: "kitaqnic",
+      // int の result code は string にして返す（§10.3）
+      registryCode: "2202",
+      retryable: false,
+    });
+    // AC-12-2 / #47: result code から原因を特定できる場合は文言を出し分ける
+    expect(body.error.message).toBe("AuthCode が正しくありません。");
   });
 
   it("想定外の Error は 500 INTERNAL で message を漏らさない（NFR-06）", async () => {

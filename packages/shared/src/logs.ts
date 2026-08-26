@@ -8,7 +8,7 @@
 
 import { z } from "zod";
 import { aiFeatureSchema, aiLogStatusSchema, aiProviderSchema } from "./ai";
-import { apiErrorCodeSchema } from "./api";
+import { errorCodeSchema } from "./errors";
 import {
   operationCommandSchema,
   operationLogStatusSchema,
@@ -68,7 +68,7 @@ export const operationLogItemSchema = z.object({
   domainName: z.string().nullable(),
   status: operationLogStatusSchema,
   /** §10.3 の統一エラーコード。成功時は `null`。 */
-  errorCode: apiErrorCodeSchema.nullable(),
+  errorCode: errorCodeSchema.nullable(),
   /** レジストリが返した結果コード（EPP result code 相当）。 */
   registryCode: z.string().nullable(),
   latencyMs: z.number().int().nonnegative(),

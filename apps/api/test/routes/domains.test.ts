@@ -6,8 +6,8 @@ import {
   type RegistryErrorCode,
 } from "@dopamin/registry";
 import {
-  type ApiErrorBody,
-  apiErrorBodySchema,
+  type ApiError,
+  apiErrorSchema,
   type DomainUniqueness,
   domainDetailResponseSchema,
   domainListResponseSchema,
@@ -184,8 +184,8 @@ async function createDomain(name: string, period = 1): Promise<DomainPayload> {
   return (await res.json()) as DomainPayload;
 }
 
-async function parseError(res: Response): Promise<ApiErrorBody> {
-  return apiErrorBodySchema.parse(await res.json());
+async function parseError(res: Response): Promise<ApiError> {
+  return apiErrorSchema.parse(await res.json());
 }
 
 describe("POST /api/v1/domains/check（FR-03）", () => {
@@ -953,7 +953,7 @@ describe("エラー変換（§10.3: RegistryError → 統一エラー形式）",
       const res = await sendJson("/domains/foo.com/renew", { period: 1 });
       expect(res.status).toBe(status);
       const text = await res.text();
-      const body = apiErrorBodySchema.parse(JSON.parse(text));
+      const body = apiErrorSchema.parse(JSON.parse(text));
       expect(body.error).toMatchObject({
         code,
         retryable,
@@ -973,7 +973,7 @@ describe("エラー変換（§10.3: RegistryError → 統一エラー形式）",
     const res = await sendJson("/domains/foo.com/renew", { period: 1 });
     expect(res.status).toBe(500);
     const text = await res.text();
-    const body = apiErrorBodySchema.parse(JSON.parse(text));
+    const body = apiErrorSchema.parse(JSON.parse(text));
     expect(body.error.code).toBe("INTERNAL");
     expect(body.error.requestId).toBeTruthy();
     expect(text).not.toContain("boom-secret-detail");

@@ -1,10 +1,10 @@
-import { API_ERROR_CODES } from "@dopamin/shared";
+import { ERROR_CODES } from "@dopamin/shared";
 import { describe, expect, it } from "vitest";
 import { ApiClientError, type ClientErrorCode } from "./api/errors";
 import { toErrorCopy } from "./error-messages";
 
 const ALL_CODES: readonly ClientErrorCode[] = [
-  ...API_ERROR_CODES,
+  ...ERROR_CODES,
   "NOT_IMPLEMENTED",
   "NETWORK",
 ];

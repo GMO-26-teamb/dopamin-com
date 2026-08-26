@@ -1,6 +1,10 @@
 import type { RegistryError, RegistryErrorCode } from "@dopamin/registry";
-import { userMessageForRegistryCode } from "@dopamin/registry";
+import {
+  REGISTRY_ERROR_CODES,
+  userMessageForRegistryCode,
+} from "@dopamin/registry";
 import type { RegistryId } from "@dopamin/shared";
+import { ERROR_STATUS } from "@dopamin/shared";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 
 const REGISTRY_DISPLAY_NAMES: Record<RegistryId, string> = {
@@ -9,19 +13,22 @@ const REGISTRY_DISPLAY_NAMES: Record<RegistryId, string> = {
   mock: "Mock レジストリ",
 };
 
-/** RegistryError → HTTP ステータス（docs/requirements.md §10.3）。 */
+/**
+ * RegistryError → HTTP ステータス（docs/requirements.md §10.3）。
+ *
+ * `RegistryErrorCode` は統一エラーコードの真部分集合なので、対応は
+ * `ERROR_STATUS`（`packages/shared` が持つ §10.3 の表）から導出する。
+ * 同じ対応を 2 か所に書くと片方だけ直る（#141）。
+ */
 export const REGISTRY_ERROR_HTTP: Record<
   RegistryErrorCode,
   ContentfulStatusCode
-> = {
-  NOT_FOUND: 404,
-  CONFLICT: 409,
-  OPERATION_NOT_ALLOWED: 409,
-  REGISTRY_REJECTED: 422,
-  REGISTRY_TIMEOUT: 504,
-  REGISTRY_UNAVAILABLE: 502,
-  REGISTRY_SPEC_MISMATCH: 502,
-};
+> = Object.fromEntries(
+  REGISTRY_ERROR_CODES.map((code) => [
+    code,
+    ERROR_STATUS[code] as ContentfulStatusCode,
+  ]),
+) as Record<RegistryErrorCode, ContentfulStatusCode>;
 
 /**
  * RegistryError → ユーザー向けメッセージ（FR-18）。技術詳細（reason 等）は載せない。

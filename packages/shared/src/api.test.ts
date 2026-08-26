@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  API_ERROR_CODES,
-  apiErrorBodySchema,
-  apiErrorCodeSchema,
   domainAvailabilitySchema,
   domainCheckRequestSchema,
   domainCreateRequestSchema,
@@ -12,79 +9,11 @@ import {
   transferCreateRequestSchema,
   transferResponseSchema,
 } from "./api";
-import { apiErrorSchema, ERROR_CODES, errorCodeSchema } from "./errors";
 
-describe("apiErrorCodeSchema（§10.3。errors.ts の別名）", () => {
-  it("API_ERROR_CODES / apiErrorCodeSchema / apiErrorBodySchema は errors.ts と同一オブジェクト", () => {
-    expect(API_ERROR_CODES).toBe(ERROR_CODES);
-    expect(apiErrorCodeSchema).toBe(errorCodeSchema);
-    expect(apiErrorBodySchema).toBe(apiErrorSchema);
-  });
-
-  it.each(API_ERROR_CODES)("%s を受理する", (code) => {
-    expect(apiErrorCodeSchema.safeParse(code).success).toBe(true);
-  });
-
-  it("17 種類のエラーコードを定義する（§10.3 の 13 種 + FR-01 の 4 種）", () => {
-    expect(API_ERROR_CODES).toHaveLength(17);
-  });
-
-  it("未知のコードは拒否する", () => {
-    expect(apiErrorCodeSchema.safeParse("UNKNOWN_ERROR").success).toBe(false);
-  });
-});
-
-describe("apiErrorBodySchema（§10.3）", () => {
-  it("§10.3 のレスポンス例を受理する", () => {
-    const body = {
-      error: {
-        code: "REGISTRY_TIMEOUT",
-        message: "Kitaqsign が応答しませんでした。",
-        retryable: true,
-        registry: "kitaqsign",
-        registryCode: "2400",
-        requestId: "req_01J...",
-      },
-    };
-    expect(apiErrorBodySchema.parse(body)).toEqual(body);
-  });
-
-  it("必須フィールド（code / message / retryable）のみでも受理する", () => {
-    const body = {
-      error: {
-        code: "VALIDATION_ERROR",
-        message: "不正な入力です",
-        retryable: false,
-      },
-    };
-    expect(apiErrorBodySchema.safeParse(body).success).toBe(true);
-  });
-
-  it("details に任意の値を許容する", () => {
-    const body = {
-      error: {
-        code: "VALIDATION_ERROR",
-        message: "不正な入力です",
-        retryable: false,
-        details: { fields: ["sld"] },
-      },
-    };
-    expect(apiErrorBodySchema.safeParse(body).success).toBe(true);
-  });
-
-  it.each([
-    ["code 欠落", { message: "x", retryable: false }],
-    ["message 欠落", { code: "INTERNAL", retryable: false }],
-    ["retryable 欠落", { code: "INTERNAL", message: "x" }],
-    ["code が未知の値", { code: "TEAPOT", message: "x", retryable: false }],
-    [
-      "registry が未知のレジストリ ID",
-      { code: "INTERNAL", message: "x", retryable: false, registry: "onamae" },
-    ],
-  ])("%s は拒否する", (_label, error) => {
-    expect(apiErrorBodySchema.safeParse({ error }).success).toBe(false);
-  });
-});
+/**
+ * `api.ts` が持つ入出力スキーマ。統一エラー（§10.3）の検証は `errors.test.ts` にある
+ * （#141 で `api.ts` の後方互換の別名 re-export を削除したため、ここでは扱わない）。
+ */
 
 describe("domainCheckRequestSchema（FR-03）", () => {
   it("sld + tlds を受理する（§10.4 の例に対応する入力）", () => {

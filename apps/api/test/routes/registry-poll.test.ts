@@ -1,7 +1,7 @@
 import { createRegistrySet, MockRegistryAdapter } from "@dopamin/registry";
 import {
-  type ApiErrorBody,
-  apiErrorBodySchema,
+  type ApiError,
+  apiErrorSchema,
   domainSyncWithPollResponseSchema,
   type PollConsumeResult,
   pollConsumeResultSchema,
@@ -96,8 +96,8 @@ function sendJson(path: string, body: unknown): Promise<Response> {
   });
 }
 
-async function parseError(res: Response): Promise<ApiErrorBody> {
-  return apiErrorBodySchema.parse(await res.json());
+async function parseError(res: Response): Promise<ApiError> {
+  return apiErrorSchema.parse(await res.json());
 }
 
 async function poll(): Promise<PollConsumeResult> {

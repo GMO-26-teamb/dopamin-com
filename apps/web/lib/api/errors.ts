@@ -7,13 +7,13 @@
  */
 
 import {
-  type ApiErrorCode,
-  apiErrorBodySchema,
-  apiErrorCodeSchema,
+  apiErrorSchema,
+  type ErrorCode,
+  errorCodeSchema,
   type RegistryId,
 } from "@dopamin/shared";
 
-export type ClientErrorCode = ApiErrorCode | "NOT_IMPLEMENTED" | "NETWORK";
+export type ClientErrorCode = ErrorCode | "NOT_IMPLEMENTED" | "NETWORK";
 
 /**
  * 失敗した相手。`REGISTRY_TIMEOUT` / `REGISTRY_UNAVAILABLE` は AI 呼び出しでも使うため、
@@ -101,7 +101,7 @@ export function toApiClientError(e: unknown): ApiClientError {
   }
 
   // §10.3 の統一エラー形式（fetch で読んだ JSON をそのまま渡せる）
-  const body = apiErrorBodySchema.safeParse(e);
+  const body = apiErrorSchema.safeParse(e);
   if (body.success) {
     const { error } = body.data;
     return new ApiClientError({
@@ -118,7 +118,7 @@ export function toApiClientError(e: unknown): ApiClientError {
   }
 
   if (isApiRequestErrorLike(e)) {
-    const code = apiErrorCodeSchema.safeParse(e.code);
+    const code = errorCodeSchema.safeParse(e.code);
     return new ApiClientError({
       code: code.success ? code.data : "INTERNAL",
       message: e.message,

@@ -7,12 +7,12 @@
 
 import type { AppType } from "@dopamin/api";
 import {
-  apiErrorCodeSchema,
   domainAvailabilitySchema,
   domainListResponseSchema,
   type domainSummarySchema,
   domainSyncResponseSchema,
   domainUniquenessSchema,
+  errorCodeSchema,
   registryIdSchema,
   transferResponseSchema,
 } from "@dopamin/shared";
@@ -93,7 +93,7 @@ export const checkResponseSchema = z.object({
       // FR-05: available の行に付く（unavailable / error は null。§10.4）
       uniqueness: domainUniquenessSchema.nullable(),
       error: z
-        .object({ code: apiErrorCodeSchema, message: z.string() })
+        .object({ code: errorCodeSchema, message: z.string() })
         .optional(),
     }),
   ),
