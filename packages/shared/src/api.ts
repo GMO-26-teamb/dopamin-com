@@ -13,6 +13,7 @@ import {
   transferStatusSchema,
 } from "./registry";
 import { pollConsumeSummarySchema, transferDirectionSchema } from "./transfers";
+import { type UniquenessResult, uniquenessLabel } from "./uniqueness";
 
 /**
  * 統一エラー（docs/requirements.md §10.3）の定義は `./errors.ts` が正（issue #30）。
@@ -47,6 +48,48 @@ export const domainAvailabilitySchema = z.enum([
   "error",
 ]);
 export type DomainAvailability = z.infer<typeof domainAvailabilitySchema>;
+
+/**
+ * `POST /domains/check` 応答内の独自性スコア (FR-05 / §10.4 の `uniqueness`)。
+ * `similarity` は 0〜1 の文字列類似度 (§10.4 の例と同じく小数2桁へ丸める。
+ * 算出方式が embedding から lexical へ変わった経緯は ADR-0003)。
+ */
+export const domainUniquenessSchema = z.object({
+  score: z.number().int().min(0).max(100),
+  label: z.enum(["high", "medium", "low"]),
+  topSimilar: z
+    .array(z.object({ name: z.string(), similarity: z.number().min(0).max(1) }))
+    .max(3),
+  /** 短名 (記号除去後3文字以下) は判定精度が構造的に低いことの明示 */
+  confidence: z.enum(["normal", "low"]),
+  algorithmVersion: z.string(),
+  corpusVersion: z.string(),
+});
+export type DomainUniqueness = z.infer<typeof domainUniquenessSchema>;
+
+/** UniquenessResult (スコア計算の生の結果) を §10.4 のワイヤ形式へ写す。 */
+export function toDomainUniqueness(r: UniquenessResult): DomainUniqueness {
+  return {
+    score: r.score,
+    label: uniquenessLabel(r.score),
+    // §10.4「最も近い既存名 上位3件と類似度」。closestMatches はスコアを決めた順
+    // （エントリ別スコアの昇順）で並んでいるので、表示用にここで類似度の降順へ並べ直す。
+    // 類似度 0 の行は「近い既存名が無い」ことを意味するため落とす（プレフィルタで
+    // 距離計算を省いた行も 0 で入ってくるので、そのまま出すと未計算値を類似度として
+    // 見せてしまう）。
+    topSimilar: r.closestMatches
+      .filter((m) => m.similarity > 0)
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, 3)
+      .map((m) => ({
+        name: m.name,
+        similarity: Math.round(m.similarity * 100) / 100,
+      })),
+    confidence: r.confidence,
+    algorithmVersion: r.algorithmVersion,
+    corpusVersion: r.corpusVersion,
+  };
+}
 
 /** `POST /domains` の入力（FR-06）。 */
 export const domainCreateRequestSchema = z.object({
@@ -192,10 +235,15 @@ export const domainSyncFailureSchema = z.object({
 /**
  * `POST /domains/sync` のレスポンス（FR-02 / FR-12）。失敗した行は stale: true で返る。
  * `poll` は同時に消化した非同期通知の件数（§10.1「同時に Poll も消化する」）。
+ *
+ * `poll` は入力では省略可（既定 0 件）。web と api は別々にデプロイされるため、
+ * 新しい web が `poll` を返さない古い api を叩く瞬間がありうる。そこで最新化ごと
+ * 失敗させるより、Poll の件数だけ 0 として読む方が実害が小さい。
+ * api 側は常に埋める（`z.infer` の出力型では必須）。
  */
 export const domainSyncResponseSchema = z.object({
   domains: z.array(domainSummarySchema),
   failures: z.array(domainSyncFailureSchema),
-  poll: pollConsumeSummarySchema,
+  poll: pollConsumeSummarySchema.default({ processed: 0, failed: 0 }),
 });
 export type DomainSyncResponse = z.infer<typeof domainSyncResponseSchema>;
