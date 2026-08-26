@@ -63,7 +63,8 @@ pnpm --filter @dopamin/api test
 
 Kitaqsign / Kitaqnic への接続が正常にできているかを、実レジストリに対する
 フルライフサイクル（hello → check → create → info → renew → update →
-authCode → transfer 拒否 → delete → restore → 最終 delete）で検証する。
+authCode → transfer 拒否（誤 AuthCode の request / 申請不在の approve・reject・cancel）→
+delete → restore → 最終 delete）で検証する。
 
 ```sh
 pnpm --filter @dopamin/api test:connect

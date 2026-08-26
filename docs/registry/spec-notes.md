@@ -131,6 +131,12 @@ exDate 超過でも廃止されず、レジストリが自動で 1 年延長（�
 
 - **losing が放置すると申請から 20 分後にサーバが自動承認**（本来は 5 日。ハッカソン用に短縮）
 - ICANN の「登録後 60 日以内は移管拒否可」はレジストラ側ルールのため、本ハッカソンでは対応不要（登録直後でも移管できる）
+- **`requestBody` を宣言しているのは `transfer/request` だけ**（`DomainTransferRequest {op, authInfo?, period?}`）。
+  `approve` / `reject` / `cancel` の 3 つは両 openapi.json とも `requestBody` を持たないため、
+  アダプタ（`packages/registry` の `transferAct`）は `restore` / `rotate-auth-info` と同じくボディを送らない。
+  実レジストリが必須ボディ欠落や 400 / 2001 で拒否するようなら `{ op }` を付け、本メモを更新する。
+- 応答はいずれも `EppResponseDomainTransferResponse`（request と同じ形）。`request` だけ HTTP 202、
+  `approve` / `reject` / `cancel` は 200。拒否は 403（操作権限なし）/ 409（転送リクエスト不在）
 
 ### ドメインステータス（RFC 5731）
 

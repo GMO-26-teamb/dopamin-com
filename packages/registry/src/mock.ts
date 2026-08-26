@@ -12,6 +12,7 @@ import {
   type RenewInput,
   TRANSFER_AUTO_APPROVE_MS,
   type TransferResult,
+  type TransferStatus,
   type UpdateInput,
 } from "@dopamin/shared";
 import type { RegistryAdapter } from "./adapter";
@@ -27,6 +28,20 @@ export type MockFailMode =
   | "reject"
   | "spec_mismatch";
 
+/**
+ * 進行中の移管申請。approve / reject / cancel の応答は申請時のレジストラ ID・
+ * 日時をそのまま返す必要があるため、boolean ではなく申請内容ごと保持する。
+ */
+interface MockPendingTransfer {
+  /** 申請した側（レジストリの gainingRegistrar）。 */
+  requestingRegistrarId: string;
+  /** 承認 / 拒否の権限を持つ側（レジストリの losingRegistrar）。 */
+  actingRegistrarId: string;
+  requestedAt: string;
+  /** 放置時にサーバが自動承認する期限（FR-12。既定 20 分後）。 */
+  actByAt: string;
+}
+
 interface MockDomainState {
   name: string;
   registrant: string;
@@ -40,7 +55,8 @@ interface MockDomainState {
   rgpStatuses: string[];
   authInfo: string;
   pendingDelete: boolean;
-  pendingTransfer: boolean;
+  /** 移管申請中なら申請内容、そうでなければ null。 */
+  pendingTransfer: MockPendingTransfer | null;
 }
 
 function addYears(iso: string, years: number): string {
@@ -55,7 +71,7 @@ function deriveStatuses(state: MockDomainState): string[] {
     return ["pendingDelete"];
   }
   const statuses: string[] = [];
-  if (state.pendingTransfer) {
+  if (state.pendingTransfer !== null) {
     statuses.push("pendingTransfer");
   }
   statuses.push(...state.clientStatuses);
@@ -68,9 +84,13 @@ function deriveStatuses(state: MockDomainState): string[] {
   return statuses;
 }
 
-/** mock が名乗る相手レジストラ ID（移管の申請側 / 対応側）。 */
-const MOCK_REQUESTING_REGISTRAR_ID = "MOCK-GAINING";
-const MOCK_ACTING_REGISTRAR_ID = "MOCK-LOSING";
+/** mock が名乗る自レジストラ ID（実レジストリの `X-Registrar-Id` 相当）。 */
+const MOCK_REGISTRAR_ID = "MOCK-REGISTRAR";
+/** mock が相手取る他レジストラ ID（requirements §22 の `MOCK_FOREIGN_REGISTRAR_ID` 相当）。 */
+const MOCK_FOREIGN_REGISTRAR_ID = "MOCK-FOREIGN";
+
+/** 移管完了後に付く RGP（RFC 3915 の Transfer Grace Period）。 */
+const TRANSFER_GRACE_PERIOD = "transferPeriod";
 
 /**
  * ローカル開発・テスト・デモ用のインメモリレジストリ（docs/requirements.md §11.1）。
@@ -79,7 +99,11 @@ const MOCK_ACTING_REGISTRAR_ID = "MOCK-LOSING";
  */
 export class MockRegistryAdapter implements RegistryAdapter {
   readonly id: RegistryId;
+  /** 自レジストラ ID（§11.1）。移管の direction 導出に使う（ADR-0002 決定 3）。 */
+  readonly registrarId: string;
   readonly specVersion = "mock";
+  /** 移管の相手役として名乗る他レジストラ ID。 */
+  private readonly foreignRegistrarId: string;
   private readonly domains = new Map<string, MockDomainState>();
   private readonly now: () => Date;
   private failMode: MockFailMode;
@@ -93,6 +117,13 @@ export class MockRegistryAdapter implements RegistryAdapter {
      * （API 統合テストでレジストリ単位の部分失敗を再現するために使う）。
      */
     id?: RegistryId;
+    /** 自レジストラ ID（既定 `MOCK-REGISTRAR`）。 */
+    registrarId?: string;
+    /**
+     * 移管の相手レジストラ ID（既定 `MOCK-FOREIGN`）。
+     * 自分と同じ値を渡すと direction が導出できなくなるため別値にする。
+     */
+    foreignRegistrarId?: string;
     failMode?: MockFailMode;
     now?: () => Date;
     /** 操作ログ（FR-15）用の観測フック。公開メソッド 1 回 = 1 レコード。 */
@@ -101,6 +132,9 @@ export class MockRegistryAdapter implements RegistryAdapter {
     makeClTrid?: ClTridFactory;
   }) {
     this.id = options?.id ?? "mock";
+    this.registrarId = options?.registrarId ?? MOCK_REGISTRAR_ID;
+    this.foreignRegistrarId =
+      options?.foreignRegistrarId ?? MOCK_FOREIGN_REGISTRAR_ID;
     this.failMode = options?.failMode ?? "none";
     this.now = options?.now ?? (() => new Date());
     this.onCall = options?.onCall;
@@ -325,7 +359,7 @@ export class MockRegistryAdapter implements RegistryAdapter {
       rgpStatuses: ["addPeriod"],
       authInfo: input.authInfo,
       pendingDelete: false,
-      pendingTransfer: false,
+      pendingTransfer: null,
     };
     this.domains.set(name, state);
     return this.toInfo(state);
@@ -343,7 +377,7 @@ export class MockRegistryAdapter implements RegistryAdapter {
     const statuses = deriveStatuses(state);
     if (
       state.pendingDelete ||
-      state.pendingTransfer ||
+      state.pendingTransfer !== null ||
       statuses.includes("clientRenewProhibited")
     ) {
       throw new RegistryError({
@@ -385,7 +419,7 @@ export class MockRegistryAdapter implements RegistryAdapter {
       (input.removeStatuses?.length ?? 0) > 0;
     if (
       state.pendingDelete ||
-      state.pendingTransfer ||
+      state.pendingTransfer !== null ||
       (state.clientStatuses.includes("clientUpdateProhibited") && !removingOnly)
     ) {
       throw new RegistryError({
@@ -425,7 +459,7 @@ export class MockRegistryAdapter implements RegistryAdapter {
     const state = this.getState(name, "delete");
     if (
       state.pendingDelete ||
-      state.pendingTransfer ||
+      state.pendingTransfer !== null ||
       state.clientStatuses.includes("clientDeleteProhibited")
     ) {
       throw new RegistryError({
@@ -500,22 +534,33 @@ export class MockRegistryAdapter implements RegistryAdapter {
         registryCode: 2304,
       });
     }
-    state.pendingTransfer = true;
+    if (state.pendingTransfer !== null) {
+      throw new RegistryError({
+        code: "OPERATION_NOT_ALLOWED",
+        registry: this.id,
+        message: `transfer:request: ${name} は既に移管申請中です`,
+        registryCode: 2304,
+      });
+    }
     const requestedAt = this.now().toISOString();
-    state.upDate = requestedAt;
-    return {
-      name: state.name,
-      status: "pending",
-      registryStatus: "pending",
-      requestingRegistrarId: MOCK_REQUESTING_REGISTRAR_ID,
-      actingRegistrarId: MOCK_ACTING_REGISTRAR_ID,
+    // 申請したのは自レジストラなので requesting = 自分、対応するのは相手レジストラ。
+    state.pendingTransfer = {
+      requestingRegistrarId: this.registrarId,
+      actingRegistrarId: this.foreignRegistrarId,
       requestedAt,
       // 放置時のサーバ自動承認（FR-12。既定 20 分後）。
       actByAt: new Date(
         new Date(requestedAt).getTime() + TRANSFER_AUTO_APPROVE_MS,
       ).toISOString(),
-      raw: this.toTransferRaw("transfer_request", state),
     };
+    state.upDate = requestedAt;
+    return this.toTransferResult(
+      state,
+      "transfer_request",
+      "pending",
+      "pending",
+      state.pendingTransfer,
+    );
   }
 
   async transferQuery(name: string): Promise<TransferResult> {
@@ -527,18 +572,139 @@ export class MockRegistryAdapter implements RegistryAdapter {
   private async doTransferQuery(name: string): Promise<TransferResult> {
     this.gate("transfer:query");
     const state = this.getState(name, "transfer:query");
-    // 実アダプタと同じく info 相当からの導出。移管中でなければレジストラ ID は返さない。
+    // 実アダプタと同じく info 相当からの導出。移管中でなければレジストラ ID も日時も返さない。
+    const pending = state.pendingTransfer;
+    if (pending === null) {
+      return {
+        name: state.name,
+        status: "none",
+        raw: this.toTransferRaw("transfer_query", state),
+      };
+    }
+    return this.toTransferResult(
+      state,
+      "transfer_query",
+      "pending",
+      "pending",
+      pending,
+    );
+  }
+
+  async transferApprove(name: string): Promise<TransferResult> {
+    return this.recorded("transfer_approve", name, { name }, () =>
+      this.doTransferApprove(name),
+    );
+  }
+
+  /**
+   * 移管の承認。実レジストリと同じく losing 側の操作で、承認するとドメインは申請側へ移る。
+   * mock は 1 レジストラ分の状態しか持たないため「移管先へ渡した」ことを
+   * `trDate`（最終移管日時）と Transfer GP で表し、`pendingTransfer` を解除する。
+   * 有効期限は延ばさない（両レジストリの transfer 応答に exDate が無く、
+   * 完了時に延びるかも未確認のため。ADR-0002 /【要確認: §21.2 #16】）。
+   */
+  private async doTransferApprove(name: string): Promise<TransferResult> {
+    this.gate("transfer:approve");
+    const state = this.getState(name, "transfer:approve");
+    const pending = this.requirePending(state, "transfer:approve");
+    const approvedAt = this.now().toISOString();
+    state.pendingTransfer = null;
+    state.trDate = approvedAt;
+    state.rgpStatuses = [TRANSFER_GRACE_PERIOD];
+    state.upDate = approvedAt;
+    return this.toTransferResult(
+      state,
+      "transfer_approve",
+      "approved",
+      "clientApproved",
+      pending,
+    );
+  }
+
+  async transferReject(name: string): Promise<TransferResult> {
+    return this.recorded("transfer_reject", name, { name }, () =>
+      this.doTransferReject(name),
+    );
+  }
+
+  /** 移管の拒否（losing 側）。申請を取り下げるだけで、ドメインの保有は変わらない。 */
+  private async doTransferReject(name: string): Promise<TransferResult> {
+    this.gate("transfer:reject");
+    const state = this.getState(name, "transfer:reject");
+    const pending = this.requirePending(state, "transfer:reject");
+    state.pendingTransfer = null;
+    state.upDate = this.now().toISOString();
+    return this.toTransferResult(
+      state,
+      "transfer_reject",
+      "rejected",
+      "clientRejected",
+      pending,
+    );
+  }
+
+  async transferCancel(name: string): Promise<TransferResult> {
+    return this.recorded("transfer_cancel", name, { name }, () =>
+      this.doTransferCancel(name),
+    );
+  }
+
+  /** 移管申請の取消（gaining 側）。承認前にだけ実行できる。 */
+  private async doTransferCancel(name: string): Promise<TransferResult> {
+    this.gate("transfer:cancel");
+    const state = this.getState(name, "transfer:cancel");
+    const pending = this.requirePending(state, "transfer:cancel");
+    state.pendingTransfer = null;
+    state.upDate = this.now().toISOString();
+    return this.toTransferResult(
+      state,
+      "transfer_cancel",
+      "cancelled",
+      "clientCancelled",
+      pending,
+    );
+  }
+
+  /**
+   * approve / reject / cancel は進行中の申請が前提。無ければ実レジストリの
+   * 「転送リクエスト不在」（HTTP 409）に合わせて 2304 で拒否する。
+   */
+  private requirePending(
+    state: MockDomainState,
+    command: string,
+  ): MockPendingTransfer {
+    const pending = state.pendingTransfer;
+    if (pending === null) {
+      throw new RegistryError({
+        code: "OPERATION_NOT_ALLOWED",
+        registry: this.id,
+        message: `${command}: ${state.name} に進行中の移管申請がありません`,
+        registryCode: 2304,
+      });
+    }
+    return pending;
+  }
+
+  /**
+   * 移管系の正規化結果。`newExpiresAt` は設定しない（実レジストリの transfer 応答に
+   * exDate が無く、mock だけが返すと mock でしか動かない実装を誘発するため。ADR-0002）。
+   */
+  private toTransferResult(
+    state: MockDomainState,
+    command: string,
+    status: TransferStatus,
+    registryStatus: string,
+    pending: MockPendingTransfer,
+  ): TransferResult {
     return {
       name: state.name,
-      status: state.pendingTransfer ? "pending" : "none",
-      ...(state.pendingTransfer
-        ? {
-            registryStatus: "pending",
-            requestingRegistrarId: MOCK_REQUESTING_REGISTRAR_ID,
-            actingRegistrarId: MOCK_ACTING_REGISTRAR_ID,
-          }
-        : {}),
-      raw: this.toTransferRaw("transfer_query", state),
+      status,
+      registryStatus,
+      requestingRegistrarId: pending.requestingRegistrarId,
+      actingRegistrarId: pending.actingRegistrarId,
+      requestedAt: pending.requestedAt,
+      actByAt: pending.actByAt,
+      raw: this.toTransferRaw(command, state),
     };
   }
 
@@ -552,7 +718,7 @@ export class MockRegistryAdapter implements RegistryAdapter {
       registry: this.id,
       command,
       domain: state.name,
-      pendingTransfer: state.pendingTransfer,
+      pendingTransfer: state.pendingTransfer !== null,
       statuses: deriveStatuses(state),
     };
   }

@@ -92,11 +92,12 @@ describe("POST /api/v1/transfers（FR-12 移管 IN）", () => {
     const res = await sendJson("/transfers", { name: "move.com", authCode });
     expect(res.status).toBe(202);
     const { transfer } = (await res.json()) as TransferPayload;
+    // 申請したのは自レジストラなので requesting = 自分、対応するのは相手レジストラ（ADR-0002 決定 3）
     expect(transfer).toMatchObject({
       name: "move.com",
       status: "pending",
-      requestingRegistrarId: "MOCK-GAINING",
-      actingRegistrarId: "MOCK-LOSING",
+      requestingRegistrarId: "MOCK-REGISTRAR",
+      actingRegistrarId: "MOCK-FOREIGN",
     });
     // 自動承認の期限は申請から 20 分後（FR-12）
     expect(
@@ -109,7 +110,7 @@ describe("POST /api/v1/transfers（FR-12 移管 IN）", () => {
     expect(query.status).toBe(200);
     const queried = (await query.json()) as TransferPayload;
     expect(queried.transfer.status).toBe("pending");
-    expect(queried.transfer.requestingRegistrarId).toBe("MOCK-GAINING");
+    expect(queried.transfer.requestingRegistrarId).toBe("MOCK-REGISTRAR");
 
     const info = await api("/domains/move.com");
     const { domain } = (await info.json()) as {
