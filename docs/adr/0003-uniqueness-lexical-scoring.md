@@ -21,7 +21,7 @@ lexical 方式への転換余地を明示していた。本 ADR がその記録�
    （typo / leet / 日本語ローマ字読み）× Damerau-Levenshtein / Jaro-Winkler ×
    5 カーブ min 合成 + 一般語免除。全数式は ALGORITHM_SPEC.md。
 2. **比較コーパスは DB でなくビルド同梱の静的モジュールとする。**
-   Tranco（リスト ID `74V4X`、2026-08-26 取得、上位 1 万行から SLD 抽出 8,927 件）+
+   Tranco（リスト ID `74V4X`、2026-08-26 取得、上位 1 万行から SLD 抽出。アダルト・海賊版の除外後 8,520 件）+
    curated-jp/tech 58 件。生成は `packages/shared/scripts/convert-tranco.mjs`（オフライン、
    出典・checksum をコード内 `TRANCO_META` に記録）。API は tsup バンドルに同梱されるため
    本番で確実に読み込め、DB 接続・seed 運用・コールドスタート増を持ち込まない
@@ -52,8 +52,13 @@ lexical 方式への転換余地を明示していた。本 ADR がその記録�
 
 - 実 Tranco コーパスでの傾向監査は AUDIT_TRANCO.md に記録（gold 開発セットは 90 件中 84 件
   一致。差分 6 件はいずれも実在の近傍名の出現による説明可能な mid 化で、ラベルの改変はしない）。
-- 要件更新の提案: §14 の算出方式節を本 ADR ベース（lexical）に差し替え、§11 の 2 テーブルと
-  `POST /ai/uniqueness`、`UNIQUENESS_THETA_*` を削除または「不採用（ADR-0003）」と注記する。
-  requirements.md の編集はチーム承認の上で別コミットとする。
+- 要件への反映は **`docs/requirements.md` v0.1.14（2026-08-26、PR #155）で完了**。
+  §14 を lexical 方式に差し替え、§9.1 の `reference_names` / `uniqueness_checks`、
+  §10.1 の `POST /ai/uniqueness`、§13.3 の埋め込み、§6.1 図・§7 の pgvector、
+  §17 の `EMBEDDING_*` / `UNIQUENESS_THETA_*` を「不採用（ADR-0003）」とした。
+  §14.3 の【要確認】と §21.2 #9 も解決済み。
+- 参照コーパスにはアダルト・海賊版サイトを含めない（`topSimilar` の名前が画面に
+  そのまま描画されるため）。除外規則は `packages/shared/scripts/corpus-denylist.mjs`
+  が持ち、生成時に適用する。
 - 将来 embedding を併用する場合も、§14.3 の `score = min(score_embedding, score_lexical)`
   の形で本実装の上に足せる（本実装の置き換えは不要）。
