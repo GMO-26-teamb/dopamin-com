@@ -583,6 +583,323 @@ describe("authCode（rotate-auth-info）", () => {
   });
 });
 
+describe("poll / ackMessage（§11.1 / FR-12 AC-12-4。レジストリ差はエンドポイントだけ）", () => {
+  it("kitaqsign: GET /messages/poll から最古の通知を取り出す", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(loadFixture("poll.kitaqsign.json")),
+    );
+    const message = await createKitaqAdapter(CONFIG).poll();
+    expect(requestAt(0)).toMatchObject({
+      method: "GET",
+      path: "/api/v1/epp/messages/poll",
+    });
+    expect(message).toMatchObject({
+      // int64 は string に正規化する（ADR-0002 決定 8）
+      id: "1042",
+      count: 2,
+      queuedAt: "2026-08-26T10:00:00Z",
+      // msgType から動詞が読めないので payload.status（pending）へフォールバックする
+      type: "transfer_request",
+      domainName: "example.com",
+      transfer: {
+        name: "example.com",
+        status: "pending",
+        registryStatus: "pending",
+        requestingRegistrarId: "REG-OTHER",
+        actingRegistrarId: "REG-DOPAMIN",
+      },
+    });
+    // kitaqsign の payload には reDate / acDate が無い
+    expect(message?.transfer?.requestedAt).toBeUndefined();
+    expect(message?.transfer?.actByAt).toBeUndefined();
+  });
+
+  it("kitaqnic: GET /messages から取り出し、msgType だけで種別が決まる", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(loadFixture("poll.kitaqnic.json")),
+    );
+    const message = await createKitaqAdapter({
+      ...CONFIG,
+      id: "kitaqnic",
+    }).poll();
+    expect(requestAt(0)).toMatchObject({
+      method: "GET",
+      path: "/api/v1/epp/messages",
+    });
+    expect(message).toMatchObject({
+      id: "2087",
+      count: 1,
+      type: "transfer_approved",
+      domainName: "example.xyz",
+      transfer: {
+        status: "approved",
+        registryStatus: "clientApproved",
+        requestingRegistrarId: "REG-DOPAMIN",
+        actingRegistrarId: "REG-OTHER",
+        requestedAt: "2026-08-26T10:00:00Z",
+        actByAt: "2026-08-26T10:20:00Z",
+      },
+    });
+  });
+
+  it("通知が無ければ null（count 0 / message 省略）", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(loadFixture("poll-empty.json")),
+    );
+    await expect(createKitaqAdapter(CONFIG).poll()).resolves.toBeNull();
+  });
+
+  it("message: null の応答も通知なしとして扱う", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(envelope({ count: 0, message: null })),
+    );
+    await expect(createKitaqAdapter(CONFIG).poll()).resolves.toBeNull();
+  });
+
+  it("未知の msgType は unknown に倒し、通知そのものは落とさない（ADR-0002 決定 9）", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        envelope({
+          count: 1,
+          message: {
+            id: 7,
+            msgType: "lowBalanceNotice",
+            payload: { threshold: 1000 },
+            qdate: "2026-08-26T11:00:00Z",
+          },
+        }),
+      ),
+    );
+    const message = await createKitaqAdapter(CONFIG).poll();
+    expect(message).toMatchObject({ id: "7", type: "unknown" });
+    // 対象ドメインも移管情報も取れないが、生応答は raw に残る
+    expect(message?.domainName).toBeUndefined();
+    expect(message?.transfer).toBeUndefined();
+    expect(message?.raw).toMatchObject({ result: { code: 1000 } });
+  });
+
+  it("payload が想定外の形でも id / type までは持ち上げる", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        envelope({
+          count: 1,
+          message: {
+            id: 8,
+            msgType: "transfer:reject",
+            payload: "移管が拒否されました",
+            qdate: "2026-08-26T11:00:00Z",
+          },
+        }),
+      ),
+    );
+    const message = await createKitaqAdapter(CONFIG).poll();
+    // payload からドメイン名が取れないので transfer は組み立てない
+    expect(message).toMatchObject({ id: "8", type: "transfer_rejected" });
+    expect(message?.transfer).toBeUndefined();
+  });
+
+  it("payload の 1 フィールドが想定外の型でも、読めた分は落とさない", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        envelope({
+          count: 1,
+          message: {
+            id: 11,
+            msgType: "transferApproved",
+            payload: {
+              domain: "z.com",
+              status: "clientApproved",
+              // 日付が ISO 文字列ではなく epoch 数値で来たケース
+              acDate: 1_756_200_000,
+            },
+            qdate: "2026-08-26T11:00:00Z",
+          },
+        }),
+      ),
+    );
+    const message = await createKitaqAdapter(CONFIG).poll();
+    // acDate だけが落ち、domain / status は生き残る
+    expect(message).toMatchObject({
+      type: "transfer_approved",
+      domainName: "z.com",
+      transfer: { name: "z.com", status: "approved" },
+    });
+    expect(message?.transfer?.actByAt).toBeUndefined();
+  });
+
+  it("msgType に動詞が無く status が配列でも、対象ドメインは失わない", async () => {
+    // このレジストリの domain:info は status を配列で返す。payload も同じ形で来うる
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        envelope({
+          count: 1,
+          message: {
+            id: 12,
+            msgType: "domain:transfer",
+            payload: {
+              domain: "z.com",
+              status: ["pendingTransfer"],
+              gainingRegistrar: "REG-OTHER",
+            },
+            qdate: "2026-08-26T11:00:00Z",
+          },
+        }),
+      ),
+    );
+    const message = await createKitaqAdapter(CONFIG).poll();
+    // status が読めないので種別は決められない（unknown に倒す）が、
+    // 対象ドメインは分かるので消化側が突き合わせられる
+    expect(message).toMatchObject({
+      id: "12",
+      type: "unknown",
+      domainName: "z.com",
+    });
+  });
+
+  it("移管と無関係な通知は status が pending でも移管通知にしない", async () => {
+    // matchTransferStatus は部分一致なので、ライフサイクル通知の pendingDelete /
+    // pendingRestore を移管として拾ってしまわないことを固定する
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        envelope({
+          count: 1,
+          message: {
+            id: 13,
+            msgType: "domainDeleteScheduled",
+            payload: { domain: "victim.com", status: "pendingDelete" },
+            qdate: "2026-08-26T11:00:00Z",
+          },
+        }),
+      ),
+    );
+    const message = await createKitaqAdapter(CONFIG).poll();
+    expect(message).toMatchObject({
+      id: "13",
+      type: "unknown",
+      domainName: "victim.com",
+    });
+    // 移管ではないので TransferResult を捏造しない
+    expect(message?.transfer).toBeUndefined();
+  });
+
+  it("msgType が EPP 由来（trnData）なら移管通知として扱う", async () => {
+    // EPP の Poll は <domain:trnData> で移管を伝える。payload に移管固有の
+    // フィールドが無くても msgType だけで移管と判断できる必要がある
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        envelope({
+          count: 1,
+          message: {
+            id: 14,
+            msgType: "trnData",
+            payload: { domain: "epp.com", status: "clientApproved" },
+            qdate: "2026-08-26T11:00:00Z",
+          },
+        }),
+      ),
+    );
+    const message = await createKitaqAdapter(CONFIG).poll();
+    expect(message).toMatchObject({
+      id: "14",
+      type: "transfer_approved",
+      domainName: "epp.com",
+      transfer: { status: "approved", registryStatus: "clientApproved" },
+    });
+  });
+
+  it("msgType が読めなくても payload の形（gainingRegistrar 等）で移管と判断する", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        envelope({
+          count: 1,
+          message: {
+            id: 15,
+            msgType: "9001",
+            payload: {
+              domain: "shape.com",
+              status: "pending",
+              gainingRegistrar: "REG-DOPAMIN",
+              losingRegistrar: "REG-OTHER",
+            },
+            qdate: "2026-08-26T11:00:00Z",
+          },
+        }),
+      ),
+    );
+    const message = await createKitaqAdapter(CONFIG).poll();
+    expect(message).toMatchObject({
+      id: "15",
+      type: "transfer_request",
+      domainName: "shape.com",
+      transfer: { status: "pending", requestingRegistrarId: "REG-DOPAMIN" },
+    });
+  });
+
+  it("count の欠落は REGISTRY_SPEC_MISMATCH（必須フィールド）", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(envelope({})));
+    const err = await createKitaqAdapter(CONFIG)
+      .poll()
+      .then(
+        () => null,
+        (e: unknown) => e,
+      );
+    expect(err).toBeInstanceOf(RegistryError);
+    expect((err as RegistryError).code).toBe("REGISTRY_SPEC_MISMATCH");
+  });
+
+  it("kitaqsign の ack は POST /messages/{id}/ack", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(envelope()));
+    await createKitaqAdapter(CONFIG).ackMessage("1042");
+    expect(requestAt(0)).toMatchObject({
+      method: "POST",
+      path: "/api/v1/epp/messages/1042/ack",
+    });
+  });
+
+  it("kitaqnic の ack は DELETE /messages/{id}", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(envelope()));
+    await createKitaqAdapter({ ...CONFIG, id: "kitaqnic" }).ackMessage("2087");
+    expect(requestAt(0)).toMatchObject({
+      method: "DELETE",
+      path: "/api/v1/epp/messages/2087",
+    });
+  });
+
+  it("整数でないメッセージ ID は送信せず REGISTRY_SPEC_MISMATCH で落とす", async () => {
+    const err = await createKitaqAdapter(CONFIG)
+      .ackMessage("not-a-number")
+      .then(
+        () => null,
+        (e: unknown) => e,
+      );
+    expect(err).toBeInstanceOf(RegistryError);
+    expect((err as RegistryError).code).toBe("REGISTRY_SPEC_MISMATCH");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("poll / ack は操作ログに専用コマンド名で残る（FR-15）", async () => {
+    const records: RegistryCallRecord[] = [];
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(loadFixture("poll.kitaqsign.json")))
+      .mockResolvedValueOnce(jsonResponse(envelope()));
+    const adapter = createKitaqAdapter({
+      ...CONFIG,
+      onCall: (record) => {
+        records.push(record);
+      },
+    });
+
+    const message = await adapter.poll();
+    await adapter.ackMessage(String(message?.id));
+
+    // 対象ドメインは payload を読むまで決まらないため domainName は null（§9.1 は null 可）
+    expect(records.map((r) => [r.command, r.domainName])).toEqual([
+      ["poll", null],
+      ["ack", null],
+    ]);
+  });
+});
+
 describe("観測フック（FR-15: 1 HTTP 呼び出し = 1 レコード）", () => {
   it("create はネームサーバ指定時、補助コマンド含む独立レコードを発行する（v0.1.7 / AC-15-1）", async () => {
     const records: RegistryCallRecord[] = [];

@@ -7,6 +7,7 @@ import {
 import {
   type ApiErrorBody,
   apiErrorBodySchema,
+  type ClientStatus,
   domainListResponseSchema,
   type TransferResult,
   transferDetailResponseSchema,
@@ -152,16 +153,39 @@ async function listDomains(cookie?: string) {
 /**
  * レジストリ側にだけドメインを用意する（アプリの `domains` 行は作らない）。
  *
- * `POST /domains` で作ると申請者自身の保有ドメインになってしまい、
- * AC-12-1「移管申請中は保有一覧に出ない」を検証できなくなる。
- * 相手レジストラが保有している状態を再現するため、アダプタを直接叩く。
+ * `POST /domains` や `adapter.create` で作ると申請者自身の保有ドメインになり、
+ * 移管 IN の申請そのものが 409 になる（#45 で mock がスポンサーを見るようになった）。
+ * 相手レジストラが保有している状態を再現するため、mock の seed を直接叩く。
  */
-async function seedForeignDomain(
+function seedForeignDomain(
   adapter: MockRegistryAdapter,
   name: string,
+  options?: { clientStatuses?: readonly ClientStatus[] },
   authCode = "auth-code-1234",
+): string {
+  adapter.seedForeignDomain(name, authCode, options);
+  return authCode;
+}
+
+/**
+ * 相手レジストラ保有で、かつ**過去の移管履歴（`trDate`）を持つ**ドメインを作る。
+ *
+ * mock は状態遷移でしか `trDate` を刻まないので、「一度こちらへ移管 IN してから
+ * こちらから移管 OUT する」ことで本物の履歴を作る。戻り値は移管 OUT 時に発行した
+ * AuthCode で、そのまま次の移管 IN 申請に使える。
+ */
+async function seedForeignDomainWithPastTransfer(
+  adapter: MockRegistryAdapter,
+  name: string,
 ): Promise<string> {
-  await adapter.create({ name, periodYears: 1, authInfo: authCode });
+  const seedCode = seedForeignDomain(adapter, name);
+  await adapter.transferRequest(name, seedCode);
+  // 相手が承認 → こちらの保有になり trDate が付く
+  adapter.simulateCounterpartApprove(name);
+  const authCode = await adapter.authCode(name);
+  // 相手が申請 → こちらが承認して手放す（再び相手レジストラ保有に戻る）
+  adapter.simulateInboundTransferRequest(name);
+  await adapter.transferApprove(name);
   return authCode;
 }
 
@@ -197,7 +221,7 @@ function findLogLine(
 
 describe("POST /api/v1/transfers（FR-12 移管 IN の申請と永続化）", () => {
   it("AC-12-1: 申請が受理されると pending の transfers 行ができ、保有一覧には出ない", async () => {
-    const authCode = await seedForeignDomain(kitaqsign, "move.com");
+    const authCode = seedForeignDomain(kitaqsign, "move.com");
 
     const res = await sendJson("/transfers", { name: "move.com", authCode });
     expect(res.status).toBe(202);
@@ -250,7 +274,7 @@ describe("POST /api/v1/transfers（FR-12 移管 IN の申請と永続化）", ()
   });
 
   it("AC-12-2: 誤った AuthCode は 422 REGISTRY_REJECTED で、行は作らない", async () => {
-    await seedForeignDomain(kitaqsign, "wrong.com");
+    seedForeignDomain(kitaqsign, "wrong.com");
     const res = await sendJson("/transfers", {
       name: "wrong.com",
       authCode: "wrong-auth-code",
@@ -269,9 +293,9 @@ describe("POST /api/v1/transfers（FR-12 移管 IN の申請と永続化）", ()
   });
 
   it("clientTransferProhibited 中の申請は 409 OPERATION_NOT_ALLOWED で、行は作らない", async () => {
-    const authCode = await seedForeignDomain(kitaqsign, "lock.com");
-    await kitaqsign.update("lock.com", {
-      addStatuses: ["clientTransferProhibited"],
+    // ロックを掛けているのは現スポンサー（相手レジストラ）側
+    const authCode = seedForeignDomain(kitaqsign, "lock.com", {
+      clientStatuses: ["clientTransferProhibited"],
     });
     const res = await sendJson("/transfers", { name: "lock.com", authCode });
     expect(res.status).toBe(409);
@@ -310,7 +334,7 @@ describe("POST /api/v1/transfers（FR-12 移管 IN の申請と永続化）", ()
     setRegistrySetForTesting(
       createRegistrySet({ mode: "real", adapters: [adapter] }),
     );
-    const authCode = await seedForeignDomain(adapter, "twice.com");
+    const authCode = seedForeignDomain(adapter, "twice.com");
 
     const [before] = await requestTransfer("twice.com", authCode);
     // 2 回目: レジストリには既に届いているので transferRequest はタイムアウト扱いにし、
@@ -346,7 +370,7 @@ describe("AC-18-2 / ADR-0002: 移管申請タイムアウト時の照合", () =>
   });
 
   it("申請がレジストリに到達していれば、応答タイムアウトでも 202 + pending 行", async () => {
-    const authCode = await seedForeignDomain(adapter, "slowmove.com");
+    const authCode = seedForeignDomain(adapter, "slowmove.com");
 
     adapter.timeoutMode = "after-success";
     const res = await sendJson("/transfers", {
@@ -364,7 +388,7 @@ describe("AC-18-2 / ADR-0002: 移管申請タイムアウト時の照合", () =>
   });
 
   it("受理を確認できないタイムアウトは 504 のまま、追跡用の pending 行だけ残す", async () => {
-    const authCode = await seedForeignDomain(adapter, "lostmove.com");
+    const authCode = seedForeignDomain(adapter, "lostmove.com");
 
     adapter.timeoutMode = "before-reach";
     const res = await sendJson("/transfers", {
@@ -385,11 +409,11 @@ describe("AC-18-2 / ADR-0002: 移管申請タイムアウト時の照合", () =>
 
 describe("GET /api/v1/transfers（FR-12 一覧と承認検知）", () => {
   it("AC-12-3: 相手が承認するとドメインが取り込まれ、保有一覧に出る", async () => {
-    const authCode = await seedForeignDomain(kitaqsign, "gained.com");
+    const authCode = seedForeignDomain(kitaqsign, "gained.com");
     const [created] = await requestTransfer("gained.com", authCode);
 
     // 相手レジストラ（またはサーバの自動承認）が承認した状態を作る
-    await kitaqsign.transferApprove("gained.com");
+    kitaqsign.simulateCounterpartApprove("gained.com");
 
     const list = await listTransfers();
     expect(list.inbound).toEqual([]);
@@ -417,10 +441,10 @@ describe("GET /api/v1/transfers（FR-12 一覧と承認検知）", () => {
   });
 
   it("拒否・取消で pendingTransfer が消えても approved にはしない（承認と区別できないため据え置く）", async () => {
-    const authCode = await seedForeignDomain(kitaqsign, "rejected.com");
+    const authCode = seedForeignDomain(kitaqsign, "rejected.com");
     await requestTransfer("rejected.com", authCode);
 
-    await kitaqsign.transferReject("rejected.com");
+    kitaqsign.simulateCounterpartReject("rejected.com");
 
     const list = await listTransfers();
     expect(list.history).toEqual([]);
@@ -431,7 +455,7 @@ describe("GET /api/v1/transfers（FR-12 一覧と承認検知）", () => {
   });
 
   it("照合しても申請時に分かっていた値（act_by_at / 相手レジストラ）を null で潰さない", async () => {
-    const authCode = await seedForeignDomain(kitaqsign, "keep.com");
+    const authCode = seedForeignDomain(kitaqsign, "keep.com");
     const [before] = await requestTransfer("keep.com", authCode);
 
     await listTransfers();
@@ -457,9 +481,9 @@ describe("GET /api/v1/transfers（FR-12 一覧と承認検知）", () => {
       statuses: ["ok"],
     });
 
-    const authCode = await seedForeignDomain(kitaqsign, "contested.com");
+    const authCode = seedForeignDomain(kitaqsign, "contested.com");
     await requestTransfer("contested.com", authCode);
-    await kitaqsign.transferApprove("contested.com");
+    kitaqsign.simulateCounterpartApprove("contested.com");
 
     const blocked = await listTransfers();
     expect(blocked.inbound).toHaveLength(1);
@@ -489,11 +513,11 @@ describe("GET /api/v1/transfers（FR-12 一覧と承認検知）", () => {
   });
 
   it("1 つのレジストリが落ちても一覧は返り、失敗した行は据え置かれる（部分失敗）", async () => {
-    const signCode = await seedForeignDomain(kitaqsign, "up.com");
-    const nicCode = await seedForeignDomain(kitaqnic, "down.xyz");
+    const signCode = seedForeignDomain(kitaqsign, "up.com");
+    const nicCode = seedForeignDomain(kitaqnic, "down.xyz");
     await requestTransfer("up.com", signCode);
     await requestTransfer("down.xyz", nicCode);
-    await kitaqsign.transferApprove("up.com");
+    kitaqsign.simulateCounterpartApprove("up.com");
 
     kitaqnic.setFailMode("5xx");
     const list = await listTransfers();
@@ -511,7 +535,7 @@ describe("GET /api/v1/transfers（FR-12 一覧と承認検知）", () => {
   });
 
   it("レジストリからドメインが消えていても一覧は 200 で、その行は pending のまま", async () => {
-    const authCode = await seedForeignDomain(kitaqsign, "vanished.com");
+    const authCode = seedForeignDomain(kitaqsign, "vanished.com");
     await requestTransfer("vanished.com", authCode);
     // 照合が NOT_FOUND になる状況（レジストリからドメインが消えた）を、
     // そのドメインを持たないアダプタに差し替えて再現する
@@ -533,7 +557,7 @@ describe("GET /api/v1/transfers（FR-12 一覧と承認検知）", () => {
   });
 
   it("AC-02-1: 他ユーザーの移管は自分の一覧に出ない", async () => {
-    const authCode = await seedForeignDomain(kitaqsign, "mine.com");
+    const authCode = seedForeignDomain(kitaqsign, "mine.com");
     await requestTransfer("mine.com", authCode);
 
     const list = await listTransfers(other.cookie);
@@ -541,7 +565,7 @@ describe("GET /api/v1/transfers（FR-12 一覧と承認検知）", () => {
   });
 
   it("Poll 未実装のため outbound は常に空（#58）", async () => {
-    const authCode = await seedForeignDomain(kitaqsign, "onlyin.com");
+    const authCode = seedForeignDomain(kitaqsign, "onlyin.com");
     await requestTransfer("onlyin.com", authCode);
     const list = await listTransfers();
     expect(list.outbound).toEqual([]);
@@ -551,7 +575,7 @@ describe("GET /api/v1/transfers（FR-12 一覧と承認検知）", () => {
   });
 
   it("FR-18: レジストリの生応答（raw）はどの応答にも含めない", async () => {
-    const authCode = await seedForeignDomain(kitaqsign, "noraw.com");
+    const authCode = seedForeignDomain(kitaqsign, "noraw.com");
     const created = await sendJson("/transfers", {
       name: "noraw.com",
       authCode,
@@ -583,16 +607,13 @@ describe("承認検知の境界（#56 / ADR-0002）", () => {
   it("申請より前の移管履歴（古い trDate）を自分の承認と取り違えない", async () => {
     let clock = new Date("2026-01-01T00:00:00.000Z");
     const adapter = clockedAdapter(() => clock);
-    const authCode = await seedForeignDomain(adapter, "old.com");
     // このドメインには過去（申請より前）の移管履歴がある
-    await adapter.transferRequest("old.com", authCode);
-    await adapter.transferApprove("old.com");
+    const code = await seedForeignDomainWithPastTransfer(adapter, "old.com");
 
     clock = new Date("2026-06-01T00:00:00.000Z");
-    const code = await adapter.authCode("old.com");
     await requestTransfer("old.com", code);
     // 相手が拒否 → pendingTransfer は消えるが trDate は古いまま
-    await adapter.transferReject("old.com");
+    adapter.simulateCounterpartReject("old.com");
 
     const list = await listTransfers();
     expect(list.history).toEqual([]);
@@ -600,19 +621,18 @@ describe("承認検知の境界（#56 / ADR-0002）", () => {
     expect(await listDomains()).toEqual([]);
   });
 
-  it("自動承認期限を大きく過ぎた移管（無関係な第三者への移管）を自分の承認にしない", async () => {
+  it("自動承認期限を大きく過ぎた移管（無関係な後日の移管）を自分の承認にしない", async () => {
     let clock = new Date("2026-06-01T00:00:00.000Z");
     const adapter = clockedAdapter(() => clock);
-    const authCode = await seedForeignDomain(adapter, "later.com");
+    const authCode = seedForeignDomain(adapter, "later.com");
     await requestTransfer("later.com", authCode);
     // 自分の申請は拒否された（検知できないので行は pending のまま残る）
-    await adapter.transferReject("later.com");
+    adapter.simulateCounterpartReject("later.com");
 
-    // 10 日後、まったく別の移管が成立して trDate だけが進む
+    // 10 日後、この申請とは無関係な移管が成立して trDate だけが進む
     clock = new Date("2026-06-11T00:00:00.000Z");
-    const nextCode = await adapter.authCode("later.com");
-    await adapter.transferRequest("later.com", nextCode);
-    await adapter.transferApprove("later.com");
+    await adapter.transferRequest("later.com", authCode);
+    adapter.simulateCounterpartApprove("later.com");
 
     const list = await listTransfers();
     // 申請 + 20 分の自動承認期限を大きく過ぎた trDate は自分の申請の結果ではない
@@ -629,7 +649,8 @@ describe("承認検知の境界（#56 / ADR-0002）", () => {
         authCode: string,
       ): Promise<TransferResult> {
         await super.transferRequest(name, authCode);
-        await super.transferApprove(name);
+        // 相手（losing）側が即座に承認した
+        this.simulateCounterpartApprove(name);
         // 成立してから応答を諦めるまでに時間が経つ（実際は更新系 15 秒のタイムアウト）。
         // この間があるので、requested_at に「照合が終わった今」を使うと trDate を追い越す。
         await new Promise((resolve) => setTimeout(resolve, 30));
@@ -644,7 +665,7 @@ describe("承認検知の境界（#56 / ADR-0002）", () => {
     setRegistrySetForTesting(
       createRegistrySet({ mode: "real", adapters: [adapter] }),
     );
-    const authCode = await seedForeignDomain(adapter, "raced.com");
+    const authCode = seedForeignDomain(adapter, "raced.com");
 
     const res = await sendJson("/transfers", { name: "raced.com", authCode });
     // 受理を確認できないので 504 のままだが、追跡用の行は残る
@@ -664,9 +685,9 @@ describe("承認検知の境界（#56 / ADR-0002）", () => {
 describe("取り込み再試行の期限（§6.5）", () => {
   /** 承認・取り込みまで進めてから domains 行を消し、取り込み待ちの状態を作る。 */
   async function makeImportPending(name: string): Promise<string> {
-    const authCode = await seedForeignDomain(kitaqsign, name);
+    const authCode = seedForeignDomain(kitaqsign, name);
     await requestTransfer(name, authCode);
-    await kitaqsign.transferApprove(name);
+    kitaqsign.simulateCounterpartApprove(name);
     await listTransfers();
     // FR-10 の廃止や FR-16 のデモリセットで domains 行が消えると
     // FK（ON DELETE SET NULL）で domain_id が null に戻る
@@ -716,9 +737,9 @@ describe("AC-12-5: 同名を再び移管 IN しても DB 制約で失敗しな�
       statuses: ["ok"],
     });
 
-    const authCode = await seedForeignDomain(kitaqsign, "again.com");
+    const authCode = seedForeignDomain(kitaqsign, "again.com");
     await requestTransfer("again.com", authCode);
-    await kitaqsign.transferApprove("again.com");
+    kitaqsign.simulateCounterpartApprove("again.com");
 
     const list = await listTransfers();
     expect(list.history[0]?.domainId).not.toBeNull();
@@ -735,7 +756,7 @@ describe("AC-12-5: 同名を再び移管 IN しても DB 制約で失敗しな�
 
 describe("GET /api/v1/transfers/:id（FR-12 状態照会）", () => {
   it("自分の移管を 1 件返す", async () => {
-    const authCode = await seedForeignDomain(kitaqsign, "one.com");
+    const authCode = seedForeignDomain(kitaqsign, "one.com");
     const [created] = await requestTransfer("one.com", authCode);
 
     const res = await api(`/transfers/${created?.id}`);
@@ -751,9 +772,9 @@ describe("GET /api/v1/transfers/:id（FR-12 状態照会）", () => {
   });
 
   it("AC-12-3: 単票でも承認検知 → 取り込み → domain_id 紐付けまで進む", async () => {
-    const authCode = await seedForeignDomain(kitaqsign, "single.com");
+    const authCode = seedForeignDomain(kitaqsign, "single.com");
     const [created] = await requestTransfer("single.com", authCode);
-    await kitaqsign.transferApprove("single.com");
+    kitaqsign.simulateCounterpartApprove("single.com");
 
     const res = await api(`/transfers/${created?.id}`);
     const { transfer } = transferDetailResponseSchema.parse(await res.json());
@@ -763,7 +784,7 @@ describe("GET /api/v1/transfers/:id（FR-12 状態照会）", () => {
   });
 
   it("他ユーザーの移管は 403 FORBIDDEN", async () => {
-    const authCode = await seedForeignDomain(kitaqsign, "notyours.com");
+    const authCode = seedForeignDomain(kitaqsign, "notyours.com");
     const [created] = await requestTransfer("notyours.com", authCode);
 
     const res = await api(`/transfers/${created?.id}`, {

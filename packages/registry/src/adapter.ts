@@ -4,6 +4,7 @@ import type {
   DeleteResult,
   DomainInfo,
   HelloResult,
+  PollMessage,
   RegistryId,
   RenewInput,
   TransferResult,
@@ -13,7 +14,7 @@ import type {
 /**
  * レジストリアダプタのインターフェース（docs/requirements.md §11.1）。
  * EPP 相当の 8 操作 + transferQuery / transferApprove / transferReject / transferCancel +
- * authCode に加え、疎通確認用の hello() を持つ。
+ * authCode / poll / ackMessage に加え、疎通確認用の hello() を持つ。
  * レジストリ固有のフィールド名・日付形式・エラーコードは各実装の中で吸収する。
  */
 export interface RegistryAdapter {
@@ -58,4 +59,19 @@ export interface RegistryAdapter {
    * `rotate-auth-info`（再生成）で取得する。呼ぶたびに値が変わる点に注意。
    */
   authCode(name: string): Promise<string>;
+  /**
+   * 非同期通知の取得。最古の未 ack メッセージを 1 件返し、無ければ null。
+   *
+   * ack するまで同じメッセージが返り続ける FIFO のため、消化しないと以降の通知が
+   * 読めなくなる（docs/registry/spec-notes.md「非同期通知（Poll）」）。
+   * 移管の承認 / 拒否 / 取消は `transferQuery`（`info` からの導出）では区別できないので、
+   * 状態遷移の主情報源はこの Poll になる（ADR-0002 決定 1）。
+   */
+  poll(): Promise<PollMessage | null>;
+  /**
+   * 通知の消し込み。`id` は {@link PollMessage.id}（int64 を string に正規化した値）。
+   * エンドポイントはレジストリで異なる（kitaqsign は `POST /messages/{id}/ack`、
+   * kitaqnic は `DELETE /messages/{id}`。docs/registry/spec-notes.md §2）。
+   */
+  ackMessage(id: string): Promise<void>;
 }

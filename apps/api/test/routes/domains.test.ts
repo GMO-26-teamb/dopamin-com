@@ -713,6 +713,8 @@ describe("エラー変換（§10.3: RegistryError → 統一エラー形式）",
       transferReject: async () => fail(),
       transferCancel: async () => fail(),
       authCode: async () => fail(),
+      poll: async () => fail(),
+      ackMessage: async () => fail(),
     };
     setRegistrySetForTesting(
       createRegistrySet({ mode: "real", adapters: [stub] }),
@@ -1085,6 +1087,8 @@ describe("廃止後に info が引けないときの扱い", () => {
       transferReject: (name) => base.transferReject(name),
       transferCancel: (name) => base.transferCancel(name),
       authCode: (name) => base.authCode(name),
+      poll: () => base.poll(),
+      ackMessage: (id) => base.ackMessage(id),
     };
     setRegistrySetForTesting(
       createRegistrySet({ mode: "real", adapters: [adapter] }),
@@ -1231,6 +1235,8 @@ describe("sync で info が NOT_FOUND のとき（AC-02-4 は #33 / #56 待ち�
       transferReject: (name) => base.transferReject(name),
       transferCancel: (name) => base.transferCancel(name),
       authCode: (name) => base.authCode(name),
+      poll: () => base.poll(),
+      ackMessage: (id) => base.ackMessage(id),
     };
     setRegistrySetForTesting(
       createRegistrySet({ mode: "real", adapters: [adapter] }),
