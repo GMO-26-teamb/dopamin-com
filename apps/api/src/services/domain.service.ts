@@ -24,6 +24,7 @@ export async function upsertDomainFromInfo(
     userId,
     name: info.name,
     registry: info.registry,
+    // `info` が返るのは保有中の行だけ。移管 OUT の検知は #57 / #58 が別経路で行う
     ownership: "owned",
     info,
     syncedAt,
@@ -127,8 +128,9 @@ function toSyncFailure(
  * 【未実装・意図的な制約】
  * - Poll の消化（§10.1「同時に Poll も消化する」）は、アダプタに `poll` / `ackMessage` が
  *   入る #44 と Poll サービス #58 で足す。
- * - AC-02-4（移管 OUT 完了後に保有一覧から消える）は満たしていない。`ownership` 列（#33）と
- *   移管の永続化（#56）が無いため、この関数は保有／非保有を判定できない。
+ * - AC-02-4（移管 OUT 完了後に保有一覧から消える）は満たしていない。`ownership` 列（#33）は
+ *   入ったが、それを `transferred_out` に遷移させる移管の永続化（#56 / #57）と Poll 消化（#58）が
+ *   無いため、この関数は保有／非保有を判定できない。
  *   `info` が NOT_FOUND を返しても **行は消さない**（失敗一覧にコードを載せるだけ）。
  *   非スポンサーからの `info` の応答が未確定（要確認 §21.2 #12）な段階で行を消すと、
  *   一時的な誤判定でユーザーのドメインが一覧から消える方が実害が大きいため。
