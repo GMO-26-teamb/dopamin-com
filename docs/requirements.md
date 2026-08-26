@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.1.10（2026-08-26） |
+| 版 | v0.1.11（2026-08-26） |
 | プロダクト | ドパ民.com / dopamin.com — Z世代向けドメイン管理プラットフォーム（疑似レジストラ） |
 | チーム | チームドパ民（Team B）: 佐々木 琢登・星 はるか・上原 拓也 |
 | 位置づけ | GMO Internet Internship in kitaQ Webアプリケーションコース（2026/08/24–28）成果物 |
@@ -1122,7 +1122,8 @@ export function resolveEmbeddingModel() { /* EMBEDDING_PROVIDER / EMBEDDING_MODE
   1. `pnpm install --frozen-lockfile`
   2. `vercel pull --yes --environment=production --token=$VERCEL_TOKEN`（`VERCEL_ORG_ID` / `VERCEL_PROJECT_ID` を env に）
   3. `vercel build --prod`
-  4. `vercel deploy --prebuilt --prod`
+  4. `vercel deploy --prebuilt --prod --meta originalSha=<github.sha>`
+- **commit author の書き換え**: Vercel Hobby チームは commit author がチーム所有者（上原）でないとデプロイが `BLOCKED` になり、CLI は `BLOCKED` を終端として扱わないため Deploy ステップが固まる（他メンバーが author の squash マージで発生）。`api` / `web` ジョブはチェックアウト直後に `git commit --amend --no-edit --reset-author`（`user.name` / `user.email` を所有者に指定）で **CI 上のコピーだけ** author を所有者に書き換えてから `vercel build` / `vercel deploy` する。リポジトリの履歴は変えない。Vercel 上の commit SHA は書き換え後のものになるため、元の SHA は `--meta originalSha` で残す。両ジョブに `timeout-minutes: 10` を付け、固着時は 6 時間待たずに失敗させる。恒久解は Pro プランでメンバーを追加すること。
 - GitHub Secrets: `VERCEL_TOKEN` / `VERCEL_ORG_ID` / `VERCEL_PROJECT_ID_WEB` / `VERCEL_PROJECT_ID_API` / `DIRECT_DATABASE_URL`。アプリの環境変数（§17）は Vercel プロジェクト側で管理する。
 - マイグレーション: `migrate` ジョブが `pnpm --filter @dopamin/db migrate`（`DIRECT_DATABASE_URL`）を実行し、`api` / `web` はその成功を待つ（失敗時はデプロイしない）。
   - drizzle は `drizzle.__drizzle_migrations` の最新 `created_at` **より新しい** journal エントリだけを 1 トランザクションで適用する（判定はハッシュではなくタイムスタンプ）。差分の無い push では何もしない。
@@ -1361,3 +1362,4 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | v0.1.8 | 2026-08-26 | FR-01 周辺の仕上げ: `GET /auth/me` を `{ user, features.demoReset, ai }` に拡張（`docs/specs/ui-screens.md` §7 要確認 #2 / #3 を確定。FR-16 / FR-17 に追随）、`PATCH /auth/passkeys/:id`（名前変更）と AAGUID からの名前推定を FR-01 に追加、§10.3 に FR-01 の 4 エラーコード（`CHALLENGE_NOT_FOUND` / `VERIFICATION_FAILED` / `CREDENTIAL_NOT_FOUND` / `LAST_PASSKEY`）を追記。実装計画は `docs/specs/passkey-auth.md` §12 |
 | v0.1.9 | 2026-08-26 | FR-15（PR #139）の設計判断を追記: §9.1 `operation_logs.user_id` の FK を `ON DELETE SET NULL`（退会後も通信ログを恒久保存）、`request_id` = `<x-request-id>-<連番>` の形式、§11.1 のログ発行点を `packages/registry` の HTTP クライアント層（1 HTTP 呼び出し = 1 レコード、`onCall` フック）に変更しマスク・保存は `apps/api` の observer が担当、`mock` は公開メソッド 1 回 = 1 レコードで補助コマンド行・svTRID を持たない例外を明記 |
 | v0.1.10 | 2026-08-26 | §16.2: `deploy.yml` に `migrate` ジョブ（`pnpm --filter @dopamin/db migrate`）を追加し、**migrate → api → web** の 3 ジョブ構成に変更。マイグレーション適用の【要確認】を解消し、drizzle の適用判定（`drizzle.__drizzle_migrations` の最新 `created_at` より新しい journal エントリのみ）と手動適用を避ける運用を明記。§16.3 / §17: `DIRECT_DATABASE_URL` を Supavisor session mode（5432）に変更（直結ホストは IPv6 のみで GitHub Actions から到達できないため）。INFRA-01 |
+| v0.1.11 | 2026-08-26 | §16.2: Vercel Hobby の「commit author = チーム所有者」制約で他メンバー author のデプロイが `BLOCKED` になり固着する問題への対策として、`deploy.yml` の `api` / `web` ジョブでチェックアウト上の author を所有者に書き換えてから deploy する運用（`--meta originalSha` で元 SHA を保持、`timeout-minutes: 10`）を明記 |

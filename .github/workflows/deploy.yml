@@ -2,6 +2,8 @@ name: Deploy
 
 # main push → Vercel 本番（docs/requirements.md §16.2）。PR プレビューは行わない。
 # Git 連携は使わず Vercel CLI でデプロイする（組織リポジトリ + Hobby プランの制約）。
+# Hobby は commit author = チーム所有者のデプロイしか受け付けないため、api / web ジョブでは
+# チェックアウト上で author を所有者に書き換えてから deploy する（§16.2）。
 # migrate → API → Web の順で実行する（Web の rewrites はビルド時に API_ORIGIN を読む）。
 on:
   push:
@@ -56,10 +58,17 @@ jobs:
     needs: migrate
     runs-on: ubuntu-latest
     environment: production
+    timeout-minutes: 10
     env:
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_API }}
     steps:
       - uses: actions/checkout@v7
+      # Vercel Hobby チームは commit author がチーム所有者でないとデプロイが BLOCKED になり、
+      # CLI は BLOCKED を終端扱いしないため「Building…」のまま固まる（docs/requirements.md §16.2）。
+      # CI の使い捨てチェックアウト上でだけ author を所有者に書き換える（リポジトリの履歴は変えない）。
+      # 元の SHA は deploy 時の --meta originalSha で Vercel 側に残す。
+      - name: Rewrite commit author for Vercel Hobby check
+        run: git -c user.name="Takuya Uehara" -c user.email="119403405+ut42tech@users.noreply.github.com" commit --amend --no-edit --reset-author
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
@@ -72,17 +81,24 @@ jobs:
       - name: Build
         run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
       - name: Deploy
-        run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
+        run: vercel deploy --prebuilt --prod --meta originalSha=${{ github.sha }} --token=${{ secrets.VERCEL_TOKEN }}
 
   web:
     name: Deploy Web
     needs: api
     runs-on: ubuntu-latest
     environment: production
+    timeout-minutes: 10
     env:
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_WEB }}
     steps:
       - uses: actions/checkout@v7
+      # Vercel Hobby チームは commit author がチーム所有者でないとデプロイが BLOCKED になり、
+      # CLI は BLOCKED を終端扱いしないため「Building…」のまま固まる（docs/requirements.md §16.2）。
+      # CI の使い捨てチェックアウト上でだけ author を所有者に書き換える（リポジトリの履歴は変えない）。
+      # 元の SHA は deploy 時の --meta originalSha で Vercel 側に残す。
+      - name: Rewrite commit author for Vercel Hobby check
+        run: git -c user.name="Takuya Uehara" -c user.email="119403405+ut42tech@users.noreply.github.com" commit --amend --no-edit --reset-author
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
@@ -96,4 +112,4 @@ jobs:
         # API_ORIGIN は Vercel プロジェクトに設定した固定値を使う
         run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
       - name: Deploy
-        run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
+        run: vercel deploy --prebuilt --prod --meta originalSha=${{ github.sha }} --token=${{ secrets.VERCEL_TOKEN }}
