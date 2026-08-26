@@ -28,7 +28,11 @@
   `domains` テーブル（FR-02 の DB キャッシュ）をドメイン名で引き、行が無ければ 404 `NOT_FOUND`
   （このアプリで保有していないドメイン）、行の `user_id` がログインユーザーと一致しなければ 403 `FORBIDDEN`。
   未対応 TLD の 400 `VALIDATION_ERROR`（`adapterForDomain`）が所有権より先に返る。
-  `/transfers*` は移管の性質上、所有権は見ない（認証のみ）。
+  `/transfers*` は `requireOwnedDomain` を使わない（#56）: 移管 IN は申請時点で `domains` 行が
+  無い（§6.5）ため、ドメイン基準で見ると AC-12-1 の申請直後がすべて 404 になる。
+  代わりに `GET /transfers/:id` が `transfers.user_id` を見る `requireOwnedTransfer`
+  （`apps/api/src/services/transfer.service.ts`）で 404 / 403 を返し分け、
+  `GET /transfers` は `user_id` で行を絞る。`POST /transfers` は認証のみ。
 - DB キャッシュ（FR-02 一覧・`domains` テーブル保存）、操作ログの永続化（FR-15）、
   独自性スコア（FR-05。check レスポンスの `uniqueness` は常に `null` のプレースホルダ）。
 
@@ -45,8 +49,9 @@
 | DELETE | `/domains/:name` | ✅ | 削除ロック中 409（AC-10-2）。削除後の状態（RGP）を返す |
 | POST | `/domains/:name/restore` | ✅ | `redemptionPeriod` 中のみ（AC-11-2） |
 | POST | `/domains/:name/auth-code` | ✅ | `rotate-auth-info` を実行（取得のたびに authInfo が変わる）。再発行という副作用があるため GET ではなく POST（§10.2 の Origin 検証を通すため） |
-| POST | `/transfers` | ✅ | `{name, authCode}` → transfer request → 202。応答は正規化 `TransferResult` から `raw` を除いた DTO（`transferResponseSchema`。ADR-0002） |
-| GET | `/transfers/:name` | ✅ | **要件 §10.1 の `GET /transfers/:id` に対する暫定実装**（要件を変更するものではない）。`transfers` への永続化がまだ無く id を発番できないため、ドメイン名で `transferQuery`（`info` の `pendingTransfer` から導出）を返す。移管中でなければ `status: 'none'`、相手レジストラ ID は `info` から取れないため省略。DB には保存せず一覧化もしない。#56（transfers 永続化）で `GET /transfers/:id` に戻す |
+| POST | `/transfers` | ✅ | `{name, authCode}` → transfer request → 202。受理を `transfers(direction=in, status=pending, requested_at, act_by_at, raw)` に記録し、`domains` 行は作らない（AC-12-1）。同じユーザー・同じドメインの pending 行があれば作り直さず更新する。応答は正規化 `TransferResult` から `raw` を除いた DTO（`transferResponseSchema`。ADR-0002）で、**一覧の `id` は返さない**（web が `id` にドメイン名を入れているフォールバックの解消は #57） |
+| GET | `/transfers` | ✅ | ユーザーの `transfers` 行を `{ inbound, outbound, history }` で返す（`transfersListResponseSchema`）。`inbound` は進行中の移管 IN（`pending` と、承認済みで取り込み待ち = `domain_id` が null の `approved`）、`outbound` は受信した OUT 申請、`history` はそれ以外。表示のたびに進行中の IN を `transferQuery` で照合し、承認を検知したら取り込む。**Poll の消化（§10.1）は #58**。したがって `direction=out` の行は当面できず `outbound` は常に空 |
+| GET | `/transfers/:id` | ✅ | uuid（`transferIdParamSchema`）。一覧と同じ照合を 1 行だけ行う。非 uuid は 400、他人の行は 403、無ければ 404。取り込みの再試行に時間制限を掛けない点だけ一覧と違う（下記 §3-13） |
 
 本 spec のルート（`/domains*` `/transfers*`）はすべて `requireSession` 必須（Cookie `dopamin_session`。requirements §10.1 の「認証: 要」に対応）。
 統合テストは `apps/api/test/helpers/session.ts` の `installTestSession()` + `SESSION_COOKIE_HEADER`（DB 不要の seam）
@@ -98,6 +103,44 @@
     （create=存在確認 / renew=期限延長 / update=要求変更の全反映 / delete=RGP 入りまたは消滅 /
     restore=RGP 離脱 / transfer=pendingTransfer）。確認できない場合は元の 504 を返す。
     `rotate-auth-info` は `info` で照合できない（authInfo が resData に含まれない）ため対象外。
+13. **移管 IN の承認検知は `info` の `trDate` で行う**（#56）。`transferQuery` は
+    `pendingTransfer` の有無しか見ないため、申請が消えた理由（承認 / 拒否 / 取消）を返せない
+    （上記 3）。移管が成立したときだけレジストリが `trDate`（`DomainInfo.lastTransferAt`）を
+    更新するので、**`pendingTransfer` が消え、かつ `trDate` が `transfers.requested_at` 以降
+    `act_by_at` + 24 時間まで**なら承認とみなす。上限を付けるのは、この申請と無関係な後日の移管を
+    自分の承認と取り違えないため（拒否・取消は検知できず行が `pending` のまま残るので、
+    上限が無いと「拒否された数日後に第三者へ移管された」だけで他人のドメインを取り込む）。
+    正規の承認は相手の approve かサーバの自動承認（申請 + 20 分）で起きるので、
+    期限を大きく過ぎた `trDate` は自分の申請の結果ではない。
+    判定できない場合（`trDate` を返さないレジストリ・拒否・取消・期限超過）は行を
+    `pending` のまま据え置き、確定は Poll（#58）に委ねる。
+    承認を検知したら §6.5 の順序どおり先に `status = approved` / `completed_at` を書き、
+    そのあと `info` を `domains` に取り込んで `domain_id` を紐付ける。取り込みが失敗しても
+    `approved` のまま残し、次回の `/transfers` 表示で再試行する。
+    一覧からの自動再試行は「承認を検知した時刻」（`raw.checkedAt`）から 24 時間以内に限る
+    （`domain_id` は ON DELETE SET NULL なので、廃止やデモリセットで `domains` 行が消えた行が
+    毎回 `info` を叩き続けるのを防ぐ）。`completed_at` はレジストリの `trDate` なので基準に使わない
+    （何日も前に成立していた移管を今日はじめて検知した行が、書いた瞬間に期限切れになるため）。
+    再試行はまず DB の保有行を引いて紐付け直すだけで済ませ、行が無いときだけ `info` を叩く。
+    ユーザーが明示的に叩く `GET /transfers/:id` はこの制限を掛けない。
+    同名の保有行が**他ユーザーのもの**だった場合は取り込みを中止して `transfer_import_conflict`
+    を warn ログに出す（承認は推定なので、推定を根拠に他人の保有行を奪わない。
+    `transferred_out` への遷移は Poll 起点で #57 / #58）。
+14. **`transferRequest` が受理を確認できないタイムアウトでも `transfers` 行を作る**（#56、ADR-0002 の宿題）。
+    照合（上記 12）が `pending` を確認できなければ従来どおり 504 `REGISTRY_TIMEOUT` を返すが、
+    `raw.reconcile = "timeout_unconfirmed"` の `pending` 行を残す。`transferQuery` は
+    「申請が届いていない」と「届いたが既に完了した」を区別できないため、行が無いと後者を
+    永久に取りこぼす。このとき `requested_at` にはレジストリの `reDate`（kitaqnic のみ）か、
+    無ければ**申請を送り始めた時刻**を入れる。応答を待った時間だけ後ろにずれた「今」を使うと、
+    待っている間に成立した移管の `trDate` が `requested_at` より前になり、
+    行を作った目的である「届いたが既に完了した」を上記 13 で検知できなくなる。
+    同じユーザー・同じドメインの `pending` 行への再申請は、`requested_at` / `act_by_at` を
+    動かさず、`registry_status` / `counterpart_registrar_id` は判明した値だけ上書きする
+    （実アダプタの `transferQuery` は `{ name, status, raw }` しか返さないため、
+    そのまま当てると最初の申請で分かっていた値を null で潰してしまう）。到達していなかった場合はこの行が `pending` のまま残り、
+    解消は Poll（#58）か取消（#57）になる。
+    レジストリ受理後の DB 書き込み失敗はレジストリ操作の成否に影響させず、
+    `transfer_row_write_failed` を error ログに出して 202 を返す（§6.5 の write-through）。
 
 ## 4. テスト観点
 
@@ -112,7 +155,17 @@
 
 - ~~操作ログ（FR-15）~~: 実装済み。全レジストリ呼び出しを `operation_logs` へ永続化し
   構造化 console ログ（NFR-06）を出す。設計は [`docs/specs/operation-logs.md`](operation-logs.md)。
-- `GET /transfers/:name` は id 発番前の暫定パス。#56 で要件 §10.1 どおり `GET /transfers/:id` に戻す。
+- ~~`GET /transfers/:name` は id 発番前の暫定パス~~ → 解消（#56）: `transfers` への永続化が入り、
+  要件 §10.1 どおり `GET /transfers` / `GET /transfers/:id` になった。`GET /transfers/:name` は削除済み。
+- 移管の照合が失敗した行（レジストリ障害・未対応 TLD）は一覧に `failures` として出さず、
+  照合前の値のまま返して `transfer_reconcile_failed` を warn ログに出すだけにしている
+  （`transfersListResponseSchema` を増やさない判断。1 件の失敗で一覧全体を 5xx にはしない）。
+  1 リクエストで照合する行は 20 件が上限で、超過分は `transfer_reconcile_truncated` を出して DB の値のまま返す。
+- `transfers` に「同じユーザー・同じドメインで pending の行は 1 件」という DB 制約は付けていない
+  （重複防止はアプリ側の SELECT → INSERT / UPDATE。レジストリも `pendingTransfer` 中の再申請を 2304 で弾く）。
+  Poll 由来の行（#58）を入れるときに、`registry_message_id` が NULL の pending 行を
+  `(registry, domain_name, direction)` で先に探して更新する突合ルールとあわせて、
+  部分一意インデックスの要否を再検討する。
 - `POST /domains/check` の 1 リクエストあたりの件数上限がレジストリ側で不明（API 側は 20 件に制限）。
 - コンタクト更新（FR-09 の一部）と移管の承認 / 拒否（受け側・P2）は未実装。
 - `RegistryAdapter` は §11.1 の `registrarId` / `transferApprove` / `transferReject` /
@@ -123,3 +176,8 @@
 - Poll の契約テスト fixture は未整備（#44 / #48）。transfer fixture の `status` は
   実応答が未取得のため暫定値（`docs/registry/fixtures/README.md`）。
 - Poll 通知の `msgType` の値と `payload` の中身は未確定【要確認: requirements.md §21.2 #13】。
+- `apps/web` の `TransferService.request` は移管一覧が無かった名残で `Transfer.id` にドメイン名を
+  入れている（`apps/web/lib/api/http/http-services.ts`）。`POST /transfers/:id/{approve,reject,cancel}`
+  を繋ぐ #57 で本物の uuid に寄せる（そのままだと `:id` が非 uuid で 400 になる）。
+- `domainSummarySchema.transfer`（移管バッジ）は当面つねに null。移管 IN は `domains` 行を
+  持たない（§6.5）ため、ここに出るのは Poll で `transfers(out)` を作る #58 以降。

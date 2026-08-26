@@ -12,6 +12,7 @@ import {
   type TransferResult,
   transferStatusSchema,
 } from "./registry";
+import { transferDirectionSchema } from "./transfers";
 
 /**
  * 統一エラー（docs/requirements.md §10.3）の定義は `./errors.ts` が正（issue #30）。
@@ -96,11 +97,14 @@ export const transferCreateRequestSchema = z.object({
 export type TransferCreateRequest = z.infer<typeof transferCreateRequestSchema>;
 
 /**
- * `POST /transfers` / `GET /transfers/:name` が返す移管情報（FR-12）。
+ * `POST /transfers` が返す移管情報（FR-12）。
  *
  * 正規化型 {@link TransferResult} から `raw`（レジストリの生応答）を除いたもの。
  * レジストリの生の出力は画面に流さない方針（FR-18 / NFR-03）に合わせ、API 境界で剥がす
  * （ADR-0002）。web もこのスキーマで応答を検証する（形の二重定義を作らない）。
+ *
+ * 一覧・状態照会（`GET /transfers` / `GET /transfers/:id`）はレジストリ応答ではなく
+ * `transfers` 行を返すので、そちらは `./transfers.ts` の `transferSummarySchema` が正。
  */
 export const transferResponseSchema = z.object({
   name: z.string(),
@@ -136,7 +140,7 @@ export type Ownership = z.infer<typeof ownershipSchema>;
 
 /** 進行中の移管（FR-12）。`actByAt` はサーバ自動承認の期限（申請 + 20 分）。 */
 export const domainTransferBadgeSchema = z.object({
-  direction: z.enum(["in", "out"]),
+  direction: transferDirectionSchema,
   actByAt: z.string(),
 });
 
@@ -162,7 +166,10 @@ export const domainSummarySchema = z.object({
   syncedAt: z.string(),
   /** true = 直近の同期に失敗し DB キャッシュを表示している（AC-07-2）。 */
   stale: z.boolean(),
-  /** 移管一覧（FR-12）を実装するまでは常に null。 */
+  /**
+   * 進行中の移管のバッジ。移管 IN は `domains` 行を持たないため（§6.5）ここには出ず、
+   * 出るのは移管 OUT（Poll で `transfers(out)` を作る #58）だけ。その生産者が入るまで常に null。
+   */
   transfer: domainTransferBadgeSchema.nullable(),
 });
 export type DomainSummary = z.infer<typeof domainSummarySchema>;

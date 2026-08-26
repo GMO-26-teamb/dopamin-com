@@ -31,6 +31,29 @@ export async function upsertDomainFromInfo(
   });
 }
 
+/**
+ * FR-12 移管 IN の取り込み（§6.5）。承認を検知したあとに `info` を write-through し、
+ * `transfers.domain_id` に紐付ける `domains` 行の id を返す。
+ *
+ * 同名の保有行が他ユーザーのものなら **書き換えずに null を返す**
+ * （承認の検知は `info` からの推定なので、推定で他人の保有行を奪わない）。
+ * `ownership = transferred_out` の履歴行は同名でも衝突しない（§9.1 の部分一意）。
+ */
+export async function claimDomainFromInfo(
+  userId: string,
+  info: DomainInfo,
+  syncedAt: Date = new Date(),
+): Promise<string | null> {
+  return getDomainStore().claimOwned({
+    userId,
+    name: info.name,
+    registry: info.registry,
+    ownership: "owned",
+    info,
+    syncedAt,
+  });
+}
+
 /** 保有ドメインを DB から削除する（レジストリから即時消滅した場合）。 */
 export async function removeDomain(name: string): Promise<void> {
   await getDomainStore().remove(name);

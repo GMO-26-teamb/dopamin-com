@@ -118,8 +118,10 @@ export const checkResponseSchema = z.object({
 });
 
 /**
- * `POST /transfers` / `GET /transfers/:name` の応答。
+ * `POST /transfers` の応答。
  * 形の正は `packages/shared` の `transferResponseSchema`（`raw` は API 境界で落ちる）。
+ * 一覧・状態照会（`GET /transfers` / `GET /transfers/:id`）は `transfers` 行を返すので
+ * `transfersListResponseSchema` / `transferSummarySchema` が正（#56）。
  */
 export const transferEnvelopeSchema = z.object({
   transfer: transferResponseSchema,

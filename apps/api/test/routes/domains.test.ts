@@ -117,12 +117,13 @@ async function api(path: string, init?: RequestInit): Promise<Response> {
 async function seedDomain(
   name: string,
   userId: string = TEST_USER.id,
+  ownership: "owned" | "transferred_out" = "owned",
 ): Promise<void> {
   await store.upsert({
     userId,
     name,
     registry: "kitaqsign",
-    ownership: "owned",
+    ownership,
     info: {
       name,
       registry: "kitaqsign",
@@ -849,6 +850,17 @@ describe("GET /api/v1/domains（FR-02 保有一覧）", () => {
       await (await api("/domains")).json(),
     );
     expect(body.domains.map((d) => d.name)).toEqual(["mine.com"]);
+  });
+
+  it("AC-02-4: 移管 OUT 済み（transferred_out）の履歴行は保有一覧に出ない", async () => {
+    await createDomain("kept.com");
+    await seedDomain("moved.com", TEST_USER.id, "transferred_out");
+
+    const body = domainListResponseSchema.parse(
+      await (await api("/domains")).json(),
+    );
+    // 履歴は /transfers から参照する（FR-02 §「表示対象は ownership = owned の行のみ」）
+    expect(body.domains.map((d) => d.name)).toEqual(["kept.com"]);
   });
 
   it("0 件のときは空配列を返す", async () => {
