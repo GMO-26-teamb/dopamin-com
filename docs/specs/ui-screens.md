@@ -51,7 +51,7 @@
 | S-10 | `/dashboard` | 通常 | Page Header（件数・最終同期・「最新化」）+ Domain Card 2 列グリッド。カードの表示項目: ドメイン名 / 状態バッジ / 進捗（残日数）/ レジストリ名 / 有効期限 or 残日数 / 最終同期（Meta 右端、キャッシュ時は「Stale」バッジ）/ 操作。「詳細」→ S-30、「今すぐ更新」→ D-01、「復旧する」→ D-04、「状態を確認」→ S-50、「NS を設定」→ D-02 | Page Header, Domain Card |
 | S-11 | `/dashboard` | 0 件 | Empty State Neutral + CTA「ドメインを取得」→ S-20、「移管で持ち込む」→ S-50 | Empty State |
 | S-12 | `/dashboard` | 読み込み | Skeleton（ヘッダー + カード 4）。DB キャッシュを先に描画し、`POST /domains/sync` はバックグラウンド | Skeleton |
-| S-13 | `/dashboard` | 同期エラー（AC-18-1） | Banner Warn。文言は `error.registry` から生成（「Kitaqsign が応答しません」「Kitaqnic が…」「両レジストリが応答しません」）。同期に失敗したカードだけ「Stale · 最終同期 n 分前」を表示し、更新系操作は Disabled | Banner |
+| S-13 | `/dashboard` | 同期エラー（AC-18-1） | Banner Warn。`POST /domains/sync` は部分失敗でも 200 + `failures[]` を返すので、文言は `failures[].registry`（TLD から特定）から生成し、リクエストごとの失敗のときは `error.registry`、どちらも無ければ stale なカードのレジストリから推定する（「Kitaqsign が応答しません」「Kitaqnic が…」「両レジストリが応答しません」）。部分失敗のときは「n 件が最新化できませんでした」を本文に添える。Banner に最終同期時刻は書かない。同期に失敗したカードだけ「Stale · 最終同期 n 分前」を表示し、更新系操作は Disabled | Banner |
 
 **Domain Card の Status（§9.2 `deriveDisplayStatus` と 1:1）**
 
@@ -281,3 +281,4 @@ Figma **Prototype / Screens** にプロトタイプ接続を設定済み（Prese
 |---|---|---|
 | v0.1 | 2026-08-26 | 初版。requirements v0.1.5 の全 FR を画面 × 状態（54 フレーム）に展開し、Figma Prototype ページと対応付け |
 | v0.2 | 2026-08-26 | 網羅性レビュー（38 件）を反映: Domain Card の Status を §9.2 と 1:1 化、S-36〜39 / S-02c / S-53 / S-40b / S-63 / S-70b を追加、Rarity ↔ FR-05 ラベル対応表、直接検索の複数 TLD / FQDN、S-26 → S-40、S-28 / D-03 / D-06 の分岐、認証リダイレクト規則、エラーコード表に 5 コード追加、§7 要確認 7 件 |
+| v0.3 | 2026-08-26 | S-13 を `POST /domains/sync` の部分失敗契約（200 + `failures[]`、PR #136）に合わせて更新。§7 #2 / #3 は requirements v0.1.8 で解決 |
