@@ -71,10 +71,19 @@ export function toDomainUniqueness(r: UniquenessResult): DomainUniqueness {
   return {
     score: r.score,
     label: uniquenessLabel(r.score),
-    topSimilar: r.closestMatches.slice(0, 3).map((m) => ({
-      name: m.name,
-      similarity: Math.round(m.similarity * 100) / 100,
-    })),
+    // §10.4「最も近い既存名 上位3件と類似度」。closestMatches はスコアを決めた順
+    // （エントリ別スコアの昇順）で並んでいるので、表示用にここで類似度の降順へ並べ直す。
+    // 類似度 0 の行は「近い既存名が無い」ことを意味するため落とす（プレフィルタで
+    // 距離計算を省いた行も 0 で入ってくるので、そのまま出すと未計算値を類似度として
+    // 見せてしまう）。
+    topSimilar: r.closestMatches
+      .filter((m) => m.similarity > 0)
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, 3)
+      .map((m) => ({
+        name: m.name,
+        similarity: Math.round(m.similarity * 100) / 100,
+      })),
     confidence: r.confidence,
     algorithmVersion: r.algorithmVersion,
     corpusVersion: r.corpusVersion,

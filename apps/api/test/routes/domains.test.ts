@@ -257,6 +257,30 @@ describe("POST /api/v1/domains/check（FR-03）", () => {
     expect(results[1]?.availability).toBe("available");
   });
 
+  it("AC-05-2: レジストリ障害で error になった行にもスコアが付く", async () => {
+    kitaqnic.setFailMode("5xx");
+    const res = await sendJson("/domains/check", {
+      names: ["googel.xyz"],
+    });
+    expect(res.status).toBe(200);
+    const { results } = (await res.json()) as CheckPayload;
+    const [errored] = results;
+    expect(errored?.availability).toBe("error");
+    // スコア算出はレジストリ通信と独立している（docs/specs/ui-screens.md の
+    // Unknown バリアント: 「スコアは表示、Badge Warn『確認不可』」）
+    expect(domainUniquenessSchema.safeParse(errored?.uniqueness).success).toBe(
+      true,
+    );
+    expect(errored?.uniqueness?.label).toBe("low");
+    // 未対応 TLD は「レジストリ障害」ではないのでスコアを付けない
+    const res2 = await sendJson("/domains/check", {
+      names: ["googel.example"],
+    });
+    const { results: r2 } = (await res2.json()) as CheckPayload;
+    expect(r2[0]?.error?.code).toBe("VALIDATION_ERROR");
+    expect(r2[0]?.uniqueness).toBeNull();
+  }, 60_000);
+
   it("AC-03-2: 一方のレジストリが落ちても他方の結果は返る（部分失敗）", async () => {
     kitaqnic.setFailMode("5xx");
     const res = await sendJson("/domains/check", {

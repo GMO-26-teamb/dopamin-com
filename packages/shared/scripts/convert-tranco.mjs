@@ -14,7 +14,9 @@
 //   1. SLD 抽出: 登録可能ドメインの公有サフィックス直前のラベルを取る。
 //      2レベル公有サフィックス (co.uk 等) は「中間ラベル集合 × 2文字ccTLD」の
 //      規則で判定する (入力1万件に現れた161種の組合せを全て網羅することを確認済み)。
-//   2. 除外: .arpa / punycode (xn--) / /^[a-z0-9-]{1,63}$/ に合わないもの
+//   2. 除外: .arpa / punycode (xn--) / /^[a-z0-9-]{1,63}$/ に合わないもの /
+//      アダルト・海賊版サイト (scripts/corpus-denylist.mjs。topSimilar に名前が
+//      そのまま描画されるため、スコア計算からも表示からも外す)
 //   3. 重複除去: 同一SLDは最小 rank (最有名) を採用
 //   4. 出典メタ (リストID・取得日・入力checksum・件数) を TRANCO_META に記録
 //
@@ -23,6 +25,7 @@
 // ============================================================
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { isExcludedName } from "./corpus-denylist.mjs";
 
 const args = process.argv.slice(2);
 const csvPath = args.find((a) => !a.startsWith("--"));
@@ -72,7 +75,7 @@ const listId = listIdArg
 
 const SLD_RE = /^[a-z0-9-]{1,63}$/;
 const bySld = new Map(); // sld -> min rank
-const dropped = { arpa: 0, punycode: 0, invalid: 0, dup: 0 };
+const dropped = { arpa: 0, punycode: 0, invalid: 0, denied: 0, dup: 0 };
 
 for (const line of raw.toString("utf8").split("\n")) {
   const t = line.trim();
@@ -108,6 +111,10 @@ for (const line of raw.toString("utf8").split("\n")) {
     dropped.invalid++;
     continue;
   }
+  if (isExcludedName(sld)) {
+    dropped.denied++;
+    continue;
+  }
   const prev = bySld.get(sld);
   if (prev === undefined || rank < prev) {
     if (prev !== undefined) dropped.dup++;
@@ -132,7 +139,8 @@ const header = `// 自動生成ファイル — 手編集禁止。再生成は p
 // 生成元: Tranco top sites ranking (https://tranco-list.eu/, Le Pochat+ NDSS 2019)
 //   公式 top-1m.csv.zip の上位1万行から SLD 抽出・重複除去したもの。
 //   引用時は TRANCO_META.listId のリストIDを用いる (Tranco の推奨引用形式)。
-// 除外: .arpa ${dropped.arpa}件 / punycode ${dropped.punycode}件 / 形式不正 ${dropped.invalid}件 / 重複SLD ${dropped.dup}件
+// 除外: .arpa ${dropped.arpa}件 / punycode ${dropped.punycode}件 / 形式不正 ${dropped.invalid}件
+//   / アダルト・海賊版 ${dropped.denied}件 (scripts/corpus-denylist.mjs) / 重複SLD ${dropped.dup}件
 // データ形式: "rank:sld" の空白区切り文字列 (パースは corpusTranco.ts 内で行う)
 `;
 

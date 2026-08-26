@@ -69,3 +69,13 @@ gold 91件(人間確定ラベル、ambiguous 除外で90件)・red-team 確定�
 上位100名への系統変形978件(削除/置換/転置/重複/leet/combo/missing-dot)・シード固定の発音可能造語2,000件・
 ランダム500クエリの性能測定を実行した。gold セットと生成器は検証ワークスペース(uniq-lab)側にあり、
 リポジトリには含まれない(検証記録は DESIGN_RATIONALE.md を参照)。
+
+## 追記（2026-08-26、PR #155 レビュー対応）
+
+参照コーパスからアダルト・海賊版サイト **407 件**を除外した（`packages/shared/scripts/corpus-denylist.mjs`）。
+`topSimilar` の名前は候補カード・登録ダイアログ・ランディングにそのまま描画されるため、
+`anime` / `manga` / `rule` のような一般的な入力で成人向けサイト名が「最も近い既存名」として
+表示されていた。除外はスコア計算にも効くので、該当語の周辺スコアは上振れする（例: `manga` 44 → 57）。
+除外規則はキーワード部分一致 + 誤検出の個別 allowlist（`analytics` / `java` / `myanimelist` など）で、
+回帰は `packages/shared/src/uniqueness/default-corpus.test.ts` が守る。
+本書の gold / 攻撃回帰の数値は除外前の測定値であり、除外後の再測定は未実施。

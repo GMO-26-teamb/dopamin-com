@@ -224,7 +224,9 @@ export const domains = new Hono<AuthedEnv>()
                 name,
                 registry: adapter.id,
                 availability: "error",
-                uniqueness: null,
+                // AC-05-2: スコア算出はレジストリ通信と独立しているので、
+                // check が失敗した行でもスコアは返す（ui-screens §Unknown バリアント）
+                uniqueness: uniquenessFor(name),
                 error: {
                   code: "REGISTRY_SPEC_MISMATCH",
                   message: "check の結果に対象ドメインが含まれていません。",
@@ -246,7 +248,8 @@ export const domains = new Hono<AuthedEnv>()
               name,
               registry: adapter.id,
               availability: "error",
-              uniqueness: null,
+              // AC-05-2: レジストリ障害時もスコアは表示する
+              uniqueness: uniquenessFor(name),
               error: item,
             });
           }
