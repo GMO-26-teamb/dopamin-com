@@ -120,12 +120,13 @@ async function api(path: string, init?: RequestInit): Promise<Response> {
 async function seedDomain(
   name: string,
   userId: string = TEST_USER.id,
+  ownership: "owned" | "transferred_out" = "owned",
 ): Promise<void> {
   await store.upsert({
     userId,
     name,
     registry: "kitaqsign",
-    ownership: "owned",
+    ownership,
     info: {
       name,
       registry: "kitaqsign",
@@ -872,6 +873,56 @@ describe("AC-01-3 / NFR-04: 認証と所有権", () => {
     const write = await api("/domains/someone-else.com", { method: "DELETE" });
     expect(write.status).toBe(403);
   });
+
+  /** 更新系は requireOwnedDomain(forWrite) で入口を揃える（NFR-04）。 */
+  const writeRoutes: Array<[string, (name: string) => Promise<Response>]> = [
+    [
+      "POST /:name/renew",
+      (n) => sendJson(`/domains/${n}/renew`, { period: 1 }),
+    ],
+    [
+      "PATCH /:name",
+      (n) => sendJson(`/domains/${n}`, { nameservers: [] }, "PATCH"),
+    ],
+    ["DELETE /:name", (n) => api(`/domains/${n}`, { method: "DELETE" })],
+    [
+      "POST /:name/restore",
+      (n) => api(`/domains/${n}/restore`, { method: "POST" }),
+    ],
+    [
+      "POST /:name/auth-code",
+      (n) => api(`/domains/${n}/auth-code`, { method: "POST" }),
+    ],
+  ];
+
+  it.each(writeRoutes)(
+    "%s: 他ユーザーのドメインは 403 FORBIDDEN（レジストリには問い合わせない）",
+    async (_label, call) => {
+      await seedDomain("theirs-write.com", OTHER_USER.id);
+      const info = vi.spyOn(kitaqsign, "info");
+
+      const res = await call("theirs-write.com");
+      expect(res.status).toBe(403);
+      expect((await parseError(res)).error.code).toBe("FORBIDDEN");
+      expect(info).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(writeRoutes)(
+    "AC-12-5: %s: transferred_out のドメインは 409 OPERATION_NOT_ALLOWED",
+    async (_label, call) => {
+      await seedDomain("moved-out.com", TEST_USER.id, "transferred_out");
+      const info = vi.spyOn(kitaqsign, "info");
+
+      const res = await call("moved-out.com");
+      expect(res.status).toBe(409);
+      const body = await parseError(res);
+      expect(body.error.code).toBe("OPERATION_NOT_ALLOWED");
+      expect(body.error.details).toMatchObject({ reason: "transferred_out" });
+      // 移管 OUT 済みは自レジストラがスポンサーでないので info を呼ばずに弾く
+      expect(info).not.toHaveBeenCalled();
+    },
+  );
 
   it("保有していないドメインは 404 NOT_FOUND（レジストリには問い合わせない）", async () => {
     const res = await api("/domains/unknown.com");

@@ -333,7 +333,7 @@ export const domains = new Hono<AuthedEnv>()
     const { period } = c.req.valid("json");
     const userId = c.get("user").id;
     const adapter = adapterForDomain(name);
-    const owned = await requireOwnedDomain(userId, name);
+    const owned = await requireOwnedDomain(userId, name, { forWrite: true });
 
     const current = await adapter.info(name);
     const opCheck = isOperationAllowed("renew", current.statuses, {
@@ -384,7 +384,7 @@ export const domains = new Hono<AuthedEnv>()
     const body = c.req.valid("json");
     const userId = c.get("user").id;
     const adapter = adapterForDomain(name);
-    const owned = await requireOwnedDomain(userId, name);
+    const owned = await requireOwnedDomain(userId, name, { forWrite: true });
 
     const current = await adapter.info(name);
     // ロック解除だけの要求は clientUpdateProhibited 中でも許可する（解除経路を残す）
@@ -457,7 +457,7 @@ export const domains = new Hono<AuthedEnv>()
     const name = parseDomainNameParam(c.req.param("name"));
     const userId = c.get("user").id;
     const adapter = adapterForDomain(name);
-    const owned = await requireOwnedDomain(userId, name);
+    const owned = await requireOwnedDomain(userId, name, { forWrite: true });
 
     const current = await adapter.info(name);
     const opCheck = isOperationAllowed("delete", current.statuses, {
@@ -520,7 +520,7 @@ export const domains = new Hono<AuthedEnv>()
     const name = parseDomainNameParam(c.req.param("name"));
     const userId = c.get("user").id;
     const adapter = adapterForDomain(name);
-    await requireOwnedDomain(userId, name);
+    await requireOwnedDomain(userId, name, { forWrite: true });
 
     const current = await adapter.info(name);
     if (!isRestorable(current.rgpStatuses, current.statuses)) {
@@ -553,7 +553,9 @@ export const domains = new Hono<AuthedEnv>()
   .post("/:name/auth-code", async (c) => {
     const name = parseDomainNameParam(c.req.param("name"));
     const adapter = adapterForDomain(name);
-    const owned = await requireOwnedDomain(c.get("user").id, name);
+    const owned = await requireOwnedDomain(c.get("user").id, name, {
+      forWrite: true,
+    });
 
     const current = await adapter.info(name);
     const opCheck = isOperationAllowed("authCode", current.statuses, {
