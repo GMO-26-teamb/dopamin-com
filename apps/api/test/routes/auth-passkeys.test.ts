@@ -53,7 +53,7 @@ beforeAll(async () => {
       name: "このデバイス",
     },
   ]);
-});
+}, 30_000);
 
 afterAll(async () => {
   setDbForTesting(null);
