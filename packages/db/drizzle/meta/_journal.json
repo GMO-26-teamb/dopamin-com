@@ -50,6 +50,13 @@
       "when": 1787760545071,
       "tag": "0006_wooden_scourge",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1787776406576,
+      "tag": "0007_blue_living_lightning",
+      "breakpoints": true
     }
   ]
 }
