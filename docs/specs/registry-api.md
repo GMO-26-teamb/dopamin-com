@@ -39,7 +39,7 @@
 | GET | `/health` | ✅ | 各レジストリの `hello` 疎通結果 + レイテンシを返す |
 | POST | `/domains/check` | ✅ | `{sld, tlds[]}` or `{names[]}`。レジストリ単位で並列、部分失敗許容（AC-03-2） |
 | POST | `/domains` | ✅ | check 再実行 → contact 作成 → create → info（AC-06 系）。authInfo はサーバー生成 |
-| GET | `/domains/:name` | ✅ | `info` で最新化して DB キャッシュに write-through。レジストリに繋がらない（`REGISTRY_TIMEOUT` / `REGISTRY_UNAVAILABLE` / `REGISTRY_SPEC_MISMATCH`）ときは DB キャッシュを `stale: true` + `syncedAt` 付きで返す（AC-07-2、#129）。`NOT_FOUND` や拒否応答はそのまま返す |
+| GET | `/domains/:name` | ✅ | `info` で最新化して DB キャッシュに write-through。レジストリに繋がらない（`REGISTRY_TIMEOUT` / `REGISTRY_UNAVAILABLE` / `REGISTRY_SPEC_MISMATCH`）ときは DB キャッシュを `stale: true` + `syncedAt` 付きで返す（AC-07-2、#129）。`NOT_FOUND` や拒否応答はそのまま返す。**`ownership = 'transferred_out'` の行はレジストリに問い合わせずキャッシュを返す**（#57。自レジストラが非スポンサーで `info` を信頼できず、`upsertDomainFromInfo` が常に `owned` で書くため部分一意インデックスをすり抜けて保有行が復活する） |
 | POST | `/domains/:name/renew` | ✅ | `{period}`。curExpDate は API 側で `info` から取得。10 年上限ガード（AC-08-2） |
 | PATCH | `/domains/:name` | ✅ | `{nameservers?（全量指定→差分変換）, clientStatuses?{add,remove}}`。コンタクト変更は未対応 |
 | DELETE | `/domains/:name` | ✅ | 削除ロック中 409（AC-10-2）。削除後の状態（RGP）を返す |
@@ -48,6 +48,9 @@
 | POST | `/transfers` | ✅ | `{name, authCode}` → transfer request → 202。受理した申請は `transfers(direction = in, status = pending)` として永続化する（`domains` 行は作らない。AC-12-1）。応答は `{ transfer, record }`: `transfer` は正規化 `TransferResult` から `raw` を除いた DTO（`transferResponseSchema`。ADR-0002）、`record` は永続化した行の要約（`transferSummarySchema`。以降の `:id` 操作に使う） |
 | GET | `/transfers` | ✅ | 移管一覧（`transfersListResponseSchema`）。`inbound`（IN 申請中）/ `outbound`（受信した OUT 申請）/ `history`（確定済み）に分けて返す。表示のたびに pending 行を `transferQuery` で照会して DB に反映する（#56。Poll 消化は #58 で足す） |
 | GET | `/transfers/:id` | ✅ | 移管 1 件の状態照会（`id` は `transfers.id` の uuid。uuid 以外は 400）。承認を検知したら `info` で取り込み `domains` 行を作って `domain_id` を紐付ける（§6.5）。他ユーザーの行は 403（§10.3） |
+| POST | `/transfers/:id/approve` | ✅ | 受信した OUT 申請を承認（`direction = out` かつ `status = pending` のみ、他は 409）。成功後 `domains.ownership = 'transferred_out'` にして保有一覧から外す（AC-12-5）。行は履歴として残す |
+| POST | `/transfers/:id/reject` | ✅ | 受信した OUT 申請を拒否。保有は動かない（AC-12-4） |
+| POST | `/transfers/:id/cancel` | ✅ | 自分の IN 申請を承認前に取消（`direction = in` のみ）。`domains` 行は元々無いので保有は動かない |
 
 本 spec のルート（`/domains*` `/transfers*`）はすべて `requireSession` 必須（Cookie `dopamin_session`。requirements §10.1 の「認証: 要」に対応）。
 統合テストは `apps/api/test/helpers/session.ts` の `installTestSession()` + `SESSION_COOKIE_HEADER`（DB 不要の seam）
@@ -126,6 +129,12 @@
     （create=存在確認 / renew=期限延長 / update=要求変更の全反映 / delete=RGP 入りまたは消滅 /
     restore=RGP 離脱 / transfer=pendingTransfer）。確認できない場合は元の 504 を返す。
     `rotate-auth-info` は `info` で照合できない（authInfo が resData に含まれない）ため対象外。
+15. **照合できない操作はタイムアウトで確定させない**（#57）。移管の承認 / 拒否 / 取消のうち、
+    `transferQuery` + `info` から成立を証明できるのは**承認だけ**（trDate が申請の窓の中で動く）。
+    「`pendingTransfer` が消えた」は承認 / 拒否 / 取消・相手の取下げ・サーバ自動承認のどれでも起きるので、
+    それを根拠に要求どおりの結果を書くと「拒否したのに移管されていた」「取り消したのに実は
+    取得できていた（以後 `approved` にならないので取り込みも走らない）」を静かに作る。
+    そこで `reject` / `cancel` は照合せず 504 を返し、確定は Poll 消化（#58）に委ねる。
 
 ## 4. テスト観点
 
@@ -147,7 +156,9 @@
   申請時刻以降に動いていれば承認**という判定だけを行い（拒否・取消では trDate が動かないので偽陽性が無い）、
   拒否・取消の確定は Poll 消化（#58）に委ねて行を `pending` のまま残す。
 - `POST /domains/check` の 1 リクエストあたりの件数上限がレジストリ側で不明（API 側は 20 件に制限）。
-- コンタクト更新（FR-09 の一部）と移管の承認 / 拒否（受け側・P2）は未実装。
+- コンタクト更新（FR-09 の一部）は未実装。移管の承認 / 拒否 / 取消は実装済み（#57）。
+  受信申請から `transfers(out)` 行を作る経路は Poll 消化（#58）が入るまで無く、
+  それまでは `recordOutboundTransferRequest()` をテストから直接呼んで前提を作る。
 - ~~`RegistryAdapter` の `poll` / `ackMessage`~~: 実装済み（#44）。§11.1 のメソッドは
   kitaq / mock ともすべて揃った。アダプタの承認 / 拒否 / 取消と Poll 消化を叩く API ルート
   （`POST /transfers/:id/{approve,reject,cancel}` / `POST /registry/poll`）は

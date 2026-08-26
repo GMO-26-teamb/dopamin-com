@@ -12,7 +12,13 @@ export type { DomainRecord, DomainUpsert } from "./domain-row";
 
 /** 保有ドメインの永続化。テストではインメモリ実装に差し替える。 */
 export interface DomainStore {
-  /** ユーザーの保有ドメインを名前順で返す（FR-02）。 */
+  /**
+   * ユーザーの**保有中**（`ownership = 'owned'`）のドメインを名前順で返す（FR-02）。
+   *
+   * 移管 OUT 済みの行は含めない（§6.5 / AC-12-5。履歴は `/transfers` 側で見る）。
+   * 一覧の再同期（`POST /domains/sync`）も同じ集合を対象にする: 自レジストラが
+   * スポンサーでないドメインに `info` を投げても結果を信頼できないため。
+   */
   list(userId: string): Promise<DomainRecord[]>;
   /**
    * FQDN で 1 件引く。所有者で絞らないのは、他ユーザーのドメインを
@@ -39,7 +45,12 @@ export function createDbDomainStore(db: Db): DomainStore {
       const rows = await db
         .select()
         .from(schema.domains)
-        .where(eq(schema.domains.userId, userId))
+        .where(
+          and(
+            eq(schema.domains.userId, userId),
+            eq(schema.domains.ownership, "owned"),
+          ),
+        )
         .orderBy(asc(schema.domains.name));
       return rows.map(toDomainRecord);
     },
@@ -116,7 +127,7 @@ export function createInMemoryDomainStore(
     list: (userId) =>
       Promise.resolve(
         [...byName.values()]
-          .filter((r) => r.userId === userId)
+          .filter((r) => r.userId === userId && r.ownership === "owned")
           .sort((a, b) => a.name.localeCompare(b.name)),
       ),
     find: (name) => Promise.resolve(byName.get(name) ?? null),

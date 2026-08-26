@@ -304,6 +304,14 @@ export const domains = new Hono<AuthedEnv>()
     const adapter = adapterForDomain(name);
     const cached = await requireOwnedDomain(userId, name);
 
+    // AC-12-5: 移管 OUT 済みの行はレジストリに問い合わせない。
+    // 自レジストラがスポンサーではないので `info` の応答を信頼できず（【要確認 §21.2 #12】）、
+    // さらに `upsertDomainFromInfo` は常に `ownership = 'owned'` で書くため、
+    // 部分一意インデックス（保有中の行のみ）をすり抜けて保有行が復活してしまう。
+    if (cached.ownership !== "owned") {
+      return c.json(detailResponse(cached, false));
+    }
+
     try {
       const info = await adapter.info(name);
       const record = await upsertDomainFromInfo(userId, info);

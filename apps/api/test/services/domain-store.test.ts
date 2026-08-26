@@ -92,13 +92,19 @@ describe.each(implementations)(
       expect((await store.find(INFO.name))?.ownership).toBe("transferred_out");
     });
 
-    it("保有一覧（FR-02）からは消える", async () => {
+    it("保有一覧（FR-02）からは消え、他の保有行は残る", async () => {
       const store = create();
       await store.upsert(owned());
+      await store.upsert(owned({ name: "keep.example" }));
       await store.markTransferredOut(INFO.name, at);
 
-      const listed = await store.list(userId);
-      expect(listed.filter((r) => r.ownership === "owned")).toEqual([]);
+      // list は ownership = 'owned' の行だけを返す（§6.5 / AC-12-5）。
+      // 「全部消えた」ではなく「移管した行だけ消えた」ことを見る
+      expect((await store.list(userId)).map((r) => r.name)).toEqual([
+        "keep.example",
+      ]);
+      // 履歴としては残っているので詳細からは読める
+      expect((await store.find(INFO.name))?.ownership).toBe("transferred_out");
     });
 
     it("保有中の行が無ければ null（二重適用しても壊れない）", async () => {

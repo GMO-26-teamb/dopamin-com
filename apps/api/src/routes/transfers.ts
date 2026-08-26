@@ -10,6 +10,7 @@ import { adapterForDomain } from "../lib/registries";
 import { jsonValidator } from "../lib/validator";
 import { requireSession } from "../middleware/session";
 import {
+  actOnTransfer,
   getTransfer,
   listTransfers,
   recordInboundTransferRequest,
@@ -76,4 +77,31 @@ export const transfers = new Hono<AuthedEnv>()
   .get("/:id", async (c) => {
     const id = parseTransferIdParam(c.req.param("id"));
     return c.json({ transfer: await getTransfer(c.get("user").id, id) });
+  })
+
+  /**
+   * FR-12 / AC-12-4 / AC-12-5: 受信した移管申請（`direction = out`）を承認する。
+   * 承認したドメインは `ownership = 'transferred_out'` になり保有一覧から消える。
+   */
+  .post("/:id/approve", async (c) => {
+    const id = parseTransferIdParam(c.req.param("id"));
+    return c.json({
+      transfer: await actOnTransfer(c.get("user").id, id, "approve"),
+    });
+  })
+
+  /** FR-12 / AC-12-4: 受信した移管申請を拒否する。保有は動かない。 */
+  .post("/:id/reject", async (c) => {
+    const id = parseTransferIdParam(c.req.param("id"));
+    return c.json({
+      transfer: await actOnTransfer(c.get("user").id, id, "reject"),
+    });
+  })
+
+  /** FR-12（P1）: 自分が出した移管 IN 申請を承認前に取り消す（`direction = in`）。 */
+  .post("/:id/cancel", async (c) => {
+    const id = parseTransferIdParam(c.req.param("id"));
+    return c.json({
+      transfer: await actOnTransfer(c.get("user").id, id, "cancel"),
+    });
   });

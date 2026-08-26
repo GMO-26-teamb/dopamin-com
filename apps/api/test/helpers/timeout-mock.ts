@@ -85,4 +85,22 @@ export class TimeoutMockAdapter extends MockRegistryAdapter {
       super.transferRequest(name, authCode),
     );
   }
+
+  override transferApprove(name: string): Promise<TransferResult> {
+    return this.withTimeout("transfer:approve", () =>
+      super.transferApprove(name),
+    );
+  }
+
+  override transferReject(name: string): Promise<TransferResult> {
+    return this.withTimeout("transfer:reject", () =>
+      super.transferReject(name),
+    );
+  }
+
+  override transferCancel(name: string): Promise<TransferResult> {
+    return this.withTimeout("transfer:cancel", () =>
+      super.transferCancel(name),
+    );
+  }
 }

@@ -1,16 +1,20 @@
 import type { RegistryAdapter } from "@dopamin/registry";
 import type {
   DomainInfo,
+  DomainOperation,
   TransferDirection,
+  TransferRecordStatus,
   TransferResult,
   TransferSummary,
   TransfersListResponse,
 } from "@dopamin/shared";
 import {
+  isOperationAllowed,
   TRANSFER_AUTO_APPROVE_MS,
   transferAutoApproveAt,
 } from "@dopamin/shared";
 import { ApiException } from "../lib/errors";
+import { reconcileOnTimeout } from "../lib/reconcile";
 import { adapterForDomain } from "../lib/registries";
 import { upsertDomainFromInfo } from "./domain.service";
 import { getDomainStore } from "./domain-store";
@@ -154,6 +158,56 @@ export async function recordInboundTransferRequest(
   };
 
   const existing = await store.findPending(result.name, "in");
+  if (existing && existing.userId === userId) {
+    const updated = await store.update(existing.id, values);
+    return updated ?? existing;
+  }
+  return store.create(values);
+}
+
+/**
+ * 相手レジストラから受信した移管申請を `transfers(direction = out, status = pending)` として
+ * 記録する（AC-12-4）。Poll 消化（#58）と `POST /domains/sync` の `pendingTransfer` 検知から呼ぶ。
+ *
+ * 冪等性は 2 段で担保する:
+ * - `registryMessageId` があれば `UNIQUE(registry, registry_message_id)` の側で二重処理を防ぐ
+ * - 同じドメインに pending な OUT 行が既にあれば、行を増やさず最新の応答で上書きする
+ *   （`info` 由来の検知には Poll メッセージ ID が無いため、こちらが効く）
+ */
+export async function recordOutboundTransferRequest(
+  userId: string,
+  adapter: RegistryAdapter,
+  result: TransferResult,
+  options: { domainId?: string | null; registryMessageId?: string | null } = {},
+  now: Date = new Date(),
+): Promise<TransferRecord> {
+  const store = getTransferStore();
+  const registryMessageId = options.registryMessageId ?? null;
+  if (registryMessageId !== null) {
+    const known = await store.findByMessageId(adapter.id, registryMessageId);
+    if (known) {
+      return known;
+    }
+  }
+
+  const requestedAt = result.requestedAt ? new Date(result.requestedAt) : now;
+  const values = {
+    userId,
+    domainId: options.domainId ?? null,
+    domainName: result.name,
+    registry: adapter.id,
+    direction: "out" as const,
+    status: "pending" as const,
+    registryStatus: result.registryStatus ?? null,
+    counterpartRegistrarId: counterpartRegistrarId(result, adapter.registrarId),
+    registryMessageId,
+    requestedAt,
+    actByAt: transferAutoApproveAt(requestedAt, result.actByAt ?? null),
+    completedAt: null,
+    raw: result.raw,
+  };
+
+  const existing = await store.findPending(result.name, "out");
   if (existing && existing.userId === userId) {
     const updated = await store.update(existing.id, values);
     return updated ?? existing;
@@ -367,4 +421,162 @@ export async function getTransfer(
 ): Promise<TransferSummary> {
   const record = await requireOwnedTransfer(userId, id);
   return toTransferSummary(await refreshTransfer(userId, record, now));
+}
+
+/** ユーザーが移管に対して行える操作（§10.1 の 3 ルート）。 */
+export type TransferAction = "approve" | "reject" | "cancel";
+
+interface TransferActionSpec {
+  /** この操作を行える向き。approve / reject は受信側（out）、cancel は申請側（in）。 */
+  direction: TransferDirection;
+  operation: DomainOperation;
+  status: TransferRecordStatus;
+  /** アダプタの対応メソッド。 */
+  call: (adapter: RegistryAdapter, name: string) => Promise<TransferResult>;
+  /**
+   * AC-18-2 の照合（タイムアウト時のみ）。**この操作が成立したこと**の証跡が取れる場合だけ
+   * 実装する。「申請が消えた」だけでは不十分: `transferQuery` は `info` の `pendingTransfer`
+   * からの導出で、承認 / 拒否 / 取消・相手の取消・サーバ自動承認を区別できない
+   * （ADR-0002 決定 1）。区別できないまま要求した結果を書くと、
+   * 「拒否したはずが移管されていた」「承認したはずが保有し続けていた」を静かに作る。
+   * 照合できない操作は `undefined` にして 504 を返し、確定は Poll 消化（#58）に委ねる。
+   */
+  confirm?: (
+    adapter: RegistryAdapter,
+    record: TransferRecord,
+  ) => Promise<TransferResult | null>;
+  /** 弾いたときのユーザー向け文言（FR-18）。 */
+  rejection: string;
+}
+
+/**
+ * 承認の照合: 申請が消えていて、かつ `info` の trDate が申請の窓の中で動いていれば成立。
+ * 拒否・取消では trDate が動かないので、これは承認だけを通す（{@link isApprovedByInfo}）。
+ */
+const confirmApproved: NonNullable<TransferActionSpec["confirm"]> = async (
+  adapter,
+  record,
+) => {
+  const queried = await adapter.transferQuery(record.domainName);
+  if (queried.status === "pending") {
+    return null;
+  }
+  const info = await adapter.info(record.domainName);
+  return isApprovedByInfo(info, {
+    requestedAt: record.requestedAt,
+    actByAt: record.actByAt,
+  })
+    ? queried
+    : null;
+};
+
+const TRANSFER_ACTIONS: Record<TransferAction, TransferActionSpec> = {
+  approve: {
+    direction: "out",
+    operation: "transferApprove",
+    status: "approved",
+    call: (adapter, name) => adapter.transferApprove(name),
+    confirm: confirmApproved,
+    rejection: "承認できる移管申請ではありません。",
+  },
+  reject: {
+    // 拒否は「申請が消えた」以外の痕跡をレジストリに残さない。タイムアウト時は
+    // 承認・取消と区別できないので照合しない（偽の成功より 504 を返す）
+    direction: "out",
+    operation: "transferReject",
+    status: "rejected",
+    call: (adapter, name) => adapter.transferReject(name),
+    rejection: "拒否できる移管申請ではありません。",
+  },
+  cancel: {
+    // 取消も同様。誤って cancelled で確定させると、実は承認されていた場合に
+    // 取り込み（§6.5）が二度と走らずドメインを取りこぼす
+    direction: "in",
+    operation: "transferCancel",
+    status: "cancelled",
+    call: (adapter, name) => adapter.transferCancel(name),
+    rejection: "取り消せる移管申請ではありません。",
+  },
+};
+
+/**
+ * 受信した移管申請への応答（承認 / 拒否）と、自分の申請の取消（AC-12-4 / AC-12-5）。
+ *
+ * 進行中でない行・向き違いの行はレジストリに問い合わせる前に 409 で弾く。
+ * 可否の判定そのものは `isOperationAllowed`（§9.2 の SSOT）に委ねる。
+ * EPP ステータス由来の可否は見ない: 承認 / 拒否 / 取消は §11.3 の個別ロックの対象外で、
+ * 残る条件（ロック以外の理由でレジストリが拒む場合）はレジストリ側が result code で返す。
+ *
+ * 承認した移管 OUT は `domains` を `transferred_out` に倒して保有一覧から外す（AC-12-5）。
+ * 行は消さず履歴として残す（§6.5）。
+ */
+export async function actOnTransfer(
+  userId: string,
+  id: string,
+  action: TransferAction,
+  now: Date = new Date(),
+): Promise<TransferSummary> {
+  const spec = TRANSFER_ACTIONS[action];
+  const record = await requireOwnedTransfer(userId, id);
+
+  if (record.direction !== spec.direction || record.status !== "pending") {
+    throw new ApiException("OPERATION_NOT_ALLOWED", spec.rejection, {
+      statuses: [],
+      reason: record.status === "pending" ? "wrong_direction" : "not_pending",
+    });
+  }
+
+  // `find` は保有行が無ければ移管 OUT 済みの履歴行にフォールバックする（§9.1）ので、
+  // 「自分が今保有している行」だけを採る。移管 IN（cancel）は保有行が無いのが正常で、
+  // 同名の履歴行を拾うと ownership = transferred_out で自分の申請を取り消せなくなる。
+  const found = await getDomainStore().find(record.domainName);
+  const owned =
+    found !== null && found.ownership === "owned" && found.userId === userId
+      ? found
+      : null;
+
+  // 受信申請への応答（out）は自分が保有しているドメインにしか出せない。
+  // `markTransferredOut` は FQDN で引くので、ここを通さないと他人の行を倒せてしまう（NFR-04）
+  if (spec.direction === "out" && owned === null) {
+    throw new ApiException("OPERATION_NOT_ALLOWED", spec.rejection, {
+      statuses:
+        found?.ownership === "transferred_out" ? ["transferred_out"] : [],
+      reason: "not_owned",
+    });
+  }
+
+  // ここまでで ownership は必ず owned なので、この判定が見ているのは実質
+  // 「操作と向きの対応」（out = 承認 / 拒否、in = 取消）。SSOT を二重に持たないため委譲する
+  const check = isOperationAllowed(spec.operation, [], {
+    ...(owned ? { ownership: owned.ownership } : {}),
+    transfer: { direction: record.direction },
+  });
+  if (!check.allowed) {
+    throw new ApiException("OPERATION_NOT_ALLOWED", spec.rejection, {
+      statuses: check.blockedBy,
+    });
+  }
+
+  const adapter = adapterForDomain(record.domainName);
+  // AC-18-2: タイムアウト時は再送せず、操作ごとの照合（spec.confirm）で結果を確定する
+  const result = await reconcileOnTimeout(
+    () => spec.call(adapter, record.domainName),
+    () => spec.confirm?.(adapter, record) ?? Promise.resolve(null),
+  );
+
+  if (action === "approve") {
+    // 移管 OUT の完了。保有一覧から外し、行は履歴として残す（AC-12-5 / §6.5）
+    await getDomainStore().markTransferredOut(record.domainName, now);
+  }
+
+  const updated = await getTransferStore().update(record.id, {
+    status: spec.status,
+    completedAt: now,
+    registryStatus: result.registryStatus ?? record.registryStatus,
+    counterpartRegistrarId:
+      counterpartRegistrarId(result, adapter.registrarId) ??
+      record.counterpartRegistrarId,
+    raw: result.raw,
+  });
+  return toTransferSummary(updated ?? record);
 }

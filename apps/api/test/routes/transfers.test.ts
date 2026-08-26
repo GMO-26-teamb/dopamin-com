@@ -15,6 +15,7 @@ import {
   type DomainStore,
   setDomainStoreForTesting,
 } from "../../src/services/domain-store";
+import { recordOutboundTransferRequest } from "../../src/services/transfer.service";
 import {
   createInMemoryTransferStore,
   setTransferStoreForTesting,
@@ -25,6 +26,7 @@ import {
   installTestSession,
   OTHER_USER,
   SESSION_COOKIE_HEADER,
+  TEST_USER,
 } from "../helpers/session";
 import { TimeoutMockAdapter } from "../helpers/timeout-mock";
 
@@ -136,6 +138,26 @@ async function createDomainWithAuthCode(name: string): Promise<string> {
   expect(res.status).toBe(200);
   const { authCode } = (await res.json()) as { authCode: string };
   return authCode;
+}
+
+/**
+ * 移管 OUT の前提を作る（AC-12-4）: 自分の保有ドメインに相手レジストラからの申請を
+ * 受信させ、`transfers(direction = out, status = pending)` を記録して ID を返す。
+ *
+ * Poll 消化（#58）が入るまで受信申請から行を作る経路が無いので、
+ * ここでは Poll と同じサービス関数（`recordOutboundTransferRequest`）を直接呼ぶ。
+ */
+async function receiveOutboundRequest(name: string): Promise<string> {
+  await sendJson("/domains", { name, period: 1 });
+  const result = kitaqsign.simulateInboundTransferRequest(name);
+  const domain = await domainStore.find(name);
+  const record = await recordOutboundTransferRequest(
+    TEST_USER.id,
+    kitaqsign,
+    result,
+    { domainId: domain?.id ?? null },
+  );
+  return record.id;
 }
 
 describe("POST /api/v1/transfers（FR-12 移管 IN）", () => {
@@ -466,11 +488,458 @@ describe("GET /api/v1/transfers/:id（FR-12 状態照会）", () => {
   });
 });
 
+describe("POST /api/v1/transfers/:id/approve・reject（FR-12 移管 OUT）", () => {
+  it("AC-12-4 / AC-12-5: 承認すると保有一覧から消え、履歴に approved で残る", async () => {
+    const id = await receiveOutboundRequest("leave.com");
+
+    // 承認前は「受信した申請」として outbound に出る
+    const before = await listTransfers();
+    expect(before.outbound).toHaveLength(1);
+    expect(before.outbound[0]).toMatchObject({
+      domainName: "leave.com",
+      direction: "out",
+      status: "pending",
+      counterpartRegistrarId: "MOCK-FOREIGN",
+    });
+    expect(await listDomainNames()).toEqual(["leave.com"]);
+
+    const res = await api(`/transfers/${id}/approve`, { method: "POST" });
+    expect(res.status).toBe(200);
+    const { transfer } = (await res.json()) as { transfer: TransferSummary };
+    expect(transfer).toMatchObject({ id, status: "approved" });
+    expect(transfer.completedAt).not.toBeNull();
+
+    // レジストリ側でも承認されている（スポンサーが相手レジストラへ移った）。
+    // mock の rotate-auth-info は現スポンサーしか実行できないので、これで承認と拒否を見分けられる
+    await expect(kitaqsign.authCode("leave.com")).rejects.toMatchObject({
+      code: "REGISTRY_REJECTED",
+      registryCode: 2201,
+    });
+    expect((await kitaqsign.info("leave.com")).lastTransferAt).not.toBeNull();
+
+    // AC-12-5: 保有一覧から消える（行は履歴として残る）
+    expect(await listDomainNames()).toEqual([]);
+    expect((await domainStore.find("leave.com"))?.ownership).toBe(
+      "transferred_out",
+    );
+    const after = await listTransfers();
+    expect(after.outbound).toEqual([]);
+    expect(after.history).toHaveLength(1);
+    expect(after.history[0]?.status).toBe("approved");
+  });
+
+  it("AC-12-5: 承認後は詳細を開いても保有一覧に復活しない", async () => {
+    const id = await receiveOutboundRequest("gone.com");
+    expect(
+      (await api(`/transfers/${id}/approve`, { method: "POST" })).status,
+    ).toBe(200);
+
+    // 履歴からの導線で詳細を開く（移管済みのドメインも表示だけはできる）
+    const detail = await api("/domains/gone.com");
+    expect(detail.status).toBe(200);
+    const body = (await detail.json()) as {
+      summary: { ownership: string } | null;
+    };
+    expect(body.summary?.ownership).toBe("transferred_out");
+
+    // `info` の write-through で ownership = 'owned' の行が復活しないこと
+    expect(await listDomainNames()).toEqual([]);
+    expect((await domainStore.find("gone.com"))?.ownership).toBe(
+      "transferred_out",
+    );
+  });
+
+  it("AC-12-4: 拒否すると保有は動かず、履歴に rejected で残る", async () => {
+    const id = await receiveOutboundRequest("stay.com");
+
+    const res = await api(`/transfers/${id}/reject`, { method: "POST" });
+    expect(res.status).toBe(200);
+    const { transfer } = (await res.json()) as { transfer: TransferSummary };
+    expect(transfer).toMatchObject({ id, status: "rejected" });
+
+    // レジストリ側でも申請だけが消え、スポンサーは自分のまま
+    // （承認していれば rotate-auth-info が 2201 で失敗する）
+    await expect(kitaqsign.authCode("stay.com")).resolves.toBeTruthy();
+    expect((await kitaqsign.info("stay.com")).statuses).not.toContain(
+      "pendingTransfer",
+    );
+    expect((await kitaqsign.info("stay.com")).lastTransferAt).toBeNull();
+
+    // 拒否は申請を取り下げるだけ。ドメインは保有したまま
+    expect(await listDomainNames()).toEqual(["stay.com"]);
+    expect((await domainStore.find("stay.com"))?.ownership).toBe("owned");
+    const after = await listTransfers();
+    expect(after.outbound).toEqual([]);
+    expect(after.history[0]?.status).toBe("rejected");
+  });
+
+  it("AC-12-5: 移管 OUT 済みのドメインは再び承認できない", async () => {
+    const id = await receiveOutboundRequest("once.com");
+    expect(
+      (await api(`/transfers/${id}/approve`, { method: "POST" })).status,
+    ).toBe(200);
+
+    const res = await api(`/transfers/${id}/approve`, { method: "POST" });
+    expect(res.status).toBe(409);
+    expect((await parseError(res)).error.code).toBe("OPERATION_NOT_ALLOWED");
+  });
+
+  it("確定済み（拒否済み）の行は承認できない（status = pending が前提）", async () => {
+    const id = await receiveOutboundRequest("settled.com");
+    expect(
+      (await api(`/transfers/${id}/reject`, { method: "POST" })).status,
+    ).toBe(200);
+
+    const res = await api(`/transfers/${id}/approve`, { method: "POST" });
+    expect(res.status).toBe(409);
+    expect((await parseError(res)).error.details).toMatchObject({
+      reason: "not_pending",
+    });
+    // 保有は動かない（拒否の結果がひっくり返らない）
+    expect(await listDomainNames()).toEqual(["settled.com"]);
+  });
+
+  it("自分が保有していないドメインの OUT 行は承認できない（NFR-04）", async () => {
+    // 保有行を他ユーザーに付け替えた状態（Poll 由来の行が古くなった等）を作る
+    await sendJson("/domains", { name: "notyours.com", period: 1 });
+    const result = kitaqsign.simulateInboundTransferRequest("notyours.com");
+    const record = await recordOutboundTransferRequest(
+      TEST_USER.id,
+      kitaqsign,
+      result,
+    );
+    const existing = await domainStore.find("notyours.com");
+    if (!existing) {
+      throw new Error("保有行が見つからない");
+    }
+    await domainStore.upsert({ ...existing, userId: OTHER_USER.id });
+
+    const res = await api(`/transfers/${record.id}/approve`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(409);
+    expect((await parseError(res)).error.details).toMatchObject({
+      reason: "not_owned",
+    });
+    // 他ユーザーの保有行は倒れていない
+    expect((await domainStore.find("notyours.com"))?.ownership).toBe("owned");
+  });
+
+  it("移管 IN の行は承認・拒否できない（向き違いは 409）", async () => {
+    const authCode = seedForeignDomain("wrongway.com");
+    const created = await sendJson("/transfers", {
+      name: "wrongway.com",
+      authCode,
+    });
+    const { record } = (await created.json()) as TransferPayload;
+
+    for (const action of ["approve", "reject"]) {
+      const res = await api(`/transfers/${record.id}/${action}`, {
+        method: "POST",
+      });
+      expect(res.status).toBe(409);
+      expect((await parseError(res)).error.code).toBe("OPERATION_NOT_ALLOWED");
+    }
+    // レジストリ側の申請はそのまま残っている
+    expect((await kitaqsign.info("wrongway.com")).statuses).toContain(
+      "pendingTransfer",
+    );
+  });
+
+  it("他ユーザーの移管行は 403 FORBIDDEN", async () => {
+    const other = await transferStore.create({
+      userId: OTHER_USER.id,
+      domainId: null,
+      domainName: "other.com",
+      registry: "kitaqsign",
+      direction: "out",
+      status: "pending",
+      registryStatus: null,
+      counterpartRegistrarId: null,
+      registryMessageId: null,
+      requestedAt: new Date(),
+      actByAt: null,
+      completedAt: null,
+      raw: null,
+    });
+    const res = await api(`/transfers/${other.id}/approve`, { method: "POST" });
+    expect(res.status).toBe(403);
+    expect((await parseError(res)).error.code).toBe("FORBIDDEN");
+  });
+});
+
+describe("recordOutboundTransferRequest（受信申請の記録。#58 の Poll 消化が使う）", () => {
+  it("domains 行の ID を紐付け、outbound に pending として出る", async () => {
+    await sendJson("/domains", { name: "linked.com", period: 1 });
+    const domain = await domainStore.find("linked.com");
+    const result = kitaqsign.simulateInboundTransferRequest("linked.com");
+
+    const record = await recordOutboundTransferRequest(
+      TEST_USER.id,
+      kitaqsign,
+      result,
+      { domainId: domain?.id ?? null, registryMessageId: "42" },
+    );
+    expect(record).toMatchObject({
+      domainName: "linked.com",
+      direction: "out",
+      status: "pending",
+      domainId: domain?.id,
+      registryMessageId: "42",
+      counterpartRegistrarId: "MOCK-FOREIGN",
+    });
+    expect(record.actByAt).not.toBeNull();
+  });
+
+  it("同じ Poll メッセージ ID を二度取り込んでも行は増えない（冪等）", async () => {
+    await sendJson("/domains", { name: "dup.com", period: 1 });
+    const result = kitaqsign.simulateInboundTransferRequest("dup.com");
+
+    const first = await recordOutboundTransferRequest(
+      TEST_USER.id,
+      kitaqsign,
+      result,
+      { registryMessageId: "7" },
+    );
+    const second = await recordOutboundTransferRequest(
+      TEST_USER.id,
+      kitaqsign,
+      result,
+      { registryMessageId: "7" },
+    );
+    expect(second.id).toBe(first.id);
+    expect((await listTransfers()).outbound).toHaveLength(1);
+  });
+
+  it("メッセージ ID が無くても同じドメインの pending 行は増えない（info 由来の検知）", async () => {
+    await sendJson("/domains", { name: "again-out.com", period: 1 });
+    const result = kitaqsign.simulateInboundTransferRequest("again-out.com");
+
+    const first = await recordOutboundTransferRequest(
+      TEST_USER.id,
+      kitaqsign,
+      result,
+    );
+    const second = await recordOutboundTransferRequest(
+      TEST_USER.id,
+      kitaqsign,
+      result,
+    );
+    expect(second.id).toBe(first.id);
+    expect((await listTransfers()).outbound).toHaveLength(1);
+  });
+});
+
+describe("POST /api/v1/transfers/:id/cancel（FR-12 移管 IN の取消）", () => {
+  it("承認前の IN 申請を取り消すと cancelled になり、保有一覧にも出ない", async () => {
+    const authCode = seedForeignDomain("undo.com");
+    const created = await sendJson("/transfers", {
+      name: "undo.com",
+      authCode,
+    });
+    const { record } = (await created.json()) as TransferPayload;
+
+    const res = await api(`/transfers/${record.id}/cancel`, { method: "POST" });
+    expect(res.status).toBe(200);
+    const { transfer } = (await res.json()) as { transfer: TransferSummary };
+    expect(transfer).toMatchObject({ id: record.id, status: "cancelled" });
+
+    // レジストリ側の申請も消えている
+    expect((await kitaqsign.info("undo.com")).statuses).not.toContain(
+      "pendingTransfer",
+    );
+    const after = await listTransfers();
+    expect(after.inbound).toEqual([]);
+    expect(after.history[0]?.status).toBe("cancelled");
+    expect(await listDomainNames()).toEqual([]);
+  });
+
+  it("受信した OUT 申請は取り消せない（向き違いは 409）", async () => {
+    const id = await receiveOutboundRequest("notmine.com");
+    const res = await api(`/transfers/${id}/cancel`, { method: "POST" });
+    expect(res.status).toBe(409);
+    expect((await parseError(res)).error.code).toBe("OPERATION_NOT_ALLOWED");
+  });
+
+  it("確定済みの行は取り消せない（409）", async () => {
+    const authCode = seedForeignDomain("done.com");
+    const created = await sendJson("/transfers", {
+      name: "done.com",
+      authCode,
+    });
+    const { record } = (await created.json()) as TransferPayload;
+    expect(
+      (await api(`/transfers/${record.id}/cancel`, { method: "POST" })).status,
+    ).toBe(200);
+
+    const res = await api(`/transfers/${record.id}/cancel`, { method: "POST" });
+    expect(res.status).toBe(409);
+    expect((await parseError(res)).error.code).toBe("OPERATION_NOT_ALLOWED");
+  });
+
+  it("移管 OUT 済みの履歴行があっても、同名の再 IN 申請は取り消せる（出戻り）", async () => {
+    // 一度 OUT した名前を後日また移管 IN する。`domains` には transferred_out の
+    // 履歴行が残るが、`find` がそれを拾って取消をブロックしてはいけない
+    const authCode = await createDomainWithAuthCode("again.com");
+    const result = kitaqsign.simulateInboundTransferRequest("again.com");
+    const out = await recordOutboundTransferRequest(
+      TEST_USER.id,
+      kitaqsign,
+      result,
+    );
+    expect(
+      (await api(`/transfers/${out.id}/approve`, { method: "POST" })).status,
+    ).toBe(200);
+    expect((await domainStore.find("again.com"))?.ownership).toBe(
+      "transferred_out",
+    );
+
+    // 相手レジストラ保有になったので、同じ AuthCode で移管 IN を申請し直せる
+    const created = await sendJson("/transfers", {
+      name: "again.com",
+      authCode,
+    });
+    expect(created.status).toBe(202);
+    const { record } = (await created.json()) as TransferPayload;
+
+    const res = await api(`/transfers/${record.id}/cancel`, { method: "POST" });
+    expect(res.status).toBe(200);
+    const { transfer } = (await res.json()) as { transfer: TransferSummary };
+    expect(transfer.status).toBe("cancelled");
+  });
+
+  it("uuid でない ID は 400 VALIDATION_ERROR", async () => {
+    const res = await api("/transfers/undo.com/cancel", { method: "POST" });
+    expect(res.status).toBe(400);
+    expect((await parseError(res)).error.code).toBe("VALIDATION_ERROR");
+  });
+});
+
+describe("AC-18-2: 承認のタイムアウト時は transferQuery で照合する", () => {
+  it("承認がレジストリに届いていれば、応答タイムアウトでも 200 を返す", async () => {
+    const adapter = new TimeoutMockAdapter("kitaqsign");
+    setRegistrySetForTesting(
+      createRegistrySet({ mode: "real", adapters: [adapter] }),
+    );
+    await sendJson("/domains", { name: "slowapprove.com", period: 1 });
+    const result = adapter.simulateInboundTransferRequest("slowapprove.com");
+    const record = await recordOutboundTransferRequest(
+      TEST_USER.id,
+      adapter,
+      result,
+    );
+
+    adapter.timeoutMode = "after-success";
+    const res = await api(`/transfers/${record.id}/approve`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+    const { transfer } = (await res.json()) as { transfer: TransferSummary };
+    expect(transfer.status).toBe("approved");
+    expect(await listDomainNames()).toEqual([]);
+  });
+
+  it("承認が届いていなければ 504 REGISTRY_TIMEOUT のまま保有は動かない", async () => {
+    const adapter = new TimeoutMockAdapter("kitaqsign");
+    setRegistrySetForTesting(
+      createRegistrySet({ mode: "real", adapters: [adapter] }),
+    );
+    await sendJson("/domains", { name: "lostapprove.com", period: 1 });
+    const result = adapter.simulateInboundTransferRequest("lostapprove.com");
+    const record = await recordOutboundTransferRequest(
+      TEST_USER.id,
+      adapter,
+      result,
+    );
+
+    adapter.timeoutMode = "before-reach";
+    const res = await api(`/transfers/${record.id}/approve`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(504);
+    expect((await parseError(res)).error.code).toBe("REGISTRY_TIMEOUT");
+    // 保有はそのまま（偽の成功にしない）
+    expect(await listDomainNames()).toEqual(["lostapprove.com"]);
+  });
+
+  it("申請が別の理由で消えていれば、承認のタイムアウトは 504 のまま", async () => {
+    // 「申請が消えた」だけでは承認の証跡にならない（ADR-0002 決定 1）。
+    // 相手が取り下げただけなのに承認扱いにすると、保有しているドメインを失う
+    const adapter = new TimeoutMockAdapter("kitaqsign");
+    setRegistrySetForTesting(
+      createRegistrySet({ mode: "real", adapters: [adapter] }),
+    );
+    await sendJson("/domains", { name: "vanished.com", period: 1 });
+    const result = adapter.simulateInboundTransferRequest("vanished.com");
+    const record = await recordOutboundTransferRequest(
+      TEST_USER.id,
+      adapter,
+      result,
+    );
+
+    // 承認が届く前に申請が別経路で消えた（ここでは拒否で消す。trDate は動かない）
+    await adapter.transferReject("vanished.com");
+    adapter.timeoutMode = "before-reach";
+
+    const res = await api(`/transfers/${record.id}/approve`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(504);
+    expect((await parseError(res)).error.code).toBe("REGISTRY_TIMEOUT");
+    // 保有は動かない（移管されていないため）
+    expect(await listDomainNames()).toEqual(["vanished.com"]);
+    expect((await domainStore.find("vanished.com"))?.ownership).toBe("owned");
+  });
+
+  it.each([
+    ["reject", "rejectme.com"],
+    ["cancel", "cancelme.com"],
+  ])(
+    "%s は照合できないためタイムアウト時は必ず 504（偽の成功にしない）",
+    async (action, name) => {
+      const adapter = new TimeoutMockAdapter("kitaqsign");
+      setRegistrySetForTesting(
+        createRegistrySet({ mode: "real", adapters: [adapter] }),
+      );
+
+      let id: string;
+      if (action === "reject") {
+        await sendJson("/domains", { name, period: 1 });
+        const result = adapter.simulateInboundTransferRequest(name);
+        id = (
+          await recordOutboundTransferRequest(TEST_USER.id, adapter, result)
+        ).id;
+      } else {
+        const authCode = `foreign-auth-${name}`;
+        adapter.seedForeignDomain(name, authCode);
+        const created = await sendJson("/transfers", { name, authCode });
+        expect(created.status).toBe(202);
+        id = ((await created.json()) as TransferPayload).record.id;
+      }
+
+      // 実際にはレジストリに届いていた（申請は消えている）が、拒否・取消は
+      // 承認と区別できないので照合しない
+      adapter.timeoutMode = "after-success";
+      const res = await api(`/transfers/${id}/${action}`, { method: "POST" });
+      expect(res.status).toBe(504);
+      expect((await parseError(res)).error.code).toBe("REGISTRY_TIMEOUT");
+
+      // 行は pending のまま残り、Poll 消化（#58）で確定させる
+      const stored = await transferStore.findById(id);
+      expect(stored?.status).toBe("pending");
+    },
+  );
+});
+
 describe("AC-01-3: 移管ルートの認証", () => {
+  const SAMPLE_ID = "00000000-0000-4000-8000-000000000001";
   it.each([
     ["POST", "/api/v1/transfers"],
     ["GET", "/api/v1/transfers"],
-    ["GET", "/api/v1/transfers/00000000-0000-4000-8000-000000000001"],
+    ["GET", `/api/v1/transfers/${SAMPLE_ID}`],
+    ["POST", `/api/v1/transfers/${SAMPLE_ID}/approve`],
+    ["POST", `/api/v1/transfers/${SAMPLE_ID}/reject`],
+    ["POST", `/api/v1/transfers/${SAMPLE_ID}/cancel`],
   ])("%s %s は Cookie 無しで 401 UNAUTHORIZED", async (method, path) => {
     const res = await app.request(path, { method });
     expect(res.status).toBe(401);
