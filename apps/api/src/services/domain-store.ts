@@ -1,5 +1,5 @@
 import { type Db, schema } from "@dopamin/db";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "../lib/db";
 import {
   type DomainRecord,
@@ -35,10 +35,16 @@ export function createDbDomainStore(db: Db): DomainStore {
     },
 
     async find(name) {
+      // 同名で transferred_out の履歴行が残り得る（§9.1 の部分一意）。
+      // 保有中の行を優先し、無ければ最後に移管 OUT した行を返す（AC-12-5 の「移管済み」表示用）。
       const rows = await db
         .select()
         .from(schema.domains)
         .where(eq(schema.domains.name, name))
+        .orderBy(
+          desc(sql`${schema.domains.ownership} = 'owned'`),
+          desc(schema.domains.createdAt),
+        )
         .limit(1);
       const row = rows[0];
       return row ? toDomainRecord(row) : null;
@@ -46,18 +52,32 @@ export function createDbDomainStore(db: Db): DomainStore {
 
     async upsert(record) {
       const values = toDomainValues(record);
-      // name は一意。レジストリが正なので、同名の行は最新の所有者・情報で上書きする
-      // （移管 IN / 廃止後の再取得で所有者が変わり得る）。
+      // 一意なのは保有中の行だけ（部分一意インデックス domains_name_owned_uniq、§9.1）。
+      // ON CONFLICT の推論も同じ述語で絞らないと制約に一致せず失敗するため targetWhere を付ける。
+      // レジストリが正なので、保有中の同名行は最新の所有者・情報で上書きする
+      // （移管 IN / 廃止後の再取得で所有者が変わり得る）。transferred_out の履歴行は触らない。
       const [row] = await db
         .insert(schema.domains)
         .values(values)
-        .onConflictDoUpdate({ target: schema.domains.name, set: values })
+        .onConflictDoUpdate({
+          target: schema.domains.name,
+          targetWhere: eq(schema.domains.ownership, "owned"),
+          set: values,
+        })
         .returning();
       return row ? toDomainRecord(row) : record;
     },
 
     async remove(name) {
-      await db.delete(schema.domains).where(eq(schema.domains.name, name));
+      // 移管 OUT 済みの履歴行は残す（§6.5）。消すのは保有中の行だけ。
+      await db
+        .delete(schema.domains)
+        .where(
+          and(
+            eq(schema.domains.name, name),
+            eq(schema.domains.ownership, "owned"),
+          ),
+        );
     },
   };
 }

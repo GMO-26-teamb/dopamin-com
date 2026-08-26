@@ -12,8 +12,8 @@ const MULTI_STEP = { timeout: 60_000 } as const;
  * 実レジストリに対するフルライフサイクル疎通テスト（kitaqsign / kitaqnic 共通）。
  *
  * 検証内容: hello → check → create（コンタクト作成込み）→ info → renew →
- * update（NS / クライアントステータス）→ authCode → transfer（誤 AuthCode 拒否）→
- * delete → restore → 最終 delete。
+ * update（NS / クライアントステータス）→ authCode → transfer（誤 AuthCode 拒否 /
+ * 申請不在の approve・reject・cancel 拒否）→ delete → restore → 最終 delete。
  *
  * ⚠️ 更新系コマンドは実データに反映される。テスト用ドメインは実行ごとに一意な
  * `dopamin-t*` 名で登録し、最後に削除して RGP（復旧猶予）に落として終える。
@@ -180,6 +180,45 @@ export function registryLifecycleSuite(
       expect(err.registryCode).toBeDefined();
 
       // 万一受理されると以降の delete がブロックされるため、ここで検知する
+      const info = await adapter.info(domainName);
+      expect(info.statuses).not.toContain("pendingTransfer");
+    },
+  );
+
+  it(
+    "transfer: 申請が無い状態の approve / reject / cancel はレジストリに拒否される",
+    MULTI_STEP,
+    async () => {
+      // 相手レジストラが用意できないため、移管を実際に成立させることはできない
+      // （テスト用ドメインのスポンサーは自レジストラ。requirements §21.2 #11）。
+      // ここでは「エンドポイントに 2 段認証付きで到達し、レジストリの業務拒否として
+      // 正規化される」ことまでを確認する（AC-12-4 の疎通確認）。
+      // 期待する応答は Swagger の 403（操作権限なし）/ 409（転送リクエスト不在）。
+      for (const act of ["approve", "reject", "cancel"] as const) {
+        const call = {
+          approve: () => adapter.transferApprove(domainName),
+          reject: () => adapter.transferReject(domainName),
+          cancel: () => adapter.transferCancel(domainName),
+        }[act];
+        const err = await call().then(
+          () => null,
+          (e: unknown) => e,
+        );
+        expect(err, `${act} が拒否されませんでした`).toBeInstanceOf(
+          RegistryError,
+        );
+        if (!(err instanceof RegistryError)) {
+          throw new Error("unreachable");
+        }
+        // 接続断（UNAVAILABLE / TIMEOUT）やパス誤り（NOT_FOUND / SPEC_MISMATCH）では合格させない
+        expect(
+          ["REGISTRY_REJECTED", "OPERATION_NOT_ALLOWED"],
+          `${act}: ${err.code}（registryCode=${err.registryCode ?? "-"} / reason=${err.reason ?? "-"}）`,
+        ).toContain(err.code);
+        expect(err.registryCode).toBeDefined();
+      }
+
+      // 万一いずれかが受理されると以降の delete がブロックされるため、ここで検知する
       const info = await adapter.info(domainName);
       expect(info.statuses).not.toContain("pendingTransfer");
     },

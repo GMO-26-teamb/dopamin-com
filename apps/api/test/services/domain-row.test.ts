@@ -38,6 +38,9 @@ function row(overrides: Partial<DomainRow> = {}): DomainRow {
     tld: "com",
     registry: "kitaqsign",
     registryRef: null,
+    ownership: "owned",
+    sponsoringRegistrarId: null,
+    transferredOutAt: null,
     statuses: ["ok"],
     nameservers: ["ns1.example.com", "ns2.example.com"],
     registeredAt: new Date("2026-08-01T00:00:00.000Z"),
@@ -85,6 +88,16 @@ describe("toDomainRecord", () => {
     expect(result.info).toEqual(INFO);
     expect(result.info.registrant).toBe("C-1");
     expect(result.info.sponsoringRegistrarId).toBeNull();
+  });
+
+  it("ownership 列をそのまま読む（移管 OUT 済みの行は transferred_out）", () => {
+    expect(
+      toDomainRecord(row({ ownership: "transferred_out" })).ownership,
+    ).toBe("transferred_out");
+  });
+
+  it("ownership が想定外の値でも owned に丸めて行を落とさない", () => {
+    expect(toDomainRecord(row({ ownership: "bogus" })).ownership).toBe("owned");
   });
 
   it("registry は raw_info を優先する（列と食い違っても壊れない）", () => {
@@ -139,6 +152,16 @@ describe("fallbackInfo", () => {
     expect(info.lastTransferAt).toBeNull();
   });
 
+  it("sponsoring_registrar_id 列を DomainInfo に載せる", () => {
+    expect(
+      fallbackInfo(row({ sponsoringRegistrarId: "REG-1" }))
+        .sponsoringRegistrarId,
+    ).toBe("REG-1");
+    expect(
+      fallbackInfo(row({ sponsoringRegistrarId: null })).sponsoringRegistrarId,
+    ).toBeNull();
+  });
+
   it("未知の registry 文字列は mock に丸める（例外を投げない）", () => {
     expect(fallbackInfo(row({ registry: "kitaqXXX" })).registry).toBe("mock");
   });
@@ -159,6 +182,18 @@ describe("toDomainValues", () => {
     expect(values.registeredAt).toEqual(new Date("2026-08-01T00:00:00.000Z"));
     expect(values.expiresAt).toEqual(new Date("2027-08-01T00:00:00.000Z"));
     expect(values.rawInfo).toEqual(INFO);
+  });
+
+  it("ownership と sponsoring_registrar_id を列に書き戻す", () => {
+    expect(toDomainValues(record()).ownership).toBe("owned");
+    expect(
+      toDomainValues(record({ ownership: "transferred_out" })).ownership,
+    ).toBe("transferred_out");
+    expect(
+      toDomainValues(
+        record({ info: { ...INFO, sponsoringRegistrarId: "REG-1" } }),
+      ).sponsoringRegistrarId,
+    ).toBe("REG-1");
   });
 
   it("expiresAt / lastTransferAt が null なら列も null にする", () => {
@@ -209,6 +244,7 @@ describe("往復（record → values → row → record）", () => {
       ...values,
       rgpUntil: null,
       registryRef: null,
+      transferredOutAt: null,
     } as Partial<DomainRow>);
     expect(toDomainRecord(stored)).toEqual(original);
   });

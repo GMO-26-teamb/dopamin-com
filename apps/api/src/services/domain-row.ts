@@ -2,6 +2,7 @@ import type { schema } from "@dopamin/db";
 import {
   type DomainInfo,
   type Ownership,
+  ownershipSchema,
   registryIdSchema,
   splitDomainName,
 } from "@dopamin/shared";
@@ -18,8 +19,8 @@ export interface DomainRecord {
   name: string;
   registry: DomainInfo["registry"];
   /**
-   * 所有権。移管 OUT 完了の検知（#56）と `ownership` 列（#33）が入るまでは常に `owned`。
-   * `domains` に行があること自体が保有中を意味する。
+   * 所有権（§9.1 `ownership`）。移管 OUT 完了を検知した行は `transferred_out` になり、
+   * 表示のみ・全操作不可になる（AC-12-5）。遷移させるのは移管サービス側（#56 / #57 / #58）。
    */
   ownership: Ownership;
   /** 最後に取得した `info` の正規化結果。 */
@@ -68,8 +69,7 @@ export function fallbackInfo(row: DomainRow): DomainInfo {
     updatedAt: null,
     expiresAt: row.expiresAt?.toISOString() ?? null,
     lastTransferAt: row.lastTransferAt?.toISOString() ?? null,
-    // domains に sponsoring_registrar_id 列がまだ無い（列追加は #33）。
-    sponsoringRegistrarId: null,
+    sponsoringRegistrarId: row.sponsoringRegistrarId,
     rgpStatuses: row.rgpStatus ? [row.rgpStatus] : [],
   };
 }
@@ -82,7 +82,8 @@ export function toDomainRecord(row: DomainRow): DomainRecord {
     userId: row.userId,
     name: row.name,
     registry: info.registry,
-    ownership: "owned",
+    // 想定外の値（手動更新など）で一覧が落ちるより owned として扱う方が安全（NFR-05）
+    ownership: ownershipSchema.catch("owned").parse(row.ownership),
     info,
     syncedAt: row.syncedAt ?? row.createdAt,
   };
@@ -104,6 +105,8 @@ export function toDomainValues(record: DomainRecord): DomainValues {
     sld,
     tld,
     registry: record.registry,
+    ownership: record.ownership,
+    sponsoringRegistrarId: info.sponsoringRegistrarId,
     statuses: info.statuses,
     nameservers: info.nameservers,
     registeredAt: new Date(info.registeredAt),

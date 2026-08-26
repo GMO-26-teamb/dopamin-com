@@ -415,6 +415,148 @@ describe("transfer（fixture → TransferResult への正規化。ADR-0002）", 
   });
 });
 
+describe("transfer approve / reject / cancel（§11.1 / FR-12 AC-12-4）", () => {
+  /** DomainTransferResponse 形の成功エンベロープ。 */
+  function transferEnvelope(status: string): unknown {
+    return envelope({
+      domain: "example.com",
+      status,
+      gainingRegistrar: "REG-OTHER",
+      losingRegistrar: "REG-DOPAMIN",
+    });
+  }
+
+  it.each([
+    ["transferApprove", "approve", "clientApproved", "approved"],
+    ["transferReject", "reject", "clientRejected", "rejected"],
+    ["transferCancel", "cancel", "clientCancelled", "cancelled"],
+  ] as const)(
+    "%s は POST /transfer/%s を呼び、応答を TransferResult に正規化する",
+    async (method, op, registryStatus, expected) => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse(transferEnvelope(registryStatus)),
+      );
+      const result = await createKitaqAdapter(CONFIG)[method]("example.com");
+
+      expect(requestAt(0)).toMatchObject({
+        method: "POST",
+        path: `/api/v1/epp/domains/example.com/transfer/${op}`,
+      });
+      // Swagger は approve / reject / cancel に requestBody を宣言していないので送らない
+      // （restore / rotate-auth-info と同じ流儀）
+      expect(requestAt(0).body).toBeUndefined();
+      expect(result).toMatchObject({
+        name: "example.com",
+        status: expected,
+        registryStatus,
+        // レジストリ語彙 → 視点非依存の語彙（ADR-0002 決定 3）
+        requestingRegistrarId: "REG-OTHER",
+        actingRegistrarId: "REG-DOPAMIN",
+      });
+      // transfer 応答に exDate が無いので新有効期限は埋まらない
+      expect(result.newExpiresAt).toBeUndefined();
+      expect(result.raw).toMatchObject({ trID: { svTRID: "KQSGN-TEST-1" } });
+    },
+  );
+
+  it.each([
+    ["transferApprove", "approved"],
+    ["transferReject", "rejected"],
+    ["transferCancel", "cancelled"],
+  ] as const)(
+    "%s: 未知の生ステータスは呼んだ操作の結果（%s）に倒す",
+    async (method, expected) => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse(transferEnvelope("まったく未知の値")),
+      );
+      const result = await createKitaqAdapter(CONFIG)[method]("example.com");
+      expect(result.status).toBe(expected);
+      // 生値は必ず残す（値域が未確定なため。§21.2 #13）
+      expect(result.registryStatus).toBe("まったく未知の値");
+    },
+  );
+
+  it("approve 応答が pending を返したら pending のまま扱う", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(transferEnvelope("pending")));
+    const result =
+      await createKitaqAdapter(CONFIG).transferApprove("example.com");
+    expect(result.status).toBe("pending");
+  });
+
+  it("移管申請が無いときの 2304 は OPERATION_NOT_ALLOWED になる", async () => {
+    // 実レジストリは「転送リクエスト不在」を HTTP 409 で返す（両 openapi.json）
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        {
+          result: {
+            code: 2304,
+            message: "Object status prohibits operation",
+            reason: "no pending transfer",
+          },
+          trID: { clTRID: "dp-test", svTRID: "KQSGN-TEST-3" },
+        },
+        409,
+      ),
+    );
+    const err = await createKitaqAdapter(CONFIG)
+      .transferApprove("example.com")
+      .then(
+        () => null,
+        (e: unknown) => e,
+      );
+    expect(err).toBeInstanceOf(RegistryError);
+    expect((err as RegistryError).code).toBe("OPERATION_NOT_ALLOWED");
+    expect((err as RegistryError).registryCode).toBe(2304);
+  });
+
+  it("ドメイン名は URL エンコードされ、応答の domain は小文字化される", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        envelope({
+          domain: "EXAMPLE.COM",
+          status: "clientApproved",
+          gainingRegistrar: "REG-OTHER",
+          losingRegistrar: "REG-DOPAMIN",
+        }),
+      ),
+    );
+    const result =
+      await createKitaqAdapter(CONFIG).transferApprove("exa mple.com");
+    expect(requestAt(0).path).toBe(
+      "/api/v1/epp/domains/exa%20mple.com/transfer/approve",
+    );
+    expect(result.name).toBe("example.com");
+  });
+
+  it("registrarId を公開する（direction 導出用。ADR-0002 決定 3）", () => {
+    expect(createKitaqAdapter(CONFIG).registrarId).toBe("registrar-1");
+  });
+
+  it("approve / reject / cancel は操作ログに専用コマンド名で残る（FR-15）", async () => {
+    const records: RegistryCallRecord[] = [];
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(transferEnvelope("clientApproved")))
+      .mockResolvedValueOnce(jsonResponse(transferEnvelope("clientRejected")))
+      .mockResolvedValueOnce(jsonResponse(transferEnvelope("clientCancelled")));
+    const adapter = createKitaqAdapter({
+      ...CONFIG,
+      onCall: (record) => {
+        records.push(record);
+      },
+    });
+
+    await adapter.transferApprove("example.com");
+    await adapter.transferReject("example.com");
+    await adapter.transferCancel("example.com");
+
+    expect(records.map((r) => [r.command, r.domainName])).toEqual([
+      ["transfer_approve", "example.com"],
+      ["transfer_reject", "example.com"],
+      ["transfer_cancel", "example.com"],
+    ]);
+  });
+});
+
 describe("authCode（rotate-auth-info）", () => {
   it("resData の authInfo キーを大文字小文字を無視して読み取る", async () => {
     fetchMock.mockResolvedValueOnce(
