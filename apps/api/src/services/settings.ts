@@ -33,13 +33,25 @@ interface ProviderOption {
   models: [string, ...string[]];
 }
 
-function hasApiKey(provider: AiProvider, env: ApiEnv): boolean {
+/**
+ * そのプロバイダの API キー（未設定なら undefined）。
+ * FR-17 の「有効なプロバイダ」判定と、§13.1 の AI 呼び出し（lib/ai-provider.ts）の
+ * 両方がこの 1 か所を見る。値は外に出さず、呼び出し側は SDK に渡すだけ（NFR-03）。
+ */
+export function aiProviderApiKey(
+  provider: AiProvider,
+  env: ApiEnv,
+): string | undefined {
   switch (provider) {
     case "google":
-      return env.GOOGLE_GENERATIVE_AI_API_KEY !== undefined;
+      return env.GOOGLE_GENERATIVE_AI_API_KEY;
     case "anthropic":
-      return env.ANTHROPIC_API_KEY !== undefined;
+      return env.ANTHROPIC_API_KEY;
   }
+}
+
+function hasApiKey(provider: AiProvider, env: ApiEnv): boolean {
+  return aiProviderApiKey(provider, env) !== undefined;
 }
 
 function providerOption(id: AiProvider, env: ApiEnv): ProviderOption {

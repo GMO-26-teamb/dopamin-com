@@ -17,11 +17,14 @@
     "test:connect": "REGISTRY_CONNECT_TEST=1 vitest run test/connect/"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.42",
+    "@ai-sdk/google": "^4.0.51",
     "@dopamin/db": "workspace:*",
     "@dopamin/registry": "workspace:*",
     "@dopamin/shared": "workspace:*",
     "@hono/zod-validator": "^0.9.0",
     "@simplewebauthn/server": "^13.3.2",
+    "ai": "^7.0.79",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.13.4",
     "postgres": "^3.4.9",
