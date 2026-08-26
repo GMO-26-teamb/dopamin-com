@@ -26,3 +26,8 @@ const RARITY_BY_LABEL: Record<UniquenessLabel, RarityTier> = {
 export function rarityTier(score: number): RarityTier {
   return RARITY_BY_LABEL[uniquenessLabel(score)];
 }
+
+// FR-05 スコアリング実装 (scoreDistinctiveness / prepareCorpus / 一般語判定など) を
+// パッケージ公開入口 (src/index.ts → 本ファイル) から到達可能にする。
+// 上記の uniquenessLabel / rarityTier (表示用の既存API) はそのまま維持する。
+export * from "./uniqueness/index";
