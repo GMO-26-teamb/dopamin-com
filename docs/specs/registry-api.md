@@ -45,8 +45,9 @@
 | DELETE | `/domains/:name` | ✅ | 削除ロック中 409（AC-10-2）。削除後の状態（RGP）を返す |
 | POST | `/domains/:name/restore` | ✅ | `redemptionPeriod` 中のみ（AC-11-2） |
 | POST | `/domains/:name/auth-code` | ✅ | `rotate-auth-info` を実行（取得のたびに authInfo が変わる）。再発行という副作用があるため GET ではなく POST（§10.2 の Origin 検証を通すため） |
-| POST | `/transfers` | ✅ | `{name, authCode}` → transfer request → 202。応答は正規化 `TransferResult` から `raw` を除いた DTO（`transferResponseSchema`。ADR-0002） |
-| GET | `/transfers/:name` | ✅ | **要件 §10.1 の `GET /transfers/:id` に対する暫定実装**（要件を変更するものではない）。`transfers` への永続化がまだ無く id を発番できないため、ドメイン名で `transferQuery`（`info` の `pendingTransfer` から導出）を返す。移管中でなければ `status: 'none'`、相手レジストラ ID は `info` から取れないため省略。DB には保存せず一覧化もしない。#56（transfers 永続化）で `GET /transfers/:id` に戻す |
+| POST | `/transfers` | ✅ | `{name, authCode}` → transfer request → 202。受理した申請は `transfers(direction = in, status = pending)` として永続化する（`domains` 行は作らない。AC-12-1）。応答は `{ transfer, record }`: `transfer` は正規化 `TransferResult` から `raw` を除いた DTO（`transferResponseSchema`。ADR-0002）、`record` は永続化した行の要約（`transferSummarySchema`。以降の `:id` 操作に使う） |
+| GET | `/transfers` | ✅ | 移管一覧（`transfersListResponseSchema`）。`inbound`（IN 申請中）/ `outbound`（受信した OUT 申請）/ `history`（確定済み）に分けて返す。表示のたびに pending 行を `transferQuery` で照会して DB に反映する（#56。Poll 消化は #58 で足す） |
+| GET | `/transfers/:id` | ✅ | 移管 1 件の状態照会（`id` は `transfers.id` の uuid。uuid 以外は 400）。承認を検知したら `info` で取り込み `domains` 行を作って `domain_id` を紐付ける（§6.5）。他ユーザーの行は 403（§10.3） |
 
 本 spec のルート（`/domains*` `/transfers*`）はすべて `requireSession` 必須（Cookie `dopamin_session`。requirements §10.1 の「認証: 要」に対応）。
 統合テストは `apps/api/test/helpers/session.ts` の `installTestSession()` + `SESSION_COOKIE_HEADER`（DB 不要の seam）
@@ -139,7 +140,12 @@
 
 - ~~操作ログ（FR-15）~~: 実装済み。全レジストリ呼び出しを `operation_logs` へ永続化し
   構造化 console ログ（NFR-06）を出す。設計は [`docs/specs/operation-logs.md`](operation-logs.md)。
-- `GET /transfers/:name` は id 発番前の暫定パス。#56 で要件 §10.1 どおり `GET /transfers/:id` に戻す。
+- ~~`GET /transfers/:name` は id 発番前の暫定パス~~: 解消済み（#56）。`transfers` への永続化に伴い
+  要件 §10.1 どおりの `GET /transfers` / `GET /transfers/:id` になった。
+- 移管の確定検知は `transferQuery`（`info` の `pendingTransfer` 導出）だけでは
+  承認 / 拒否 / 取消を区別できない（ADR-0002 決定 1）。#56 では **`info.lastTransferAt`（trDate）が
+  申請時刻以降に動いていれば承認**という判定だけを行い（拒否・取消では trDate が動かないので偽陽性が無い）、
+  拒否・取消の確定は Poll 消化（#58）に委ねて行を `pending` のまま残す。
 - `POST /domains/check` の 1 リクエストあたりの件数上限がレジストリ側で不明（API 側は 20 件に制限）。
 - コンタクト更新（FR-09 の一部）と移管の承認 / 拒否（受け側・P2）は未実装。
 - ~~`RegistryAdapter` の `poll` / `ackMessage`~~: 実装済み（#44）。§11.1 のメソッドは

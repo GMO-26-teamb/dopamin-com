@@ -15,4 +15,5 @@ export * from "./pricing";
 export * from "./registry";
 export * from "./subdomains";
 export * from "./tlds";
+export * from "./transfers";
 export * from "./uniqueness";

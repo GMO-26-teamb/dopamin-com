@@ -3,11 +3,12 @@ import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "../lib/db";
 import {
   type DomainRecord,
+  type DomainUpsert,
   toDomainRecord,
   toDomainValues,
 } from "./domain-row";
 
-export type { DomainRecord } from "./domain-row";
+export type { DomainRecord, DomainUpsert } from "./domain-row";
 
 /** 保有ドメインの永続化。テストではインメモリ実装に差し替える。 */
 export interface DomainStore {
@@ -18,8 +19,17 @@ export interface DomainStore {
    * 404（存在しない）ではなく 403（所有権なし）で返し分けるため（§10.3）。
    */
   find(name: string): Promise<DomainRecord | null>;
-  upsert(record: DomainRecord): Promise<DomainRecord>;
+  upsert(record: DomainUpsert): Promise<DomainRecord>;
   remove(name: string): Promise<void>;
+  /**
+   * 保有中の行を移管 OUT 済みに遷移させる（§6.5 / AC-12-5）。行は消さず履歴として残す。
+   * 保有中の行が無ければ null（既に遷移済み・他社保有）。
+   *
+   * `upsert` では代用できない: `domains_name_owned_uniq` は `ownership = 'owned'` の
+   * 部分一意インデックスなので、`transferred_out` の行を INSERT しても衝突が起きず、
+   * 既存行を更新せずに重複行が増えてしまう。
+   */
+  markTransferredOut(name: string, at: Date): Promise<DomainRecord | null>;
 }
 
 /** Drizzle 実装（本番）。行 ↔ レコードの写像は domain-row.ts（純粋関数）に置く。 */
@@ -65,7 +75,21 @@ export function createDbDomainStore(db: Db): DomainStore {
           set: values,
         })
         .returning();
-      return row ? toDomainRecord(row) : record;
+      return row ? toDomainRecord(row) : { ...record, id: null };
+    },
+
+    async markTransferredOut(name, at) {
+      const [row] = await db
+        .update(schema.domains)
+        .set({ ownership: "transferred_out", transferredOutAt: at })
+        .where(
+          and(
+            eq(schema.domains.name, name),
+            eq(schema.domains.ownership, "owned"),
+          ),
+        )
+        .returning();
+      return row ? toDomainRecord(row) : null;
     },
 
     async remove(name) {
@@ -87,6 +111,7 @@ export function createInMemoryDomainStore(
   seed: DomainRecord[] = [],
 ): DomainStore {
   const byName = new Map<string, DomainRecord>(seed.map((r) => [r.name, r]));
+  let sequence = seed.length;
   return {
     list: (userId) =>
       Promise.resolve(
@@ -96,12 +121,33 @@ export function createInMemoryDomainStore(
       ),
     find: (name) => Promise.resolve(byName.get(name) ?? null),
     upsert: (record) => {
-      byName.set(record.name, record);
-      return Promise.resolve(record);
+      // DB の defaultRandom() 相当。同名の行を上書きするときは ID を保つ
+      const existing = byName.get(record.name);
+      sequence += 1;
+      const id =
+        existing?.id ??
+        `00000000-0000-4000-9000-${String(sequence).padStart(12, "0")}`;
+      const stored: DomainRecord = { ...record, id };
+      byName.set(record.name, stored);
+      return Promise.resolve(stored);
     },
     remove: (name) => {
       byName.delete(name);
       return Promise.resolve();
+    },
+    // `at`（遷移日時）はインメモリ実装では保持しない。DomainRecord に
+    // transferred_out_at を持たせていないため（一覧・詳細の判定に使わない）
+    markTransferredOut: (name) => {
+      const existing = byName.get(name);
+      if (!existing || existing.ownership !== "owned") {
+        return Promise.resolve(null);
+      }
+      const updated: DomainRecord = {
+        ...existing,
+        ownership: "transferred_out",
+      };
+      byName.set(name, updated);
+      return Promise.resolve(updated);
     },
   };
 }

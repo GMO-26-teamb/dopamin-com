@@ -57,6 +57,8 @@ function row(overrides: Partial<DomainRow> = {}): DomainRow {
 
 function record(overrides: Partial<DomainRecord> = {}): DomainRecord {
   return {
+    // row() が返す ID と揃える（往復テストで一致させるため）
+    id: "11111111-1111-4111-8111-111111111111",
     userId: "user-1",
     name: "example.com",
     registry: "kitaqsign",
