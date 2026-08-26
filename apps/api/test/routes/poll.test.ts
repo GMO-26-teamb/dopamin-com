@@ -437,6 +437,51 @@ describe("Poll による移管の確定（FR-12 / §6.5）", () => {
     });
   });
 
+  it("レジストラ ID を返さないレジストリでも、取り込み済みの IN を移管 OUT と読み違えない", async () => {
+    // 実レジストリの transferQuery / Poll は registrarId を返さない（ADR-0002）。
+    // 向きが分からないまま「pending 行が無い承認通知」を OUT の完了と読むと、
+    // 取り込んだばかりの保有行を transferred_out に倒してしまう
+    class AnonymousTransferAdapter extends MockRegistryAdapter {
+      override async poll(): Promise<PollMessage | null> {
+        const message = await super.poll();
+        if (!message?.transfer) {
+          return message;
+        }
+        return {
+          ...message,
+          transfer: {
+            ...message.transfer,
+            requestingRegistrarId: undefined,
+            actingRegistrarId: undefined,
+          },
+        };
+      }
+    }
+    const adapter = new AnonymousTransferAdapter({ id: "kitaqsign" });
+    setRegistrySetForTesting(
+      createRegistrySet({ mode: "real", adapters: [adapter] }),
+    );
+    await requestInbound("anon.com", adapter);
+    adapter.simulateCounterpartApprove("anon.com");
+
+    // 先に単票の照合（Poll を消化しない導線）が承認を検知して取り込む
+    const [row] = await db
+      .select()
+      .from(schema.transfers)
+      .where(eq(schema.transfers.domainName, "anon.com"));
+    expect((await api(`/transfers/${row?.id}`)).status).toBe(200);
+    expect((await listDomains()).map((d) => d.name)).toEqual(["anon.com"]);
+
+    // そのあとで向きの分からない承認通知が届く
+    expect(await consume()).toEqual({ processed: 1, failed: 0 });
+
+    expect((await listDomains()).map((d) => d.name)).toEqual(["anon.com"]);
+    expect(await selectTransfers()).toHaveLength(1);
+    expect(findLogLine("poll_message_already_settled")).toMatchObject({
+      domain: "anon.com",
+    });
+  });
+
   it("AC-02-1: 他ユーザーの保有ドメイン宛の通知は自分の一覧に出ない", async () => {
     await createOwnedDomain("theirs.com", other.cookie);
     kitaqsign.simulateInboundTransferRequest("theirs.com");

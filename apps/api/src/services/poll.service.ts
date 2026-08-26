@@ -14,6 +14,7 @@ import { getDomainStore } from "./domain-store";
 import {
   closeTransferRow,
   completeInboundTransfer,
+  findLatestTransferByDomain,
   findPendingTransferByDomain,
   findTransferByMessageId,
   recordOutboundTransferRequest,
@@ -161,9 +162,19 @@ async function applyApproved(
     await markDomainTransferredOut(domainName, now);
     return;
   }
-  if (direction === "in") {
-    // `GET /transfers` の照合（`info` の trDate）が先に承認を検知して取り込み済み。
-    // 保有行は既に自分のものなので transferred_out に倒してはいけない
+  // pending 行が無い承認通知は 2 通りに読める:
+  //   (a) 移管 IN の確定が `GET /transfers` の照合（`info` の trDate）で先に済んでいた
+  //   (b) 申請の通知を取りこぼしたまま完了だけ届いた移管 OUT
+  // レジストラ ID を返さないレジストリでは向きから区別できないので、直近に承認済みの
+  // IN 行があれば (a) と読む。(b) と誤ると、取り込んだばかりの保有行を
+  // transferred_out に倒してユーザーのドメインを一覧から消してしまうため。
+  const settledInbound =
+    direction === "in" ||
+    (await findLatestTransferByDomain(db, domainName, {
+      direction: "in",
+      status: "approved",
+    })) !== null;
+  if (settledInbound) {
     warn("poll_message_already_settled", {
       registry: adapter.id,
       messageId: message.id,
@@ -171,7 +182,7 @@ async function applyApproved(
     });
     return;
   }
-  // 申請の通知を取りこぼしたまま完了だけ届いた移管 OUT。行を起こしてから閉じる
+  // (b) 移管 OUT の完了。行を起こしてから閉じる
   const created = await ensureOutboundRow(
     db,
     adapter,

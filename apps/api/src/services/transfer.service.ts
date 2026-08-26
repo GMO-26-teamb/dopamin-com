@@ -747,11 +747,14 @@ export async function findTransferByMessageId(
   return row ?? null;
 }
 
-/** ドメインの進行中（`pending`）の行を 1 件引く。direction で絞れる。 */
-export async function findPendingTransferByDomain(
+/** ドメインの移管を新しい順に 1 件引く（direction / status で絞れる）。 */
+export async function findLatestTransferByDomain(
   db: Db,
   domainName: string,
-  direction?: TransferDirection,
+  filter: {
+    direction?: TransferDirection;
+    status?: TransferRecordStatus;
+  } = {},
 ): Promise<TransferRow | null> {
   const [row] = await db
     .select()
@@ -759,13 +762,27 @@ export async function findPendingTransferByDomain(
     .where(
       and(
         eq(schema.transfers.domainName, domainName),
-        eq(schema.transfers.status, "pending"),
-        ...(direction ? [eq(schema.transfers.direction, direction)] : []),
+        ...(filter.status ? [eq(schema.transfers.status, filter.status)] : []),
+        ...(filter.direction
+          ? [eq(schema.transfers.direction, filter.direction)]
+          : []),
       ),
     )
     .orderBy(sql`${schema.transfers.requestedAt} DESC NULLS LAST`)
     .limit(1);
   return row ?? null;
+}
+
+/** ドメインの進行中（`pending`）の行を 1 件引く。direction で絞れる。 */
+export async function findPendingTransferByDomain(
+  db: Db,
+  domainName: string,
+  direction?: TransferDirection,
+): Promise<TransferRow | null> {
+  return findLatestTransferByDomain(db, domainName, {
+    status: "pending",
+    ...(direction ? { direction } : {}),
+  });
 }
 
 export interface OutboundTransferRequestInput {
