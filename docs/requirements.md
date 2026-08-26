@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.1.13（2026-08-26） |
+| 版 | v0.1.14（2026-08-26） |
 | プロダクト | ドパ民.com / dopamin.com — Z世代向けドメイン管理プラットフォーム（疑似レジストラ） |
 | チーム | チームドパ民（Team B）: 佐々木 琢登・星 はるか・上原 拓也 |
 | 位置づけ | GMO Internet Internship in kitaQ Webアプリケーションコース（2026/08/24–28）成果物 |
@@ -216,16 +216,16 @@
 
 ### FR-05 独自性スコア（逆張りスコア）【P1】
 
-- **概要**: 候補ドメイン名が既存の有名サービス・ブランドと「紛らわしくないか」を 0〜100 で表示する。高いほど独自性が高い。算出方式は埋め込みモデルによる類似検索（詳細 §14）。
+- **概要**: 候補ドメイン名が既存の有名サービス・ブランドと「紛らわしくないか」を 0〜100 で表示する。高いほど独自性が高い。算出方式は文字列ベース（lexical）の類似判定（詳細 §14。埋め込みを採らない判断は ADR-0003）。
 - **振る舞い**:
   - 入力: SLD（TLD は無視）。
   - 出力: スコア（整数）/ ラベル（`独自性高` ≥70・`やや紛らわしい` 40–69・`紛らわしい` <40）/ 最も近い既存名 上位3件と類似度。
-  - 表示: 候補カードと検索結果に小さなゲージで表示。クリックで上位3件の内訳を展開。
-  - 同一 SLD の結果は 24 時間キャッシュする。
+  - 表示: 候補カードと検索結果に小さなゲージで表示。クリックで上位3件の内訳を展開。上位3件は類似度の降順で、類似度 0（近い既存名なし）の行は出さない。
+  - 参照コーパスにはアダルト・海賊版サイトを含めない（名前がそのまま画面に出るため。`packages/shared/scripts/corpus-denylist.mjs`）。
 - **AC**:
   - AC-05-1: `google` / `amazon` / `youtube` 等の有名名は `紛らわしい` 判定になる（検証セットで確認）。
   - AC-05-2: スコア算出はレジストリ通信と独立しており、レジストリ障害時も表示される。
-  - AC-05-3: 算出 1 件あたり 1.5 秒以内（埋め込み API + pgvector 検索）。
+  - AC-05-3: 算出 1 件あたり 1.5 秒以内（インメモリの lexical 計算。外部 API 呼び出しなし。実測 p95 約 0.22 秒）。
 
 ### FR-06 ドメイン登録【P0】
 
@@ -440,7 +440,7 @@ flowchart LR
   end
 
   subgraph Supabase
-    PG[(Postgres<br/>+ pgvector)]
+    PG[(Postgres)]
   end
 
   subgraph External
@@ -507,10 +507,10 @@ flowchart LR
 | Lint / Format | Biome | ルートの `biome.json` を全パッケージで共有。ESLint / Prettier は使わない |
 | BE フレームワーク | Hono | Vercel Functions 上で Node.js ランタイム。`@hono/zod-validator`、Hono RPC |
 | 言語 | TypeScript | `strict: true`。`any` 禁止（Biome ルール） |
-| DB | Supabase Postgres + pgvector | Supabase Auth / RLS / Storage は使わない。Postgres として利用 |
+| DB | Supabase Postgres | Supabase Auth / RLS / Storage は使わない。Postgres として利用。pgvector は不採用（ADR-0003） |
 | ORM | Drizzle ORM + drizzle-kit | 接続は `postgres`（postgres.js）。実行時は Supavisor トランザクションモード（6543, `prepare: false`）、マイグレーションは直結（5432） |
 | 認証 | SimpleWebAuthn（`@simplewebauthn/server` / `@simplewebauthn/browser`） | パスキーのみ。セッションは DB 管理の不透明トークン |
-| AI | Vercel AI SDK（`ai`, `@ai-sdk/google`, `@ai-sdk/anthropic`） | `generateObject` による structured output、`embed` / `embedMany` で埋め込み |
+| AI | Vercel AI SDK（`ai`, `@ai-sdk/google`, `@ai-sdk/anthropic`） | `generateObject` による structured output（埋め込みは不採用。ADR-0003） |
 | 外部 API | GitHub REST API | サーバー側トークン（`GITHUB_TOKEN`、公開リポのみ） |
 | テスト | Vitest（unit / contract）、Playwright（E2E, P2） | contract テストは Swagger から作成した fixture を使う |
 | CI/CD | GitHub Actions + Vercel CLI | `vercel build` → `vercel deploy --prebuilt` |
@@ -697,26 +697,9 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。すべてのテーブル
 | applied_at | timestamptz NOT NULL | |
 | — | UNIQUE(domain_id, host, record_type) | |
 
-**reference_names**（独自性スコア用の参照コーパス）
+**reference_names** / **uniqueness_checks** — **不採用（ADR-0003）**
 
-| 列 | 型 | 備考 |
-|---|---|---|
-| id | uuid PK | |
-| name | text NOT NULL UNIQUE | 正規化済み SLD / ブランド名 |
-| source | text NOT NULL | `tranco` / `curated-jp` / `curated-tech` |
-| embedding | vector(768) NOT NULL | HNSW インデックス（cosine） |
-| embedding_model | text NOT NULL | |
-
-**uniqueness_checks**（スコアのキャッシュ）
-
-| 列 | 型 | 備考 |
-|---|---|---|
-| id | uuid PK | |
-| sld | text NOT NULL | |
-| embedding_model | text NOT NULL | |
-| score | integer NOT NULL | 0〜100 |
-| top_similar | jsonb NOT NULL | `[{ name, similarity }]` 上位 3 件 |
-| UNIQUE(sld, embedding_model) | | |
+独自性スコアを lexical 方式に変更したため、参照コーパスは DB ではなくビルド同梱の静的モジュール（`packages/shared/src/uniqueness/corpusTranco.ts` / `corpusCurated.ts`）が持つ。1 件あたり p95 約 0.22 秒でキャッシュも不要なため、この 2 テーブルは作らない。
 
 **operation_logs**（レジストリ通信ログ）
 
@@ -799,7 +782,6 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。すべてのテーブル
 | POST | `/transfers/:id/cancel` | 要 | 自分の IN 申請を承認前に取消（`direction = in` のみ、P1） | FR-12 |
 | POST | `/registry/poll` | 要 | 全レジストリの Poll を消化し `transfers` / `domains` に反映（デモ・検証用の明示トリガー） | FR-12 |
 | POST | `/ai/domain-candidates` | 要 | `{ nickname, purpose?, tlds?, exclude? }` → 候補 6 件 + check + score | FR-04 |
-| POST | `/ai/uniqueness` | 要 | `{ slds[] }` → スコア | FR-05 |
 | POST | `/domains/:name/subdomain-plan` | 要 | `{ repoUrl? , description? }` → 提案（保存前） | FR-13 |
 | PUT | `/domains/:name/subdomain-plan` | 要 | 編集済み設計を保存 | FR-13 |
 | GET | `/domains/:name/subdomain-plan` | 要 | 保存済み設計（各ホストの反映状態付き） | FR-13 |
@@ -1046,10 +1028,9 @@ export function resolveEmbeddingModel() { /* EMBEDDING_PROVIDER / EMBEDDING_MODE
 - 候補生成の要点: RFC 1035 準拠、6 件、重複禁止、除外リスト尊重、日本語の理由 40 字以内、TLD は許可リスト内。
 - サブドメイン提案の要点: 入力はリポ解析結果の JSON。`www` は必ず含める。モノレポ構造（`apps/*`）ごとに 1 ホスト提案。`priority` は 必須/推奨/任意。
 
-### 13.3 埋め込み
+### 13.3 埋め込み — **不採用（ADR-0003）**
 
-- `embed` / `embedMany` で参照コーパスと候補を同一モデルで埋め込む。モデルは環境変数（既定 `EMBEDDING_PROVIDER=google`, `EMBEDDING_MODEL` は 768 次元設定）。
-- モデルを変えたら `reference_names` を再生成する（`embedding_model` 列で世代管理）。
+FR-05 は埋め込みを使わない（§14）。他に埋め込みを必要とする機能は無い。
 
 ### 13.4 ログ
 
@@ -1059,29 +1040,37 @@ export function resolveEmbeddingModel() { /* EMBEDDING_PROVIDER / EMBEDDING_MODE
 
 ## 14. 独自性スコア仕様
 
-### 14.1 参照コーパス（`reference_names`）
+算出方式は **lexical（文字列ベース）**。埋め込み + pgvector は不採用（判断と経緯は **ADR-0003**）。
+数式・定数の正は `docs/specs/uniqueness/ALGORITHM_SPEC.md`（実装の `ALGORITHM_VERSION` で版管理）。
 
-| source | 内容 | 件数目安 |
-|---|---|---|
-| `tranco` | Tranco トップリストの SLD（重複除去） | 10,000 |
-| `curated-tech` | 開発者向けサービス・OSS 名（GitHub, Vercel, Supabase, Notion, Figma ...） | 300 |
-| `curated-jp` | 国内主要サービス・ブランド名（ローマ字表記） | 300 |
+### 14.1 参照コーパス
 
-投入は `pnpm --filter @dopamin/db seed:reference`（`docs/registry/../data/*.csv` から）。
+ビルド同梱の静的モジュール（DB テーブルは持たない）。
+
+| tier | 内容 | 件数 | popularity |
+|---|---|---|---|
+| `tranco` | Tranco トップリスト（listId `74V4X`、2026-08-26 取得）の上位 1 万行から SLD 抽出・重複除去 | 8,520 | rank から算出 |
+| `curated-jp` | 国内主要サービス・ブランド名（ローマ字表記） | 手動管理 | 固定 0.90 |
+| `curated-tech` | 開発者向けサービス・OSS 名（GitHub, Vercel, Supabase, Notion, Figma ...） | 手動管理 | 固定 0.85 |
+
+- 生成: `node packages/shared/scripts/convert-tranco.mjs <csv> --list-id=<id>`（オフライン。出典・取得日・入力 checksum は生成物の `TRANCO_META` に記録）。
+- **除外**: `.arpa` / punycode / 形式不正 / 重複 SLD に加え、**アダルト・海賊版サイト**（`packages/shared/scripts/corpus-denylist.mjs`）。`topSimilar` の名前は画面にそのまま描画されるため、スコア計算からも表示からも外す。
+- 重複する名前は popularity の高い層を採用する（`defaultCorpus.ts`）。
 
 ### 14.2 算出手順
 
-1. 正規化: 小文字化、ハイフン除去、数字はそのまま（`gmo-hackathon` → `gmohackathon`）。埋め込み入力は `"<正規化SLD>"` 単体。
-2. 候補を埋め込み、pgvector で cosine 類似度上位 10 件を取得（`embedding <=> $1`）。
-3. `sim = max(similarity)`。
-4. `score = round(100 * clamp((1 - sim - θ_low) / (θ_high - θ_low), 0, 1))`。`θ_low` / `θ_high` は環境変数（既定値は検証セットで較正して決める。初期値 `θ_low=0.05`, `θ_high=0.45`）。
-5. ラベル: `high`（≥70）/ `medium`（40–69）/ `low`（<40）。
-6. 結果を `uniqueness_checks` にキャッシュ（`sld + embedding_model` で一意）。
+1. 正規化して 4+1 のビュー（base / compact / visual / phonetic）を作る。`phonetic` は日本語ローマ字の揺れ（`shi`↔`si`、`l`↔`r` ほか）を畳む。
+2. 各ビューで Damerau-Levenshtein / Jaro-Winkler による重み付き類似度を求める。
+3. 5 つのカーブ（popularity / floor / derived / contain / edit）のスコアを min 合成して 0〜100 の整数にする。一般語（同梱英語辞書 75,150 語）は過剰検出を免除する。
+4. ラベル: `high`（≥70）/ `medium`（40–69）/ `low`（<40）。境界は `uniquenessLabel` が固定で持つ（環境変数ではない）。
+5. `topSimilar` は類似度の降順で上位 3 件。類似度 0 の行は含めない。
+
+外部 API 呼び出しも DB アクセスも無いため、キャッシュテーブルは持たない（リクエスト内で SLD 単位にメモ化するのみ）。
 
 ### 14.3 較正と検証
 
-- 検証セット `docs/specs/uniqueness.validation.json`: 有名名 30 件（`low` になるべき）、造語 30 件（`high` になるべき）。CI のユニットテストでは較正済み閾値での分類を fixture 化して回帰確認する。
-- 【要確認】短い文字列に対する埋め込みの弁別力が不足する場合（例: `gogle` が `google` に十分近づかない）、編集距離 / Jaro-Winkler をガードとして併用し `score = min(score_embedding, score_lexical)` とする。この判断は較正結果を見て ADR に記録する。
+- 実コーパスでの傾向監査は `docs/specs/uniqueness/AUDIT_TRANCO.md`（gold 90 件・攻撃回帰・造語の誤検出・性能）。回帰は `packages/shared/src/uniqueness/*.test.ts` が CI で回す。
+- ~~【要確認】埋め込みの弁別力が不足する場合の編集距離ガード併用の要否~~ → **解決（ADR-0003、2026-08-26）**: 埋め込みを採らず lexical 単独とする。
 
 ---
 
@@ -1188,6 +1177,7 @@ export function resolveEmbeddingModel() { /* EMBEDDING_PROVIDER / EMBEDDING_MODE
 |---|---|
 | `API_ORIGIN` | rewrites 先（`https://dopamin-api.ut42tech.com`）。サーバー専用 |
 | `NEXT_PUBLIC_APP_ORIGIN` | 表示・OGP 用 |
+| `NEXT_PUBLIC_API_MODE` | `http` = 実 API / `mock`（未設定時の既定）= ブラウザ内モック。**ビルド時に静的置換されるので、変更したら再デプロイが必要**。`mock` では `proxy.ts` の認証チェックも素通しになるため、**本番は必ず `http` を明示設定する**（§16.4） |
 
 ### `apps/api`
 
@@ -1203,9 +1193,7 @@ export function resolveEmbeddingModel() { /* EMBEDDING_PROVIDER / EMBEDDING_MODE
 | `MOCK_REGISTRY_FAIL_MODE` | `none` / `timeout` / `5xx` / `reject` / `spec_mismatch` |
 | `MOCK_FOREIGN_REGISTRAR_ID` / `MOCK_TRANSFER_AUTO_APPROVE_MS` | `mock` レジストリの相手レジストラ ID と自動承認までのミリ秒（既定 20 分。テストでは短縮） |
 | `AI_PROVIDER` / `AI_MODEL` | 既定の生成モデル |
-| `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` | 埋め込みモデル |
 | `GOOGLE_GENERATIVE_AI_API_KEY` / `ANTHROPIC_API_KEY` | プロバイダ API キー |
-| `UNIQUENESS_THETA_LOW` / `UNIQUENESS_THETA_HIGH` | スコア較正値 |
 | `GITHUB_TOKEN` | 公開リポ取得のレート制限緩和（読み取りのみのスコープ） |
 | `DEMO_RESET_ENABLED` | `true` で FR-16 有効 |
 | `LOG_LEVEL` | `info` / `debug` |
@@ -1322,7 +1310,7 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | 6 | ~~Client ステータス（ロック）の更新可否~~ → 解決: 5 種の client ステータスを更新可（8/25） | Swagger | 済 |
 | 7 | テスト用ドメインの削除・再利用制約（デモリセットの実現方法） | 運営 | 8/26 |
 | 8 | コンタクトのダミー値として許可される形式 | 運営 | 8/25 |
-| 9 | 独自性スコアの閾値較正結果と、編集距離ガード併用の要否 | チーム（較正後） | 8/27 |
+| 9 | ~~独自性スコアの閾値較正結果と、編集距離ガード併用の要否~~ → 解決: 埋め込みを採らず lexical 単独（8/26、ADR-0003 / AUDIT_TRANCO.md） | チーム | 済 |
 | 10 | 役割分担 | チーム | 8/25 |
 | 11 | レジストラ ID はチームごとに別か。テスト用の第 2 レジストラ資格情報を発行してもらえるか（無い場合は他チームとの日程調整が必須） | 運営 | 8/26 午前 |
 | 12 | 非スポンサーからの `info` / `transferQuery` の応答（2201 で拒否か、限定情報か。`clID` を含むか）。移管 OUT 完了の検知方法がこれに依存する | Swagger / 実測 | 8/26 |
@@ -1343,7 +1331,6 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | パスキー自前実装のハマり（RP ID / origin 不一致） | ログイン不能 | 8/25 に本番 URL で通す。`mock` 認証は作らない（本番と同じ経路で検証） |
 | Vercel 2 プロジェクト間の Cookie / rewrites | 認証が通らない | rewrites を最初にデプロイして確認。ダメなら API を Next.js Route Handler にマウントする案へ切替（ADR 化） |
 | AI 無料枠のレート制限 | 候補生成失敗 | キャッシュ、フォールバックプロバイダ、失敗時は手入力導線 |
-| 埋め込みの弁別力不足 | スコアが説得力を欠く | 較正セットで早期検証、編集距離ガードを用意 |
 | 時間不足 | P1 未完 | P0 → P1 の順を厳守。P1 は FR-05 → FR-04 → FR-13 → FR-14 → FR-16 の順 |
 
 ---
@@ -1401,3 +1388,4 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | v0.1.11 | 2026-08-26 | §16.2: Vercel Hobby の「commit author = チーム所有者」制約で他メンバー author のデプロイが `BLOCKED` になり固着する問題への対策として、`deploy.yml` の `api` / `web` ジョブでチェックアウト上の author を所有者に書き換えてから deploy する運用（`--meta originalSha` で元 SHA を保持、`timeout-minutes: 10`）を明記 |
 | v0.1.13 | 2026-08-26 | §16.2: `deploy.yml` から `migrate` ジョブを削除し、**api → web** の 2 ジョブ構成に戻した（v0.1.10 で入れた自動適用を撤回）。`DIRECT_DATABASE_URL` に直結ホストが登録されたままで `migrate` が必ず失敗し、`needs` で `api` / `web` が `skipped` になって本番デプロイが全面停止したため、発表までの復旧速度を優先して DB 適用とデプロイを切り離した。マイグレーションは **main にマージしてからローカルで `pnpm db:migrate`** を当てる運用に戻し、二重適用の罠・スキーマ変更を含む PR の注意点・自動適用に戻す手順を §16.2 に明記。§16.3 / §17: `DIRECT_DATABASE_URL` は CI で使わなくなり、ローカル用途では直結 URL でよいことを明記。GitHub Secrets 一覧から削除。#150 |
 | v0.1.12 | 2026-08-26 | §11.1: 正規化型を実装に合わせて確定。`TransferResult.status` に `'none'`（`transferQuery` の「移管中でない」）を追加し、`registrarId` 語彙・`reDate` / `acDate` のレジストリ差・`raw` の扱いを明記。`DomainInfo.sponsoringRegistrarId` は両 OpenAPI に clID が無いため当面 null（§6.5 / §9.1 に追随）。`PollMessage` の未確定点を `msgType` / `payload` に限定（§21.2 #13）。判断は ADR-0002 |
+| v0.1.14 | 2026-08-26 | **FR-05 の算出方式を「埋め込み + pgvector」から lexical（文字列ベース）に変更**（判断は ADR-0003、監査は `docs/specs/uniqueness/AUDIT_TRANCO.md`）。§14 を全面改訂（参照コーパスはビルド同梱の静的モジュール = Tranco listId `74V4X` + curated、算出は 4+1 正規化ビュー × Damerau-Levenshtein / Jaro-Winkler × 5 カーブ min 合成、ラベル境界 40/70 は実装が固定で持つ）。§9.1 の `reference_names` / `uniqueness_checks`、§10.1 の `POST /ai/uniqueness`、§13.3 の埋め込み、§6.1 図・§7 の pgvector、§17 の `EMBEDDING_*` / `UNIQUENESS_THETA_*` を不採用に。FR-05 の 24 時間キャッシュを削除（1 件 p95 約 0.22 秒のため不要）し、参照コーパスからアダルト・海賊版サイトを除外する規定と `topSimilar` の並び順（類似度降順・0 を含めない）を追加。AC-05-3 を「外部 API 呼び出しなし」に修正。§14.3 の【要確認】と §21.2 #9 を解決。§17 の `apps/web` に `NEXT_PUBLIC_API_MODE`（本番は `http` 必須）を追記。#155 |

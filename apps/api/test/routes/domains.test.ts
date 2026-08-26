@@ -8,8 +8,10 @@ import {
 import {
   type ApiErrorBody,
   apiErrorBodySchema,
+  type DomainUniqueness,
   domainListResponseSchema,
   domainSyncResponseSchema,
+  domainUniquenessSchema,
 } from "@dopamin/shared";
 import {
   afterEach,
@@ -59,6 +61,7 @@ interface CheckPayload {
     registry: string | null;
     availability: "available" | "unavailable" | "error";
     reason?: string;
+    uniqueness: DomainUniqueness | null;
     error?: { code: string; message: string };
   }>;
 }
@@ -208,6 +211,38 @@ describe("POST /api/v1/domains/check（FR-03）", () => {
     expect(results[0]?.availability).toBe("unavailable");
   });
 
+  it("FR-05: available な結果に独自性スコアが付き、unavailable は null", async () => {
+    await createDomain("taken.com");
+    const res = await sendJson("/domains/check", {
+      names: ["googel.com", "zufemira.com", "taken.com"],
+    });
+    expect(res.status).toBe(200);
+    const { results } = (await res.json()) as CheckPayload;
+    const [typo, coined, taken] = results;
+    // 有名名の距離1 typo は「紛らわしい」帯で、最近傍に元の名前が入る
+    expect(domainUniquenessSchema.safeParse(typo?.uniqueness).success).toBe(
+      true,
+    );
+    expect(typo?.uniqueness?.label).toBe("low");
+    expect(typo?.uniqueness?.topSimilar[0]?.name).toBe("google");
+    // 造語は「独自性高」帯
+    expect(coined?.uniqueness?.label).toBe("high");
+    // 取得済み (unavailable) はスコアを付けない (§10.4 の例に準拠)
+    expect(taken?.availability).toBe("unavailable");
+    expect(taken?.uniqueness).toBeNull();
+  }, 60_000);
+
+  it("FR-05: sld + tlds 形式では同一 SLD のスコアが全 TLD で一致する", async () => {
+    const res = await sendJson("/domains/check", {
+      sld: "googel",
+      tlds: ["com", "xyz"],
+    });
+    const { results } = (await res.json()) as CheckPayload;
+    expect(results).toHaveLength(2);
+    expect(results[0]?.uniqueness).toEqual(results[1]?.uniqueness);
+    expect(results[0]?.uniqueness?.label).toBe("low");
+  }, 60_000);
+
   it("未対応 TLD は個別エラー項目になる（全体は 200）", async () => {
     const res = await sendJson("/domains/check", {
       names: ["foo.example", "ok.com"],
@@ -221,6 +256,30 @@ describe("POST /api/v1/domains/check（FR-03）", () => {
     });
     expect(results[1]?.availability).toBe("available");
   });
+
+  it("AC-05-2: レジストリ障害で error になった行にもスコアが付く", async () => {
+    kitaqnic.setFailMode("5xx");
+    const res = await sendJson("/domains/check", {
+      names: ["googel.xyz"],
+    });
+    expect(res.status).toBe(200);
+    const { results } = (await res.json()) as CheckPayload;
+    const [errored] = results;
+    expect(errored?.availability).toBe("error");
+    // スコア算出はレジストリ通信と独立している（docs/specs/ui-screens.md の
+    // Unknown バリアント: 「スコアは表示、Badge Warn『確認不可』」）
+    expect(domainUniquenessSchema.safeParse(errored?.uniqueness).success).toBe(
+      true,
+    );
+    expect(errored?.uniqueness?.label).toBe("low");
+    // 未対応 TLD は「レジストリ障害」ではないのでスコアを付けない
+    const res2 = await sendJson("/domains/check", {
+      names: ["googel.example"],
+    });
+    const { results: r2 } = (await res2.json()) as CheckPayload;
+    expect(r2[0]?.error?.code).toBe("VALIDATION_ERROR");
+    expect(r2[0]?.uniqueness).toBeNull();
+  }, 60_000);
 
   it("AC-03-2: 一方のレジストリが落ちても他方の結果は返る（部分失敗）", async () => {
     kitaqnic.setFailMode("5xx");

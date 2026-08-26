@@ -99,8 +99,9 @@ export interface UniquenessScore {
   score: number;
   label: "high" | "medium" | "low";
   /**
-   * 最も近い既存名（上位 3 件）。`similarity` は **0〜1** のコサイン類似度で、
-   * API（docs/requirements.md §10.2 の `topSimilar`）と同じ単位。
+   * 最も近い既存名（上位 3 件）。`similarity` は **0〜1** の文字列類似度で、
+   * API（docs/requirements.md §10.4 の `topSimilar`）と同じ単位
+   * （算出方式は embedding から lexical へ変更。ADR-0003）。
    * 表示は `SimilarityRow` が 0.61 のように小数 2 桁で出す（ui-design 14-domains-new）。
    */
   nearest: { name: string; similarity: number }[];
