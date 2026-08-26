@@ -13,5 +13,59 @@
     "claude-code-setup@claude-plugins-official": true,
     "figma@claude-plugins-official": true,
     "exa@claude-plugins-official": true
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/protect-files.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/guard-git.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "if": "Bash(gh pr create *)",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-pr-check.sh",
+            "timeout": 600,
+            "statusMessage": "pnpm check を実行中(PR 作成前チェック)..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/biome-format.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/stop-uncommitted.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
   }
 }
