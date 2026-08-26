@@ -1,5 +1,7 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { createRegistrySet } from "@dopamin/registry";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import app from "../index";
+import { setRegistrySetForTesting } from "../lib/registries";
 
 // DB に触らない範囲（ミドルウェア・zod 検証・統一エラー形式）を検証する。
 // SimpleWebAuthn の verify と DB 更新を含む契約テストは FR-01 spec §9 の残課題。
@@ -7,6 +9,14 @@ beforeAll(() => {
   process.env.DATABASE_URL = "postgres://unused:unused@localhost:1/unused";
   process.env.WEBAUTHN_RP_ID = "localhost";
   process.env.WEBAUTHN_ORIGIN = "http://localhost:3000";
+  // /health を叩くテストが操作ログ（FR-15）の INSERT を localhost:1 に向けて失敗し
+  // console を汚さないよう、observer を持たない mock を注入する
+  // （observer 込みの配線は test/routes/operation-logs.test.ts で検証する）。
+  setRegistrySetForTesting(createRegistrySet({ mode: "mock" }));
+});
+
+afterAll(() => {
+  setRegistrySetForTesting(null);
 });
 
 const json = (body: unknown, headers: Record<string, string> = {}) => ({

@@ -1,11 +1,24 @@
+import { createRegistrySet } from "@dopamin/registry";
 import { healthResponseSchema } from "@dopamin/shared";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import app from "../../src/index";
+import { setRegistrySetForTesting } from "../../src/lib/registries";
 
 // シェル環境に REGISTRY_MODE 等が残っていても実レジストリに向かわないよう mock に固定する
 // （env は初回リクエスト時に遅延評価されるため、import 後の代入で間に合う）
 process.env.REGISTRY_MODE = "mock";
 process.env.MOCK_REGISTRY_FAIL_MODE = "none";
+
+// このファイルは DB を用意しないため、操作ログ（FR-15）の observer を持たない mock を注入し、
+// operation_logs INSERT 失敗の console 出力でテスト出力が汚れないようにする
+// （observer 込みの配線は test/routes/operation-logs.test.ts で検証する）。
+beforeAll(() => {
+  setRegistrySetForTesting(createRegistrySet({ mode: "mock" }));
+});
+
+afterAll(() => {
+  setRegistrySetForTesting(null);
+});
 
 describe("GET /api/v1/health", () => {
   it("status ok とレジストリ疎通結果を返す", async () => {
