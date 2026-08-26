@@ -57,6 +57,13 @@
       "when": 1787776406576,
       "tag": "0007_blue_living_lightning",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787777499431,
+      "tag": "0008_odd_caretaker",
+      "breakpoints": true
     }
   ]
 }
