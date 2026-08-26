@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.1.9（2026-08-26） |
+| 版 | v0.1.10（2026-08-26） |
 | プロダクト | ドパ民.com / dopamin.com — Z世代向けドメイン管理プラットフォーム（疑似レジストラ） |
 | チーム | チームドパ民（Team B）: 佐々木 琢登・星 はるか・上原 拓也 |
 | 位置づけ | GMO Internet Internship in kitaQ Webアプリケーションコース（2026/08/24–28）成果物 |
@@ -1117,19 +1117,22 @@ export function resolveEmbeddingModel() { /* EMBEDDING_PROVIDER / EMBEDDING_MODE
 3. `pnpm turbo run typecheck test build`（Turborepo のキャッシュで未変更パッケージはスキップ）
 
 **`deploy.yml`**（`main` push → 本番のみ。PR プレビューは行わない。`apps/**`・`packages/**`・lockfile 変更時のみ）
-- Web と API を 1 ワークフロー・2 ジョブで **api → web の順**にデプロイする。`apps/web/next.config.ts` の rewrites はビルド時に `API_ORIGIN` を読む（Vercel プロジェクトに設定した固定値）。PR の動作確認はローカル（`pnpm dev`）で行う。
+- 1 ワークフロー・3 ジョブで **migrate → api → web の順**に実行する（`api` は `needs: migrate`、`web` は `needs: api`）。`apps/web/next.config.ts` の rewrites はビルド時に `API_ORIGIN` を読む（Vercel プロジェクトに設定した固定値）。PR の動作確認はローカル（`pnpm dev`）で行う。
 - 各ジョブの手順（リポジトリルートで実行。Root Directory は Vercel プロジェクト設定から `vercel pull` が取り込む）:
   1. `pnpm install --frozen-lockfile`
   2. `vercel pull --yes --environment=production --token=$VERCEL_TOKEN`（`VERCEL_ORG_ID` / `VERCEL_PROJECT_ID` を env に）
   3. `vercel build --prod`
   4. `vercel deploy --prebuilt --prod`
-- GitHub Secrets: `VERCEL_TOKEN` / `VERCEL_ORG_ID` / `VERCEL_PROJECT_ID_WEB` / `VERCEL_PROJECT_ID_API`。アプリの環境変数（§17）は Vercel プロジェクト側で管理する。
-- マイグレーション: `api` ジョブの前段で `pnpm --filter @dopamin/db migrate`（`DIRECT_DATABASE_URL`）。失敗時はデプロイしない。【要確認】マイグレーションが作成された時点で追加する。
+- GitHub Secrets: `VERCEL_TOKEN` / `VERCEL_ORG_ID` / `VERCEL_PROJECT_ID_WEB` / `VERCEL_PROJECT_ID_API` / `DIRECT_DATABASE_URL`。アプリの環境変数（§17）は Vercel プロジェクト側で管理する。
+- マイグレーション: `migrate` ジョブが `pnpm --filter @dopamin/db migrate`（`DIRECT_DATABASE_URL`）を実行し、`api` / `web` はその成功を待つ（失敗時はデプロイしない）。
+  - drizzle は `drizzle.__drizzle_migrations` の最新 `created_at` **より新しい** journal エントリだけを 1 トランザクションで適用する（判定はハッシュではなくタイムスタンプ）。差分の無い push では何もしない。
+  - このため、**マイグレーションを本番へ手で当てない**（`migrate` ジョブに任せる）。マージ前のブランチから手動適用すると、その後 `db:generate` をやり直して `_journal.json` の `when` が変わった場合に同じ DDL が二重適用されて落ちる。手で当ててしまった場合は、当てた SQL と `_journal.json` の内容をそのままマージすること。
 
 ### 16.3 Supabase
 
 - プロジェクト 1 つ（Free）。`vector` 拡張を有効化。
-- 接続文字列: 実行時は Supavisor（transaction mode, ポート 6543）、マイグレーションは直結（5432）。
+- 接続文字列: 実行時は Supavisor（transaction mode, ポート 6543）、マイグレーションは Supavisor（session mode, ポート 5432）。
+  - session mode を使うのは、直結ホスト（`db.<project-ref>.supabase.co`）が IPv6 のみで GitHub Actions ランナーから到達できないため。ローカルから直結する場合は同じ用途の `DIRECT_DATABASE_URL` に直結の URL を入れてよい（どちらもプリペアドステートメントと DDL が使える）。
 - Supabase Auth / RLS / Storage / Edge Functions は使わない。
 
 ### 16.4 環境
@@ -1155,7 +1158,7 @@ export function resolveEmbeddingModel() { /* EMBEDDING_PROVIDER / EMBEDDING_MODE
 | 変数 | 用途 |
 |---|---|
 | `DATABASE_URL` | Supavisor（6543）接続文字列 |
-| `DIRECT_DATABASE_URL` | マイグレーション用（5432） |
+| `DIRECT_DATABASE_URL` | マイグレーション用（session mode / 直結の 5432。§16.3） |
 | `WEBAUTHN_RP_ID` / `WEBAUTHN_RP_NAME` / `WEBAUTHN_ORIGIN` | WebAuthn RP 設定 |
 | `KITAQSIGN_BASE_URL` / `KITAQNIC_BASE_URL` | EPP API のオリジン（`https://epp.kitaqsign.com` / `https://epp.kitaqnic.com`）。`docs.*` は Swagger UI の URL であって API のホストではない |
 | `KITAQSIGN_GATE_USER` / `KITAQSIGN_GATE_PASSWORD` | 共通 Basic ゲート（認証 1 段目）。kitaqnic も同名で `KITAQNIC_*` |
@@ -1174,6 +1177,8 @@ export function resolveEmbeddingModel() { /* EMBEDDING_PROVIDER / EMBEDDING_MODE
 ### GitHub Actions Secrets
 
 `VERCEL_TOKEN` `VERCEL_ORG_ID` `VERCEL_PROJECT_ID_WEB` `VERCEL_PROJECT_ID_API` `DIRECT_DATABASE_URL`
+
+`DIRECT_DATABASE_URL` は Supavisor session mode（5432）の URL を登録する（§16.3）。DB パスワードを含むため `production` environment の Secrets に置く（`VERCEL_*` はリポジトリ Secrets。全ジョブが `environment: production` なのでどちらでも解決される）。
 
 ローカルは `.env.example` を各 app に置き、`.env.local` は git 管理外。
 
@@ -1355,3 +1360,4 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | v0.1.6 | 2026-08-26 | §8 / §11.2: 対応 TLD の定数を `packages/shared/src/tlds.ts` に一本化し、`packages/registry` のルーティングと `apps/web` の TLD 選択肢は shared を参照する形に統一（`@dopamin/registry` は `node:crypto` 依存でブラウザから import できない） |
 | v0.1.8 | 2026-08-26 | FR-01 周辺の仕上げ: `GET /auth/me` を `{ user, features.demoReset, ai }` に拡張（`docs/specs/ui-screens.md` §7 要確認 #2 / #3 を確定。FR-16 / FR-17 に追随）、`PATCH /auth/passkeys/:id`（名前変更）と AAGUID からの名前推定を FR-01 に追加、§10.3 に FR-01 の 4 エラーコード（`CHALLENGE_NOT_FOUND` / `VERIFICATION_FAILED` / `CREDENTIAL_NOT_FOUND` / `LAST_PASSKEY`）を追記。実装計画は `docs/specs/passkey-auth.md` §12 |
 | v0.1.9 | 2026-08-26 | FR-15（PR #139）の設計判断を追記: §9.1 `operation_logs.user_id` の FK を `ON DELETE SET NULL`（退会後も通信ログを恒久保存）、`request_id` = `<x-request-id>-<連番>` の形式、§11.1 のログ発行点を `packages/registry` の HTTP クライアント層（1 HTTP 呼び出し = 1 レコード、`onCall` フック）に変更しマスク・保存は `apps/api` の observer が担当、`mock` は公開メソッド 1 回 = 1 レコードで補助コマンド行・svTRID を持たない例外を明記 |
+| v0.1.10 | 2026-08-26 | §16.2: `deploy.yml` に `migrate` ジョブ（`pnpm --filter @dopamin/db migrate`）を追加し、**migrate → api → web** の 3 ジョブ構成に変更。マイグレーション適用の【要確認】を解消し、drizzle の適用判定（`drizzle.__drizzle_migrations` の最新 `created_at` より新しい journal エントリのみ）と手動適用を避ける運用を明記。§16.3 / §17: `DIRECT_DATABASE_URL` を Supavisor session mode（5432）に変更（直結ホストは IPv6 のみで GitHub Actions から到達できないため）。INFRA-01 |

@@ -2,7 +2,7 @@ name: Deploy
 
 # main push → Vercel 本番（docs/requirements.md §16.2）。PR プレビューは行わない。
 # Git 連携は使わず Vercel CLI でデプロイする（組織リポジトリ + Hobby プランの制約）。
-# API → Web の順で実行する（Web の rewrites はビルド時に API_ORIGIN を読む）。
+# migrate → API → Web の順で実行する（Web の rewrites はビルド時に API_ORIGIN を読む）。
 on:
   push:
     branches: [main]
@@ -23,8 +23,37 @@ env:
   VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
 
 jobs:
+  # DB マイグレーション（docs/requirements.md §16.2）。失敗したらデプロイしない。
+  # drizzle は drizzle.__drizzle_migrations の最新 created_at より新しい journal エントリだけを
+  # 1 トランザクションで適用する。差分が無い push では何もせずに終わる（冪等）。
+  migrate:
+    name: Migrate DB
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Apply Drizzle migrations
+        env:
+          # Supavisor session mode（5432）。直結の db.<ref>.supabase.co は IPv6 のみで
+          # Actions ランナーから届かないため、pooler のホストを使う（docs/requirements.md §16.3）
+          DIRECT_DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
+        run: |
+          if [ -z "$DIRECT_DATABASE_URL" ]; then
+            echo "::error title=DIRECT_DATABASE_URL 未設定::production environment の Secrets に DIRECT_DATABASE_URL（Supavisor session mode, 5432）を登録してください（README / docs/requirements.md §17）"
+            exit 1
+          fi
+          pnpm --filter @dopamin/db migrate
+
   api:
     name: Deploy API
+    needs: migrate
     runs-on: ubuntu-latest
     environment: production
     env:
