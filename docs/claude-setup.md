@@ -7,7 +7,8 @@
 | ファイル | 内容 |
 |---|---|
 | `CLAUDE.md` | エージェント向け規約（要件の SSOT、構成、コマンド、禁止事項） |
-| `.claude/settings.json` | チーム共通で有効にするプラグイン一覧。初回起動時にインストールを促される |
+| `.claude/settings.json` | チーム共通で有効にするプラグイン一覧と hooks。初回起動時にインストールを促される |
+| `.claude/hooks/*.sh` | hooks の実体（下記「Hooks」参照） |
 | `.mcp.json` | プロジェクトスコープの MCP サーバ（Supabase / Chrome DevTools）。初回起動時に承認を求められる |
 
 個人用の上書きは `.claude/settings.local.json`（gitignore 済み）に書く。
@@ -31,6 +32,22 @@
 | `claude-code-setup` | このプロジェクト向けの hooks / skills / MCP の推奨 | `claude-automation-recommender` |
 | `figma` | Figma デザイン ↔ コード（design-to-code、Code Connect） | Figma MCP 同梱。要 Figma ログイン |
 | `exa` | Web 検索・リサーチ | `/exa:search` |
+
+## Hooks（`.claude/settings.json` → `.claude/hooks/*.sh`）
+
+CLAUDE.md の規約のうち機械的に強制できるものを hook にしている。Claude の判断に依存せず、ツール実行の前後で自動で走る。無効化・確認は `/hooks`。
+
+| スクリプト | イベント | 内容 |
+|---|---|---|
+| `protect-files.sh` | PreToolUse (Edit/Write) | `.env*`（`.env.example` 除く）、`pnpm-lock.yaml`、`packages/db/drizzle/**` への書き込みを **拒否** |
+| `guard-git.sh` | PreToolUse (Bash) | main への push・force push・main 上での commit を **拒否** |
+| `pre-pr-check.sh` | PreToolUse (Bash `gh pr create`) | `pnpm check` を実行し、失敗なら PR 作成を **拒否**（末尾 40 行を理由に表示） |
+| `biome-format.sh` | PostToolUse (Edit/Write) | 編集ファイルを `biome check --write` で整形（失敗しても止めない） |
+| `stop-uncommitted.sh` | Stop | 未コミット差分があれば件数とブランチ名を警告 |
+
+- hook は stdin に JSON（`tool_input` など）を受け取り、拒否時は `permissionDecision: "deny"` を JSON で返す。手元での動作確認は `echo '{"tool_input":{"command":"git push origin main"}}' | .claude/hooks/guard-git.sh` のように pipe する。
+- `jq` と `pnpm` が PATH にある前提。
+- 秘密情報ファイルの編集や lockfile の更新は、hook の意図どおり人間が手動で行う。
 
 ## MCP サーバ（`.mcp.json`）
 
