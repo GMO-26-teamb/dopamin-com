@@ -2,6 +2,7 @@ import { type Db, schema } from "@dopamin/db";
 import type { DomainInfo } from "@dopamin/shared";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { ApiException } from "../../src/lib/errors";
 import {
   createDbDomainStore,
   createInMemoryDomainStore,
@@ -22,6 +23,7 @@ import { createTestDb, resetTestDb } from "../helpers/db";
 let db: Db;
 let closeDb: () => Promise<void>;
 let userId: string;
+let otherUserId: string;
 
 beforeAll(async () => {
   ({ db, close: closeDb } = await createTestDb());
@@ -31,17 +33,22 @@ afterAll(async () => {
   await closeDb();
 });
 
-beforeEach(async () => {
-  await resetTestDb(db);
+async function createUser(displayName: string): Promise<string> {
   const rows = await db
     .insert(schema.users)
-    .values({ displayName: "移管テスト" })
+    .values({ displayName })
     .returning({ id: schema.users.id });
   const id = rows[0]?.id;
   if (id === undefined) {
     throw new Error("users の INSERT に失敗した");
   }
-  userId = id;
+  return id;
+}
+
+beforeEach(async () => {
+  await resetTestDb(db);
+  userId = await createUser("移管テスト");
+  otherUserId = await createUser("別の利用者");
 });
 
 const INFO: DomainInfo = {
@@ -151,5 +158,65 @@ describe("DomainStore.markTransferredOut（Drizzle 固有）", () => {
     expect(rows).toHaveLength(2);
     // find は保有中の行を優先して返す
     expect((await store.find(INFO.name))?.ownership).toBe("owned");
+  });
+});
+
+/**
+ * #222 / NFR-04: `upsert` は他ユーザーの保有行を乗っ取らない。
+ *
+ * `domains.id` は `subdomain_plans` / `dns_records` / `transfers` の FK なので、
+ * 同名の保有行の `user_id` だけを書き換えると、旧所有者の設計・DNS レコード・
+ * 移管履歴がそのまま新所有者の持ち物になる（§6.5「所有者が変わるときは新しい行を作る」）。
+ * 所有者が違う行を渡された `upsert` は、乗っ取る代わりに拒否する。
+ */
+describe.each(implementations)(
+  "DomainStore.upsert の所有者ガード（#222、%s）",
+  (_label, create) => {
+    it("別ユーザーが保有中の同名行は id ごと乗っ取らない", async () => {
+      const store = create();
+      const mine = await store.upsert(owned());
+
+      const error = await store.upsert(owned({ userId: otherUserId })).then(
+        () => null,
+        (e: unknown) => e,
+      );
+
+      expect(error).toBeInstanceOf(ApiException);
+      expect((error as ApiException).code).toBe("FORBIDDEN");
+      const after = await store.find(INFO.name);
+      expect(after?.userId).toBe(userId);
+      expect(after?.id).toBe(mine.id);
+    });
+
+    it("同一ユーザーなら従来どおり id を保って上書きする（廃止後の再取得）", async () => {
+      const store = create();
+      const first = await store.upsert(owned());
+
+      const again = await store.upsert(
+        owned({ syncedAt: new Date("2026-08-27T00:00:00.000Z") }),
+      );
+
+      expect(again.id).toBe(first.id);
+      expect(again.userId).toBe(userId);
+    });
+  },
+);
+
+describe("DomainStore.upsert の所有者ガード（#222、Drizzle 固有）", () => {
+  it("別ユーザーの transferred_out 行は新しい保有行の作成を妨げない（AC-12-5）", async () => {
+    const store = createDbDomainStore(db);
+    await store.upsert(owned());
+    await store.markTransferredOut(INFO.name, new Date());
+
+    // 移管 OUT 済みの行は部分一意インデックスの対象外なので、別ユーザーが取得できる
+    const taken = await store.upsert(owned({ userId: otherUserId }));
+
+    expect(taken.userId).toBe(otherUserId);
+    expect(taken.ownership).toBe("owned");
+    const rows = await db
+      .select()
+      .from(schema.domains)
+      .where(eq(schema.domains.name, INFO.name));
+    expect(rows).toHaveLength(2);
   });
 });

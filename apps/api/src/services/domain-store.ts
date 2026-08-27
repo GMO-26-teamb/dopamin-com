@@ -1,6 +1,7 @@
 import { type Db, schema } from "@dopamin/db";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "../lib/db";
+import { ApiException } from "../lib/errors";
 import {
   type DomainRecord,
   type DomainUpsert,
@@ -36,6 +37,20 @@ export interface DomainStore {
    * 既存行を更新せずに重複行が増えてしまう。
    */
   markTransferredOut(name: string, at: Date): Promise<DomainRecord | null>;
+}
+
+/**
+ * 「同名の保有行が別ユーザーのものだった」ときのエラー（#222 / NFR-04）。
+ *
+ * `upsert` の最後の砦なので、通常はここまで来ない（登録は `POST /domains` が
+ * 事前に旧行を片付け、移管の取り込みは `requireNotOwnedByOtherUser` が弾く）。
+ * §10.3 の FORBIDDEN = 所有権なしに合わせ、内部の表・列名は出さない。
+ */
+function ownershipConflict(): ApiException {
+  return new ApiException(
+    "FORBIDDEN",
+    "このドメインを操作する権限がありません。",
+  );
 }
 
 /** Drizzle 実装（本番）。行 ↔ レコードの写像は domain-row.ts（純粋関数）に置く。 */
@@ -75,8 +90,15 @@ export function createDbDomainStore(db: Db): DomainStore {
       const values = toDomainValues(record);
       // 一意なのは保有中の行だけ（部分一意インデックス domains_name_owned_uniq、§9.1）。
       // ON CONFLICT の推論も同じ述語で絞らないと制約に一致せず失敗するため targetWhere を付ける。
-      // レジストリが正なので、保有中の同名行は最新の所有者・情報で上書きする
-      // （移管 IN / 廃止後の再取得で所有者が変わり得る）。transferred_out の履歴行は触らない。
+      // レジストリが正なので、保有中の同名行は最新の情報で上書きする。
+      // transferred_out の履歴行は索引に入らないので触らない。
+      //
+      // setWhere で「所有者が同じ行」に限って更新する（#222 / NFR-04 / §6.5）。
+      // domains.id は subdomain_plans / dns_records / transfers の FK なので、
+      // 他ユーザーの行の user_id だけを書き換えると旧所有者の設計・DNS レコード・
+      // 移管履歴がそのまま新所有者のものになる。所有者が変わるときは新しい行を作るのが
+      // §6.5 の決まりで、その前段（旧行の後始末）は呼び出し側の責務。
+      // 条件から外れると 0 行 = RETURNING が空になるので、乗っ取る代わりにここで止める。
       const [row] = await db
         .insert(schema.domains)
         .values(values)
@@ -84,11 +106,13 @@ export function createDbDomainStore(db: Db): DomainStore {
           target: schema.domains.name,
           targetWhere: eq(schema.domains.ownership, "owned"),
           set: values,
+          setWhere: eq(schema.domains.userId, record.userId),
         })
         .returning();
-      return row
-        ? toDomainRecord(row)
-        : { ...record, id: null, rgpUntil: null };
+      if (!row) {
+        throw ownershipConflict();
+      }
+      return toDomainRecord(row);
     },
 
     async markTransferredOut(name, at) {
@@ -161,6 +185,14 @@ export function createInMemoryDomainStore(
     upsert: (record) => {
       // DB の defaultRandom() 相当。同名の行を上書きするときは ID を保つ
       const existing = byName.get(record.name);
+      // DB 実装の setWhere と同じガード（#222）。他ユーザーの保有行は乗っ取らない
+      if (
+        existing &&
+        existing.ownership === "owned" &&
+        existing.userId !== record.userId
+      ) {
+        return Promise.reject(ownershipConflict());
+      }
       sequence += 1;
       const id =
         existing?.id ??

@@ -100,7 +100,7 @@ test.describe("FR-01 パスキー認証", () => {
     });
 
     await test.step("D-09: 1 件削除すると残り 1 件の削除ボタンが Disabled に戻る", async () => {
-      // 一覧の並びは API が保証しない（listPasskeys に orderBy なし）ので、どちらを消すかは問わない
+      // 一覧は作成日昇順で返る（#221）。先頭 = 先に作ったパスキーを消す
       await deleteButtons.first().click();
       const dialog = page.getByRole("dialog", {
         name: "パスキーを削除しますか？",

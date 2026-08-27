@@ -38,6 +38,53 @@ export async function removeDomain(name: string): Promise<void> {
   await getDomainStore().remove(name);
 }
 
+/**
+ * 新規登録の直前に、同名で残っている**別ユーザーの**保有行を片付ける（#222 / §6.5 / NFR-04）。
+ *
+ * `domains` 行はレジストリから消えても残る（`syncDomains` は `info` の NOT_FOUND で
+ * 行を消さず、RGP に入った行は `DELETE /domains/:name` でも `owned` のまま残る）ので、
+ * §11.4 のライフサイクルを最後まで進んだドメインは全部この「残存行」になる。
+ * その行の `user_id` だけを書き換えると、`domain_id` に紐付く `subdomain_plans` /
+ * `dns_records` / `transfers` が丸ごと新しい所有者のものになり、旧所有者の
+ * 非公開リポジトリ URL や DNS 設計が無関係のユーザーから読めてしまう。
+ *
+ * 行を残して `ownership` を倒す手もあるが、`ownership` は `owned` /
+ * `transferred_out` の 2 値（`packages/shared` の `ownershipSchema` が SSOT）で、
+ * 失効・削除で手放したドメインを「他社へ移管済み」と表示するのは事実と違う。
+ * `DELETE /domains/:name` がレジストリからの即時消滅を検知したときに `removeDomain`
+ * するのと同じ扱い（行ごと捨てる）に揃え、CASCADE で子テーブルも落とす
+ * （`transfers.domain_id` は ON DELETE SET NULL なので履歴の行自体は残る）。
+ *
+ * 呼ぶのは「その名前がレジストリで空いている」と確認できた経路だけ。
+ * 同一ユーザーの再取得では何もしないので、自分の設計は従来どおり引き継がれる。
+ */
+export async function discardForeignOwnedRow(
+  userId: string,
+  name: string,
+): Promise<void> {
+  const existing = await getDomainStore().find(name);
+  if (
+    existing === null ||
+    existing.ownership !== "owned" ||
+    existing.userId === userId
+  ) {
+    return;
+  }
+  // NFR-06: 他ユーザーの行を消す唯一の経路なので、構造化ログに残す
+  console.warn(
+    JSON.stringify({
+      level: "warn",
+      type: "stale_domain_row_discarded",
+      domain: name,
+      previousUserId: existing.userId,
+      userId,
+      message:
+        "レジストリで空いていた名前に別ユーザーの保有行が残っていたため、登録前に破棄しました",
+    }),
+  );
+  await getDomainStore().remove(name);
+}
+
 export interface RequireOwnedDomainOptions {
   /**
    * 更新系（renew / update / delete / restore / authCode / 移管の承認・拒否）か。
