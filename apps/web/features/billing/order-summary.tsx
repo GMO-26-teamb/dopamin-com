@@ -12,7 +12,7 @@ export interface OrderSummaryProps {
 
 const KIND_LABEL: Record<OrderQuote["kind"], string> = {
   register: "新規登録",
-  renew: "更新（有効期限延長）",
+  renew: "更新",
 };
 
 export function OrderSummary({ quote }: OrderSummaryProps) {

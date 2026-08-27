@@ -51,13 +51,13 @@ export function NameserverCard({
           )}
           {editable ? (
             <Button
-              aria-label="ネームサーバーを変更"
+              aria-label="ネームサーバーの情報修正"
               leadingIcon={<Pencil />}
               onClick={onEdit}
               size="sm"
               variant="subtle"
             >
-              変更
+              情報修正
             </Button>
           ) : null}
         </div>

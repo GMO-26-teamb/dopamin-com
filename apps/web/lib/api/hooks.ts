@@ -24,7 +24,11 @@ import { useMemo } from "react";
 import type { ApiClientError } from "./errors";
 import { type QueryScope, useQueryScope, useServices } from "./provider";
 import { ALLOW_UNAUTHORIZED_META } from "./query-meta";
-import type { CandidateService, DomainUpdateInput } from "./services";
+import type {
+  CandidateService,
+  DomainRegisterInput,
+  DomainUpdateInput,
+} from "./services";
 import type {
   AiLog,
   AiSettings,
@@ -250,9 +254,10 @@ export function usePreviewUniqueness(): Mutation<
   });
 }
 
+/** POST /domains（FR-06）。NS・コンタクトは S-25 で入力したときだけ載る。 */
 export function useRegisterDomain(): Mutation<
   DomainDetail,
-  { name: string; period: number }
+  DomainRegisterInput
 > {
   const services = useServices();
   const queryClient = useQueryClient();

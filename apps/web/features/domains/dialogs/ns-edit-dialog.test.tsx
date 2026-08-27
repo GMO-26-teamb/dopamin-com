@@ -57,7 +57,7 @@ function renderDialog(overrides: Partial<DomainDetail> = {}) {
   );
   return {
     onSubmit,
-    primary: screen.getByRole("button", { name: "変更する" }),
+    primary: screen.getByRole("button", { name: "情報を修正する" }),
   };
 }
 

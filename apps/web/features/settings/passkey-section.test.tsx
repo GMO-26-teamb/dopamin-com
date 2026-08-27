@@ -113,7 +113,9 @@ describe("PasskeySection", () => {
   it("0 件なら Empty State と追加ボタンを出す", async () => {
     renderSection({ listPasskeys: () => Promise.resolve([]) });
 
-    expect(await screen.findByText("パスキーがありません")).toBeInTheDocument();
+    expect(
+      await screen.findByText("パスキーはまだありません"),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "パスキーを追加" }),
     ).toBeInTheDocument();
@@ -126,7 +128,7 @@ describe("PasskeySection", () => {
 
     // 見えるラベルは「削除」だけにして、押せない理由はアクセシブルネームにだけ残す
     const remove = await screen.findByRole("button", {
-      name: "MacBook Touch ID のパスキーを削除（最後の1つは不可）",
+      name: "MacBook Touch ID のパスキーを削除（最後の 1 つは不可）",
     });
     expect(remove).toBeDisabled();
     expect(remove).toHaveTextContent(/^削除$/);

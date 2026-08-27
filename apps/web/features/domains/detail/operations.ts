@@ -26,8 +26,8 @@ const REASON_BY_STATUS: Record<string, string> = {
   redemptionPeriod: "復旧猶予（RGP）中のため不可",
   serverRenewProhibited: "更新ロック中",
   clientRenewProhibited: "更新ロック中",
-  serverUpdateProhibited: "変更ロック中",
-  clientUpdateProhibited: "変更ロック中",
+  serverUpdateProhibited: "情報修正ロック中",
+  clientUpdateProhibited: "情報修正ロック中",
   serverDeleteProhibited: "削除ロック中",
   clientDeleteProhibited: "削除ロック中",
   serverTransferProhibited: "移管ロック中",
@@ -78,7 +78,7 @@ export function operationState(
   op: DetailOperation,
 ): OperationState {
   if (domain.stale) {
-    return { allowed: false, reason: "再同期が必要", blockedBy: [] };
+    return { allowed: false, reason: "最新化が必要", blockedBy: [] };
   }
   // 所有権・移管方向・RGP を含めて `isOperationAllowed` に委譲する（SHARED-02）。
   // 以前はここで displayStatus === "rgp" を見ていたが、rgpStatuses を渡せば shared 側で判定できる。

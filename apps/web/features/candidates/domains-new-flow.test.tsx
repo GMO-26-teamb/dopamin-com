@@ -1,4 +1,9 @@
-import { formatJpy, type OrderQuote, quoteOrder } from "@dopamin/shared";
+import {
+  DEFAULT_REGISTRANT_PROFILE,
+  formatJpy,
+  type OrderQuote,
+  quoteOrder,
+} from "@dopamin/shared";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -399,11 +404,14 @@ describe("/domains/new", () => {
     expect(within(dialog).getByText(`${name} を登録`)).toBeInTheDocument();
     await within(dialog).findByText("空き・再確認済み");
 
-    // NS 欄は表示だけで送信しない。実際には適用されない既定 NS を出さない（#173）
+    // NS とコンタクトは畳んだ 1 行。開かなくても何が適用されるか分かる
+    expect(within(dialog).getByText("未設定のまま登録")).toBeInTheDocument();
     expect(
-      within(dialog).getByText("あとから「情報修正」で設定できます"),
+      within(dialog).getByText(DEFAULT_REGISTRANT_PROFILE.name),
     ).toBeInTheDocument();
+    // 実際には適用されない既定 NS を出さない（#173）
     expect(within(dialog).queryByText(/ns1\.dopamin/)).toBeNull();
+    expect(within(dialog).queryByLabelText("ネームサーバー 1")).toBeNull();
 
     // S-25 は期間選択まで。決済はまだ通っていない（AC-19-1）
     await user.click(
@@ -440,6 +448,118 @@ describe("/domains/new", () => {
 
     await user.click(screen.getByRole("button", { name: "詳細を見る" }));
     expect(push).toHaveBeenCalledWith(`/domains/${name}`);
+  });
+
+  it("S-25: 折りたたみを開いて入れた NS とコンタクトが登録に載る", async () => {
+    const name = await firstAvailableCandidate();
+    const services = renderPage("default");
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(CANDIDATE_FORM), "たくたく");
+    await user.click(screen.getByRole("button", { name: "候補を考える" }));
+
+    const card = (await findDomainNode(name)).closest("li");
+    await user.click(
+      within(card as HTMLElement).getByRole("button", { name: "登録へ" }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText("空き・再確認済み");
+
+    // 畳んだ行のラベルには要約が入っている（開かなくても分かる）
+    await user.click(
+      within(dialog).getByRole("button", {
+        name: "ネームサーバー未設定のまま登録",
+      }),
+    );
+    await user.type(
+      within(dialog).getByLabelText("ネームサーバー 1"),
+      "ns1.example.com",
+    );
+    await user.type(
+      within(dialog).getByLabelText("ネームサーバー 2"),
+      "ns2.example.com",
+    );
+
+    await user.click(
+      within(dialog).getByRole("button", {
+        name: `コンタクト（登録者）${DEFAULT_REGISTRANT_PROFILE.name}`,
+      }),
+    );
+    const nameField = within(dialog).getByLabelText("登録者 氏名");
+    await user.clear(nameField);
+    await user.type(nameField, "Hanako Test");
+    const emailField = within(dialog).getByLabelText("登録者 メールアドレス");
+    await user.clear(emailField);
+    await user.type(emailField, "hanako.test@example.net");
+
+    const register = vi.spyOn(services.domains, "register");
+    await user.click(
+      within(dialog).getByRole("button", { name: "お支払いへ" }),
+    );
+    const payment = await screen.findByRole("dialog");
+    const quote = quoteOrder({ kind: "register", domain: name, years: 1 });
+    await user.click(
+      within(payment).getByRole("button", {
+        name: `${formatJpy((quote as OrderQuote).total)} を支払って登録する`,
+      }),
+    );
+
+    expect(await screen.findByText("取得できました")).toBeInTheDocument();
+    expect(register).toHaveBeenCalledWith({
+      name,
+      period: 1,
+      nameservers: ["ns1.example.com", "ns2.example.com"],
+      contacts: {
+        registrant: { name: "Hanako Test", email: "hanako.test@example.net" },
+      },
+    });
+    // S-26 は実際に反映された NS を出す
+    expect(
+      screen.getByText("ネームサーバー ns1.example.com / ns2.example.com"),
+    ).toBeInTheDocument();
+  });
+
+  it("S-25: NS が 1 件だけなら決済へ進めず、畳んでいても理由を開いて見せる", async () => {
+    const name = await firstAvailableCandidate();
+    const user = await generate("default");
+
+    const card = (await findDomainNode(name)).closest("li");
+    await user.click(
+      within(card as HTMLElement).getByRole("button", { name: "登録へ" }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText("空き・再確認済み");
+
+    await user.click(
+      within(dialog).getByRole("button", {
+        name: "ネームサーバー未設定のまま登録",
+      }),
+    );
+    await user.type(
+      within(dialog).getByLabelText("ネームサーバー 1"),
+      "ns1.example.com",
+    );
+    // 畳んでから送っても、理由が見えるように開き直す
+    await user.click(
+      within(dialog).getByRole("button", { name: "ネームサーバー" }),
+    );
+    // 畳んだ行の要約は入力した内容を映す
+    expect(
+      within(dialog).getByRole("button", {
+        name: "ネームサーバーns1.example.com",
+      }),
+    ).toBeInTheDocument();
+    await user.click(
+      within(dialog).getByRole("button", { name: "お支払いへ" }),
+    );
+
+    expect(
+      within(dialog).getByText(/ネームサーバーは 0 件（全解除）または/),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("ネームサーバー 1")).toHaveValue(
+      "ns1.example.com",
+    );
+    // 決済ステップには進んでいない
+    expect(within(dialog).queryByText("ご注文内容")).toBeNull();
   });
 
   it("S-29: 決済が拒否されたら登録は呼ばれず、ダイアログ内に理由が出る（AC-19-3）", async () => {
@@ -535,7 +655,7 @@ describe("/domains/new", () => {
       await screen.findByText(`${name} は取得できませんでした`),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "代替候補を見る" }),
+      screen.getByRole("button", { name: "代替を見る" }),
     ).toBeInTheDocument();
   });
 

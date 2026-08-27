@@ -94,7 +94,7 @@ describe("hostFieldErrors", () => {
     const invalid = host({ recordType: "A", target: "cname.example.com" });
 
     expect(hostFieldErrors(invalid, []).target).toBe(
-      "A レコードの向き先は IPv4 アドレスで指定してください（例 203.0.113.10）",
+      "A レコードの向き先は IPv4 アドレスで指定してください（例: 203.0.113.10）",
     );
   });
 
@@ -104,7 +104,7 @@ describe("hostFieldErrors", () => {
       const invalid = host({ recordType, target: "203.0.113.10" });
 
       expect(hostFieldErrors(invalid, []).target).toBe(
-        `${recordType} レコードの向き先はホスト名で指定してください（例 cname.example.com）`,
+        `${recordType} レコードの向き先はホスト名で指定してください（例: cname.example.com）`,
       );
     },
   );
