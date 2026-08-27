@@ -83,7 +83,7 @@ test.describe("デモシナリオ（§3.3 の 1〜5）", () => {
       await expect(
         page.getByRole("heading", { name: "保有ドメイン" }),
       ).toBeVisible();
-      await expect(page.getByText("まだドメインがありません")).toBeVisible();
+      await expect(page.getByText("ドメインはまだありません")).toBeVisible();
     });
 
     await test.step("2-3. 直接検索で空きと独自性スコアが出る（S-24 / AC-03-1 / AC-05-2）", async () => {
