@@ -161,11 +161,21 @@ pnpm --filter @dopamin/api test:connect:transfer
   RGP に入れる。途中失敗時も両レジストラから取消・削除を試み、回収できなければ対象名を警告する。
 - AuthCode、API キー、gate パスワード、レジストリ生応答はログに出さない。
 
-## 3. e2e（Playwright + CDP Virtual Authenticator、FR-01）
+## 3. e2e（Playwright + CDP Virtual Authenticator、FR-01 / デモシナリオ）
 
 `apps/web/e2e/passkey.spec.ts` が、実ブラウザ（Chromium）でサインアップ → ログアウト → ログイン →
 パスキーの追加 / 削除 → 未認証リダイレクト（AC-01-1〜3）を通しで検証する。WebAuthn の生体認証は
 CDP の `WebAuthn.addVirtualAuthenticator` で肩代わりするので、ダイアログは出ない。
+仮想認証器とサインアップの手順は `apps/web/e2e/support/webauthn.ts` に切り出して spec 間で共有する。
+
+`apps/web/e2e/demo-scenario.spec.ts` は発表用デモ（requirements.md §3.3 の 1〜5 /
+`specs/manual-checklist.md` §6 の 6-1〜6-5）を 1 本で通す: パスキーでサインアップ →
+直接検索（S-24）で空き確認 + 独自性スコア → 登録ダイアログ → モック決済（S-29）→ 登録成功（S-26）→
+保有一覧（S-10）に出る → サブドメイン設計を保存（AC-13-3）→ DNS 反映で全ホストが `反映済み`（S-45）。
+**AI と GitHub に出る経路は通さない**（AI プロバイダのキーの有無・レート制限で結果が変わり CI が不安定になるため）:
+デモ手順 6-2 の AI 候補生成は直接検索で代替し、サブドメイン設計は `PUT /domains/:name/subdomain-plan`
+（AI を使わない保存 API）で用意してから画面で編集・保存・反映する。AI 経路は `apps/api` の
+unit / 統合テストが mock で常時検証している。
 
 web は `NEXT_PUBLIC_API_MODE=http`（`next build && next start`、:3000）、api は `REGISTRY_MODE=mock` +
 Postgres（:8787）で、`apps/web/playwright.config.ts` の `webServer` から自動起動する。
@@ -195,18 +205,21 @@ pnpm --filter @dopamin/web e2e --ui         # Playwright UI
 - api（:8787）は既存プロセスを**再利用しない**（`reuseExistingServer: false`）。`pnpm dev` の api は
   `apps/api/.env.local`（Supabase / 実レジストリ）を読んでいる可能性があり、掴むと signup やパスキー追加・削除が
   共有 DB に書き込んでしまうため。:8787 が使用中だと Playwright が「is already used」で即失敗するので、
-  `pnpm dev` を止めてから実行する。
+  `pnpm dev` を止めるか、下の `E2E_API_PORT` / `E2E_WEB_PORT` でポートを退避してから実行する。
 - web（:3000）だけは既存プロセスを再利用する（`next build` を省くため）。`pnpm dev` の web（mock モード）を掴むと
   最初のテスト（AC-01-3 のリダイレクト）が失敗する。e2e が起動した web は次回の実行で再利用されるので、
   2 回目以降は `next build` を待たずに済む（web のコードを変えたら :3000 を止めて再ビルドさせる）。
 - DB の接続先はローカルでは環境変数 `E2E_DATABASE_URL`（未設定なら上の docker の 54329）。シェルの `DATABASE_URL`
   （`pnpm dev` 用に Supabase を指していることがある）は**読まない**。CI だけは `DATABASE_URL`（`services: postgres`）を
-  必須として読む。表示名は毎回ユニークにしているので、同じ DB で繰り返し実行できる。
+  必須として読む。表示名も登録するドメイン名も毎回ユニークにしているので、同じ DB で繰り返し実行できる。
 - `next build` は `next/font/google` のフォント取得でネットワークを使う。
 - CI は `.github/workflows/ci.yml` の `e2e` ジョブ（`services: postgres`）。Playwright の step に `continue-on-error: true` を
   付けて必須にはしていない（check run は緑のまま）。失敗時は Summary に `::warning::` が出て、`playwright-report`
   アーティファクトにトレース / スクリーンショットが残る。
 - turbo の `test` には含めない（`pnpm test` / `pnpm check` は e2e を走らせない）。
+- ポートは既定 3000 / 8787 だが、`E2E_WEB_PORT` / `E2E_API_PORT` で退避できる。`pnpm dev` を止めずに
+  回したいときに使う（例: `E2E_WEB_PORT=3411 E2E_API_PORT=8811 pnpm --filter @dopamin/web e2e`）。
+  RP ID は `localhost` 固定でポートに依存せず、`WEBAUTHN_ORIGIN` は config が web と揃える。
 
 ## 4. mock レジストリのエラーシミュレーション（§11.6）
 
