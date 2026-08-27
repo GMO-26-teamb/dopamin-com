@@ -174,6 +174,92 @@ export const subdomainProposalSchema = z.object({
 });
 export type SubdomainProposal = z.infer<typeof subdomainProposalSchema>;
 
+/**
+ * AI が返す設計 1 項目の「素の形」（structured output のスキーマに渡す形）。
+ *
+ * {@link subdomainItemSchema} をそのままモデルに渡すと、制約の大半
+ * （`A` の target は IPv4・ホストは 1 ラベル）は `.refine` / `.superRefine` なので
+ * JSON Schema には現れずモデルを拘束できないまま、1 件でも外れた瞬間に
+ * `generateObject` が応答全体を捨ててしまう（8 件中 7 件が正しくても失う）。
+ * ここでは形（5 つの文字列）だけを保証し、値の妥当性は 1 件ずつ
+ * {@link pickValidSubdomainItems} で再検証する（`docs/specs/subdomain-plan.md` §2.5）。
+ */
+export const rawSubdomainItemSchema = z.object({
+  host: z.string().max(253),
+  purpose: z.string().max(500),
+  recordType: z.string().max(32),
+  target: z.string().max(255),
+  priority: z.string().max(32),
+});
+export type RawSubdomainItem = z.infer<typeof rawSubdomainItemSchema>;
+
+/**
+ * AI の structured output。件数の上限は暴走時の歯止めで、FR-13 の「3〜8 件」は
+ * プロンプトで指示し、実際の担保は {@link subdomainProposalSchema} での再検証で行う。
+ */
+export const subdomainProposalOutputSchema = z.object({
+  policy: z.string().max(MAX_SUBDOMAIN_POLICY_LENGTH * 4),
+  items: z
+    .array(rawSubdomainItemSchema)
+    .min(1)
+    .max(MAX_SUBDOMAIN_ITEMS * 2),
+});
+export type SubdomainProposalOutput = z.infer<
+  typeof subdomainProposalOutputSchema
+>;
+
+/** 検証に通らず落とした項目（構造化ログに出す。NFR-06）。 */
+export interface DroppedSubdomainItem {
+  /** AI が返した生のホスト表記（切り詰めるだけで正規化しない）。 */
+  host: string;
+  /** 落とした理由（zod の最初の issue）。 */
+  reason: string;
+}
+
+/** {@link pickValidSubdomainItems} の結果。 */
+export interface PickedSubdomainItems {
+  items: SubdomainItem[];
+  dropped: DroppedSubdomainItem[];
+}
+
+/** ログに載せるホスト表記の上限（生値をそのまま流さない）。 */
+const DROPPED_HOST_MAX_LENGTH = 64;
+
+/**
+ * AI の素の出力を 1 項目ずつ検証し、通ったものだけを返す（FR-13 / AC-13-1）。
+ *
+ * 文字数（`purpose`）は表示上の制約なので**切り詰めて残す**（#66 の `reason` と同じ扱い）。
+ * DNS として成立しない項目（ホストが 1 ラベルでない・`A` なのに target が IPv4 でない等）は
+ * **その項目だけ落とす**。集合としての制約（`www` 必須 / 件数 / ホスト重複なし）は
+ * ここでは見ない——呼び出し側が {@link subdomainProposalSchema} で掛ける。
+ */
+export function pickValidSubdomainItems(
+  raw: readonly RawSubdomainItem[],
+): PickedSubdomainItems {
+  const items: SubdomainItem[] = [];
+  const dropped: DroppedSubdomainItem[] = [];
+  for (const item of raw) {
+    const parsed = subdomainItemSchema.safeParse({
+      ...item,
+      purpose: item.purpose.trim().slice(0, MAX_SUBDOMAIN_PURPOSE_LENGTH),
+    });
+    if (parsed.success) {
+      items.push(parsed.data);
+      continue;
+    }
+    dropped.push({
+      host: item.host.trim().slice(0, DROPPED_HOST_MAX_LENGTH),
+      reason: parsed.error.issues[0]?.message ?? "検証に失敗しました",
+    });
+  }
+  return { items, dropped };
+}
+
+/** 全体方針を上限文字数で切り詰める（`purpose` と同じく表示上の制約として扱う）。 */
+export function clampSubdomainPolicy(policy: string): string {
+  return policy.trim().slice(0, MAX_SUBDOMAIN_POLICY_LENGTH);
+}
+
 // ---------------------------------------------------------------------------
 // API 入出力（§10.1）
 // ---------------------------------------------------------------------------

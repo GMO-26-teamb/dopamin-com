@@ -42,8 +42,9 @@ sequenceDiagram
   W->>R: POST /domains/:name/subdomain-plan { repoUrl? , description? }
   R->>G: fetchRepoSummary（8 秒上限・zod 検証）
   G-->>R: RepoSummary / GithubUnavailableError
-  R->>AI: runStructured(subdomain_plan, subdomainProposalSchema)（20 秒上限）
-  AI-->>W: 提案（保存しない）
+  R->>AI: runStructured(subdomain_plan, subdomainProposalOutputSchema)（20 秒上限）
+  AI-->>R: 素の出力 → 項目ごと + 集合の 2 段で再検証（§2.5）
+  R-->>W: 提案（保存しない）
   W->>R: PUT /domains/:name/subdomain-plan（編集後）
   R->>DB: upsert（UNIQUE(domain_id)）
   W->>R: GET /domains/:name/dns（差分ダイアログ）
@@ -118,6 +119,35 @@ sequenceDiagram
   ないので `packages/shared` の `APP_OPERATION_COMMANDS` という別カテゴリに置き、
   `<機能>.<操作>` 表記でレジストリコマンド（snake_case）と見分けられるようにする。
   NS 切替のレジストリ呼び出しは従来どおり `update` として別行で記録される。
+
+### 2.5 AI 出力の検証（#68 / #167）
+
+モデルには**形だけの緩いスキーマ**（`subdomainProposalOutputSchema`: 5 つの文字列 × 1〜16 件）を
+渡し、受け取ってから 2 段で検証する。厳格な `subdomainProposalSchema` を `generateObject` に
+そのまま渡していた頃は、制約の大半（`www` 必須 / 3〜8 件 / ホスト重複なし / `A` の target は IPv4）が
+`.refine` / `.superRefine` で JSON Schema に出ずモデルを拘束できないまま、1 件でも外れると
+応答全体が捨てられていた（`maxRetries: 0` なので 503。8 件中 7 件が正しくても救済されない）。
+
+| 段 | 何を見るか | 外れたとき |
+|---|---|---|
+| 1. 項目ごと（`pickValidSubdomainItems`） | `subdomainItemSchema` を 1 件ずつ。ホストが 1 ラベルか、`recordType` / `priority` が語彙内か、`A` の target が IPv4 か | **その項目だけ落とす**。`purpose` / `policy` の文字数超過は表示上の制約なので落とさず切り詰める |
+| 2. 集合として（`subdomainProposalSchema`） | `www` 必須 / 3〜8 件 / ホスト重複なし | **`AI_UNAVAILABLE`（503）**。勝手に `www` を足したり重複を畳んだりしない |
+
+**#66（AI 候補・FR-04）と揃えた部分**: 「生スキーマ + 項目ごとに再検証し、通ったものだけ使う」
+（[`ai-candidates.md`](ai-candidates.md) §2.1 / §2.2 の `CandidateBucket` と同じ）。文字数の超過を
+捨てずに切り詰めるのも #66 の `reason` と同じ扱い。
+
+**揃っていない部分（集合制約は救済しない）**: FR-04 の候補は独立した 6 件で、5 件でも 0 件でも
+「候補一覧」として成立する（AC-04-1 は「バリデーションを通過したもののみ」）。FR-13 の提案は
+**構造制約を持つ 1 つの設計**で、入口の `www` を欠いた構成や 2 ホストだけの構成は
+設計として成立しない（FR-13 の「3〜8 件」「`www` は必ず含める」）。足りない分を補完すると
+AI が提案していない設計をユーザーに見せることになるので、集合として成立しないものは
+従来どおり 503 で再試行させる。
+
+落とした項目は構造化ログに 1 行残す（NFR-06）: `{"level":"warn","type":"subdomain_plan_items_dropped",
+"requestId","userId","domain","kept","dropped":[{"host","reason"}]}`。AI の**素の出力**そのもの
+（落とした項目を含む）は `ai_logs.output` に残るので（AC-14-1）、後から「何が返ってきて何を落としたか」を
+突き合わせられる。
 
 ## 3. 画面・UI
 
@@ -201,8 +231,8 @@ Error Card で返るだけ、という割れ方をしていた（#187 で表面�
 
 | 種別 | 内容 |
 |---|---|
-| unit | `packages/shared/src/subdomains.test.ts`（差分・反映状態・手順テキスト）、`packages/db` のスキーマ制約は `apps/api/test/db/subdomain-schema.test.ts` |
-| 契約 / 統合 | `apps/api/test/lib/github.test.ts`（mock / real 両経路、失敗の分類、8KB 切り出し）、`test/routes/subdomain-plan-generate.test.ts`、`test/routes/subdomain-plan-save.test.ts`、`test/routes/subdomain-plan-apply.test.ts` |
+| unit | `packages/shared/src/subdomains.test.ts`（差分・反映状態・手順テキスト・AI 出力の項目ごと検証 `pickValidSubdomainItems`）、`packages/db` のスキーマ制約は `apps/api/test/db/subdomain-schema.test.ts` |
+| 契約 / 統合 | `apps/api/test/lib/github.test.ts`（mock / real 両経路、失敗の分類、8KB 切り出し）、`test/routes/subdomain-plan-generate.test.ts`（不正な 1 項目だけ落として残りを返す / 落とした結果 3 件未満は 503 / `www` 欠落は 503 / 落とした項目の構造化ログ）、`test/routes/subdomain-plan-save.test.ts`、`test/routes/subdomain-plan-apply.test.ts` |
 | 契約（web） | `apps/web/lib/api/http/http-services.test.ts`: `subdomains` の 5 メソッド（写像・未保存の 404 → null・提案の失敗の相手分け・apply 後の取り直し） |
 | unit（web） | `apps/web/features/subdomains/validate.test.ts`: 欄ごとの検証と、通った設計が `savedSubdomainProposalSchema` も通ること |
 | 統合（web） | `apps/web/features/subdomains/subdomains-screen.test.tsx`: 追加直後の保存を止める / 埋めれば保存できる / 全消し / 上限で追加不可 |
@@ -226,3 +256,4 @@ Error Card で返るだけ、という割れ方をしていた（#187 で表面�
 | v0.3 | 2026-08-27 | §3.1 に保存前の入力検証を追加（契約を満たさない設計はサーバーに投げず欄で直させる）。判定に使う上限を `packages/shared` の定数として切り出し、画面が数値を二重に持たないようにした。#187 |
 | v0.4 | 2026-08-27 | リポジトリ解析の時間制限を 2 倍に緩和。`GITHUB_FETCH_TIMEOUT_MS` 4 → 8 秒、`AI_CALL_TIMEOUT_MS` 10 → 20 秒とし、§2.2 / §2 の図・AC-13-1 の内訳を「GitHub 8 秒 + AI 20 秒 = 30 秒以内」に更新（requirements v0.1.22）。上限が厳しく解析を通せない公開リポジトリが実在したため。#199（thinking を絞って 10 秒予算を守る案）とは別方針で、上限そのものを引き上げている |
 | v0.5 | 2026-08-28 | ドメイン詳細（`GET /domains/:name`）に `subdomainPlan: { hosts, applied } \| null` が載ったことを §2.3 / §4 に追記（#217 / requirements v0.1.27）。設計を保存しても S-30 が「未作成」のままだった原因が web の固定値ではなく契約に件数が無かったことだったため。反映済みの判定は `GET /subdomain-plan` と同じ `subdomainApplyState` を使い、2 画面で件数が食い違わないようにしている |
+| v0.6 | 2026-08-28 | §2 / §2.5 / §7: **AI 出力の検証を 2 段構えにした**（#167）。`generateObject` には形だけの `subdomainProposalOutputSchema` を渡し、受け取ってから項目ごとに `subdomainItemSchema` で検証して**不正な項目だけ落とし**、残った集合に `subdomainProposalSchema`（`www` 必須 / 3〜8 件 / ホスト重複なし）を掛ける。集合として成立しなければ従来どおり `AI_UNAVAILABLE`（503）で、勝手な補完はしない。#66（FR-04）と揃えた部分（生スキーマ + 項目ごと再検証・文字数超過は切り詰め）と、揃えていない部分（FR-13 の提案は構造制約を持つ 1 つの設計なので集合制約は救済しない）を明記。落とした項目は `subdomain_plan_items_dropped` の構造化ログに残す（NFR-06）|

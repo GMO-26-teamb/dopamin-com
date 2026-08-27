@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DOPAMIN_NAMESERVERS } from "./constants";
 import {
   buildDnsSetupInstructions,
+  clampSubdomainPolicy,
   type DesiredDnsRecord,
   type DnsRecord,
   diffDnsRecords,
@@ -9,6 +10,8 @@ import {
   dnsTargetSchema,
   githubRepoUrlSchema,
   needsNameserverSwitch,
+  pickValidSubdomainItems,
+  type RawSubdomainItem,
   type SubdomainItem,
   subdomainApplyState,
   subdomainHostSchema,
@@ -17,6 +20,7 @@ import {
   subdomainPlanApplyResponseSchema,
   subdomainPlanGenerateRequestSchema,
   subdomainPlanSaveRequestSchema,
+  subdomainProposalOutputSchema,
   subdomainProposalSchema,
 } from "./subdomains";
 
@@ -183,6 +187,98 @@ describe("subdomainProposalSchema", () => {
         items: proposalItems(),
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("subdomainProposalOutputSchema（AI の素の出力）", () => {
+  it("値が妥当でなくても形が合っていれば通す（項目ごとの再検証に回す）", () => {
+    const parsed = subdomainProposalOutputSchema.safeParse({
+      policy: "方針",
+      items: [
+        // recordType と target が噛み合っていないが、ここでは弾かない
+        {
+          host: "www",
+          purpose: "LP",
+          recordType: "A",
+          target: "cname.vercel-dns.com",
+          priority: "required",
+        },
+      ],
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("形が違う（items が無い / 文字列でない）ものは拒否する", () => {
+    expect(
+      subdomainProposalOutputSchema.safeParse({ policy: "方針" }).success,
+    ).toBe(false);
+    expect(
+      subdomainProposalOutputSchema.safeParse({
+        policy: "方針",
+        items: [{ host: 1 }],
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("pickValidSubdomainItems", () => {
+  const raw = (
+    overrides: Partial<RawSubdomainItem> = {},
+  ): RawSubdomainItem => ({
+    host: "www",
+    purpose: "ランディングページ",
+    recordType: "CNAME",
+    target: "cname.vercel-dns.com",
+    priority: "required",
+    ...overrides,
+  });
+
+  it("不正な項目だけを落として残りを返す", () => {
+    const { items, dropped } = pickValidSubdomainItems([
+      raw(),
+      // A なのに target がホスト名（プロンプトの例をそのまま混ぜた形）
+      raw({ host: "api", recordType: "A" }),
+      raw({ host: "docs", target: "dopamin.github.io", priority: "optional" }),
+    ]);
+
+    expect(items.map((i) => i.host)).toEqual(["www", "docs"]);
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0]?.host).toBe("api");
+    expect(dropped[0]?.reason).toContain("IPv4");
+  });
+
+  it("ホスト・種別・重要度が語彙から外れた項目も落とす", () => {
+    const { items, dropped } = pickValidSubdomainItems([
+      raw({ host: "www.example" }),
+      raw({ host: "api", recordType: "TXT" }),
+      raw({ host: "docs", priority: "must" }),
+    ]);
+
+    expect(items).toHaveLength(0);
+    expect(dropped.map((d) => d.host)).toEqual(["www.example", "api", "docs"]);
+  });
+
+  it("purpose の超過は落とさず切り詰める（表示上の制約なので）", () => {
+    const { items, dropped } = pickValidSubdomainItems([
+      raw({ purpose: "あ".repeat(200) }),
+    ]);
+
+    expect(dropped).toHaveLength(0);
+    expect(items[0]?.purpose).toHaveLength(100);
+  });
+
+  it("purpose が空の項目は落とす（用途の無いホストは設計にならない）", () => {
+    const { items, dropped } = pickValidSubdomainItems([raw({ purpose: " " })]);
+
+    expect(items).toHaveLength(0);
+    expect(dropped).toHaveLength(1);
+  });
+});
+
+describe("clampSubdomainPolicy", () => {
+  it("120 字を超える方針は切り詰める", () => {
+    expect(clampSubdomainPolicy(` ${"あ".repeat(200)} `)).toHaveLength(120);
+    expect(clampSubdomainPolicy(" 方針 ")).toBe("方針");
   });
 });
 

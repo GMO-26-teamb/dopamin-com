@@ -285,6 +285,112 @@ describe("POST /domains/:name/subdomain-plan（FR-13）", () => {
     expect(status).toBe(400);
   });
 
+  it("不正な項目は 1 件だけ落とし、残りを返す（#167）", async () => {
+    const { user, cookie } = await createTestSession(db);
+    await seedDomain(user.id);
+    setAiModelFactoryForTesting(() =>
+      proposalModel({
+        policy: PROPOSAL.policy,
+        items: [
+          ...PROPOSAL.items,
+          // A レコードなのに target がホスト名（プロンプトの例が混ざった形）
+          {
+            host: "app",
+            purpose: "アプリ本体",
+            recordType: "A",
+            target: "cname.vercel-dns.com",
+            priority: "recommended",
+          },
+        ],
+      }),
+    );
+
+    const { status, json } = await post(
+      "demo.com",
+      { repoUrl: "https://github.com/dopamin/demo" },
+      cookie,
+    );
+    const body = json as SubdomainPlanProposalResponse;
+
+    expect(status).toBe(200);
+    // 落ちるのは app の 1 件だけ。残り 3 件は提案として返る
+    expect(body.items.map((i) => i.host)).toEqual(["www", "api", "docs"]);
+  });
+
+  it("落とした項目は構造化ログに残る（NFR-06）", async () => {
+    const { user, cookie } = await createTestSession(db);
+    await seedDomain(user.id);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    setAiModelFactoryForTesting(() =>
+      proposalModel({
+        policy: PROPOSAL.policy,
+        items: [
+          ...PROPOSAL.items,
+          {
+            host: "app",
+            purpose: "アプリ本体",
+            recordType: "A",
+            target: "cname.vercel-dns.com",
+            priority: "recommended",
+          },
+        ],
+      }),
+    );
+
+    await post(
+      "demo.com",
+      { repoUrl: "https://github.com/dopamin/demo" },
+      cookie,
+    );
+
+    const lines = logSpy.mock.calls
+      .map((call) => (typeof call[0] === "string" ? call[0] : ""))
+      .filter((line) => line.includes("subdomain_plan_items_dropped"));
+    expect(lines).toHaveLength(1);
+    const line = JSON.parse(lines[0] ?? "{}") as {
+      level: string;
+      kept: number;
+      dropped: { host: string; reason: string }[];
+    };
+    expect(line.level).toBe("warn");
+    expect(line.kept).toBe(3);
+    expect(line.dropped.map((d) => d.host)).toEqual(["app"]);
+    // AI の素の出力（落とした項目を含む）は ai_logs にも残る（AC-14-1）
+    const rows = await db.select().from(schema.aiLogs);
+    expect(JSON.stringify(rows[0]?.output)).toContain("app");
+  });
+
+  it("落とした結果 3 件未満になれば AI_UNAVAILABLE（503）", async () => {
+    const { user, cookie } = await createTestSession(db);
+    await seedDomain(user.id);
+    setAiModelFactoryForTesting(() =>
+      proposalModel({
+        policy: PROPOSAL.policy,
+        items: [
+          ...PROPOSAL.items.slice(0, 2),
+          {
+            host: "docs.example",
+            purpose: "仕様書",
+            recordType: "CNAME",
+            target: "dopamin.github.io",
+            priority: "optional",
+          },
+        ],
+      }),
+    );
+
+    const { status, json } = await post(
+      "demo.com",
+      { repoUrl: "https://github.com/dopamin/demo" },
+      cookie,
+    );
+
+    expect(status).toBe(503);
+    expect((json as { error: { code: string } }).error.code).toBe(
+      "AI_UNAVAILABLE",
+    );
+  });
+
   it("www を含まない提案は再検証で弾かれ AI_UNAVAILABLE（503）", async () => {
     const { user, cookie } = await createTestSession(db);
     await seedDomain(user.id);
