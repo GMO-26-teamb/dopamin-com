@@ -144,13 +144,20 @@ describe("TransferItem", () => {
     expect(screen.queryAllByRole("button")).toHaveLength(0);
   });
 
-  it("履歴以外の行からもドメイン詳細に行ける（#219）", () => {
-    render(<TransferItem transfer={transfer()} />);
+  it("受信した移管申請の行からドメイン詳細に行ける（#219）", () => {
+    render(<TransferItem transfer={transfer({ direction: "out" })} />);
 
     expect(screen.getByRole("link", { name: "tkt-lab.net" })).toHaveAttribute(
       "href",
       "/domains/tkt-lab.net",
     );
+  });
+
+  it("まだ保有していない移管 IN の行はリンクにしない（詳細が引けないため）", () => {
+    render(<TransferItem transfer={transfer({ direction: "in" })} />);
+
+    expect(screen.queryByRole("link", { name: "tkt-lab.net" })).toBeNull();
+    expect(screen.getByText("tkt-lab.net")).toBeInTheDocument();
   });
 
   it("自動承認の期限を過ぎたら承認 / 拒否を Disabled にする", () => {

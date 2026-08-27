@@ -139,6 +139,9 @@ export function TransferItem({
   const actionsDisabled = busy || updateFailed || expired;
   const recheckDisabled = busy || recheckPending;
   const isHistory = kind === "history";
+  // 保有しているドメインだけ詳細へ送る。in-pending（相手の承認待ち）と
+  // import-pending（承認済み・取り込み前）は自分の行がまだ無い
+  const linkable = kind === "out-received" || isHistory;
   // 同じラベルのボタンが行ごとに並ぶので、読み上げ名はドメイン名で一意にする
   const name = transfer.domainName;
 
@@ -152,13 +155,21 @@ export function TransferItem({
     >
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex items-center gap-2">
-          {/* 行の中に承認 / 拒否ボタンがあるので、リンクにするのはドメイン名だけ */}
-          <Link
-            className="min-w-0 truncate text-domain-card text-ink underline-offset-2 hover:underline"
-            href={`/domains/${transfer.domainName}`}
-          >
-            {transfer.domainName}
-          </Link>
+          {/* 行の中に承認 / 拒否ボタンがあるので、リンクにするのはドメイン名だけ。
+              まだ自分の保有になっていない移管 IN は詳細が引けない（S-80 に落ちる）ので
+              リンクにしない */}
+          {linkable ? (
+            <Link
+              className="min-w-0 truncate text-domain-card text-ink underline-offset-2 hover:underline"
+              href={`/domains/${encodeURIComponent(transfer.domainName)}`}
+            >
+              {transfer.domainName}
+            </Link>
+          ) : (
+            <p className="min-w-0 truncate text-domain-card text-ink">
+              {transfer.domainName}
+            </p>
+          )}
           {/* 方向はセクション見出し（受信した申請（移管 OUT）/ 申請中（移管 IN））が
               言うので、見出しに方向が無い履歴だけバッジを出す（#219） */}
           {isHistory ? (
