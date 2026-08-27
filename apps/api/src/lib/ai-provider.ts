@@ -56,6 +56,37 @@ export const AI_CALL_TIMEOUT_MS = 10_000;
  */
 export const AI_FALLBACK_MIN_BUDGET_MS = 1_000;
 
+/**
+ * Google に許す思考トークンの上限（#199）。
+ *
+ * Gemini は既定で思考トークンを使い、`gemini-2.5-flash` の FR-13 プロンプトでは
+ * 1,800〜2,200 トークンを消費して 1 回の生成が 11〜17 秒かかる。
+ * {@link AI_CALL_TIMEOUT_MS} の 10 秒を必ず超えるため、上限を渡して抑える
+ * （2026-08-27 の実測。上限なし 11〜17 秒 / 512 で 5.8〜6.2 秒 / 256 で 4.8〜5.7 秒）。
+ *
+ * 0（思考オフ）にしないのは `gemini-2.5-pro` が思考を無効化できない（最小 128）ため。
+ * モデルはユーザーが選べる（FR-17）ので、どの Gemini でも受け付ける値にしておく。
+ */
+export const GOOGLE_THINKING_BUDGET_TOKENS = 256;
+
+/**
+ * プロバイダ固有の呼び出しオプション。google 以外は既定のまま（余計な指定をしない）。
+ * gateway 経由でも同じキーで転送される（`docs/specs/ai-gateway.md` §2.5）。
+ */
+function providerOptionsFor(provider: AiProvider) {
+  if (provider !== "google") {
+    return undefined;
+  }
+  return {
+    google: {
+      thinkingConfig: {
+        thinkingBudget: GOOGLE_THINKING_BUDGET_TOKENS,
+        includeThoughts: false,
+      },
+    },
+  };
+}
+
 /** 予算を測る対象は AI 呼び出しの実時間だけ（`ai_logs` の書き込み待ちは含めない）。 */
 
 /** 上限時間内に応答が返らなかったことを表す（AI_UNAVAILABLE に変換される）。 */
@@ -301,6 +332,7 @@ async function callProvider<T>(
   options: { instructions?: string; timeoutMs: number },
 ) {
   const model = createModel(attempt);
+  const providerOptions = providerOptionsFor(attempt.provider);
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
@@ -318,6 +350,7 @@ async function callProvider<T>(
         prompt,
         instructions: options.instructions,
         abortSignal: controller.signal,
+        ...(providerOptions === undefined ? {} : { providerOptions }),
         // 再試行は AI SDK 内部ではなく本関数のフォールバック 1 回だけに寄せる
         // （SDK の既定 2 回は 10 秒の予算をプロバイダ 1 つで使い切ってしまう）
         maxRetries: 0,
