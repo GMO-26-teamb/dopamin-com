@@ -4,6 +4,12 @@ import {
   DOMAIN_CANDIDATE_REASON_MAX_LENGTH,
   type DomainCandidatesRequest,
 } from "@dopamin/shared";
+import {
+  sanitizeUntrustedList,
+  sanitizeUntrustedText,
+  UNTRUSTED_DATA_NOTICE,
+  untrustedDataBlock,
+} from "./untrusted";
 
 /**
  * ドメイン候補生成のプロンプト（docs/requirements.md §13.2 / FR-04）。
@@ -14,6 +20,11 @@ import {
  *
  * プロンプト全文は `ai_logs` に保存しない（AC-14-2）。記録されるのは
  * `runStructured` に渡す `input`（ニックネーム等の意味的な入力）の要約だけ。
+ *
+ * ニックネームと用途はユーザーが自由に打てるテキストなので、README（FR-13）と同じく
+ * `prompts/untrusted.ts` の区画に隔離してから載せる（issue #169）。
+ * 出力の妥当性を決めるのは常に再検証側（`candidates.service.ts` の `CandidateBucket`）で、
+ * RFC 1035 と許可 TLD を通らない候補は、モデルが何を書いても採用されない。
  */
 export const DOMAIN_CANDIDATES_INSTRUCTIONS = `あなたはドメイン名のネーミングを支援するアシスタントです。
 入力されたニックネーム（またはアプリ名）と用途から、覚えやすく独自性のあるドメイン名の候補を提案します。
@@ -25,7 +36,9 @@ export const DOMAIN_CANDIDATES_INSTRUCTIONS = `あなたはドメイン名のネ
 - 同じ「SLD.TLD」の組み合わせを 2 回以上出さない。
 - 除外リストに挙がった名前（および同じ SLD）は提案しない。
 - reason は日本語で ${DOMAIN_CANDIDATE_REASON_MAX_LENGTH} 字以内。なぜその名前が良いかを一言で書く。
-- 既存の有名サービスやブランドと紛らわしい名前は避ける。`;
+- 既存の有名サービスやブランドと紛らわしい名前は避ける。
+
+${UNTRUSTED_DATA_NOTICE}`;
 
 /**
  * プロバイダ別の味付け（`docs/specs/ai-candidates.md` §2.5）。
@@ -68,7 +81,21 @@ export function buildDomainCandidatesInstructions(
     : `${DOMAIN_CANDIDATES_INSTRUCTIONS}\n\n${flavor}`;
 }
 
-/** 候補生成のユーザープロンプト（入力を JSON ではなく箇条書きで渡す）。 */
+/** ユーザーが打つ値の上限（`domainCandidatesRequestSchema` と同じ値で二重に切る）。 */
+const NICKNAME_PROMPT_CHARS = 64;
+const PURPOSE_PROMPT_CHARS = 200;
+
+/** 除外リスト（前回の候補 + ユーザー指定）。件数と 1 件の長さは入口の zod と同じ。 */
+const EXCLUDE_PROMPT_CHARS = 253;
+const MAX_EXCLUDE_ITEMS = 30;
+
+/**
+ * 候補生成のユーザープロンプト（入力を JSON ではなく箇条書きで渡す）。
+ *
+ * ニックネームと用途は隔離した区画に入れる。TLD は `tldSchema` を通った値なので
+ * そのまま置く。除外リストは「守らせたい制約」として区画の外に置き、値だけ正規化する
+ * （実際の担保は `CandidateBucket` の再検証で、プロンプトはヒントでしかない）。
+ */
 export function buildDomainCandidatesPrompt(input: {
   request: DomainCandidatesRequest;
   /** 実際に選ばせる TLD（未指定なら全対応 TLD が入る）。 */
@@ -77,11 +104,27 @@ export function buildDomainCandidatesPrompt(input: {
   exclude: readonly string[];
 }): string {
   const { request, tlds, exclude } = input;
+  const excluded = sanitizeUntrustedList(exclude, {
+    maxItems: MAX_EXCLUDE_ITEMS,
+    maxChars: EXCLUDE_PROMPT_CHARS,
+  });
   const lines = [
-    `ニックネームまたはアプリ名: ${request.nickname}`,
-    `用途・キーワード: ${request.purpose ?? "（指定なし）"}`,
+    untrustedDataBlock(
+      "user-input",
+      [
+        `ニックネームまたはアプリ名: ${sanitizeUntrustedText(
+          request.nickname,
+          NICKNAME_PROMPT_CHARS,
+        )}`,
+        `用途・キーワード: ${
+          request.purpose === undefined
+            ? "（指定なし）"
+            : sanitizeUntrustedText(request.purpose, PURPOSE_PROMPT_CHARS)
+        }`,
+      ].join("\n"),
+    ),
     `使ってよい TLD: ${tlds.join(", ")}`,
-    `除外する名前: ${exclude.length === 0 ? "（なし）" : exclude.join(", ")}`,
+    `除外する名前: ${excluded.length === 0 ? "（なし）" : excluded.join(", ")}`,
     `候補の件数: ${DOMAIN_CANDIDATE_COUNT}`,
   ];
   return lines.join("\n");
