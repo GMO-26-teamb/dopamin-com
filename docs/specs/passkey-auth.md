@@ -151,7 +151,7 @@ sequenceDiagram
 | POST | `/auth/passkey/login/verify` | 不要 | `{ challengeId, response: AuthenticationResponseJSON }` | `{ user }` + Set-Cookie |
 | POST | `/auth/logout` | 要 | — | `{ ok: true }` + Cookie 削除 |
 | GET | `/auth/me` | 要 | — | `{ user, features: { demoReset }, ai: { provider, model, providers: [{ id, models[] }] } }`（`meResponseSchema`。requirements v0.1.8 §10.1） |
-| GET | `/auth/passkeys` | 要 | — | `{ passkeys: [{ id, name, deviceType, backedUp, createdAt, lastUsedAt }] }` |
+| GET | `/auth/passkeys` | 要 | — | `{ passkeys: [{ id, name, deviceType, backedUp, createdAt, lastUsedAt }] }`。**並び順は作成日昇順（同時刻は id 昇順）を API が保証する**（#221） |
 | POST | `/auth/passkeys/register/options` | 要 | `{}` | 登録 options（`excludeCredentials` 付き） |
 | POST | `/auth/passkeys/register/verify` | 要 | `{ challengeId, response }` | `{ passkey }` |
 | DELETE | `/auth/passkeys/:id` | 要 | — | `{ ok: true }` |

@@ -13,7 +13,7 @@ import {
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
 } from "@simplewebauthn/server";
-import { and, eq, lt } from "drizzle-orm";
+import { and, asc, eq, lt } from "drizzle-orm";
 import { passkeyNameFromAaguid } from "../lib/aaguid";
 import { env } from "../lib/env";
 import { ApiException } from "../lib/errors";
@@ -387,6 +387,13 @@ export async function verifyAddPasskey(
   return toPasskeySummary(row);
 }
 
+/**
+ * 登録済みパスキーの一覧（FR-01 spec §4、GET /auth/passkeys）。
+ *
+ * 並びは **登録日の昇順（同時刻は id 昇順）** で API が保証する。orderBy が無いと
+ * 返却順が Postgres のプラン任せになり、ログインのたびの `counter` / `last_used_at`
+ * の UPDATE や名前変更で新タプルが末尾に置かれて、画面の行が飛ぶ（#221）。
+ */
 export async function listPasskeys(
   db: Db,
   userId: string,
@@ -394,34 +401,70 @@ export async function listPasskeys(
   const rows = await db
     .select()
     .from(schema.passkeyCredentials)
-    .where(eq(schema.passkeyCredentials.userId, userId));
+    .where(eq(schema.passkeyCredentials.userId, userId))
+    .orderBy(
+      asc(schema.passkeyCredentials.createdAt),
+      asc(schema.passkeyCredentials.id),
+    );
   return rows.map(toPasskeySummary);
 }
 
+/**
+ * パスキーを削除する（FR-01 spec §3.4、DELETE /auth/passkeys/:id）。
+ *
+ * 「最後の 1 件は削除できない」（spec §0）を**トランザクション + 行ロック**で守る。
+ * 件数の SELECT と DELETE を別文・非トランザクションで撃つと、同一ユーザーの
+ * 2 本の削除がどちらも「まだ 2 件ある」を観測してすり抜け、0 件になる（#220）。
+ * パスキーは唯一のログイン手段で復旧手段が無いため、0 件はアカウントの永久ロックアウトを意味する。
+ *
+ * `SELECT ... FOR UPDATE` にしている理由:
+ * - READ COMMITTED では `DELETE ... WHERE (SELECT count(*) ...) > 1` の 1 文化では不十分。
+ *   副問い合わせは行ロックを取らないので、別々の行を消す 2 文が両方通る。
+ * - 行ロックなら後続のトランザクションは前のコミットを待ち、再取得した最新の
+ *   件数で判定できる（消えた行はロック再チェックで結果から落ちる）。
+ * - `id` 昇順で並べてからロックする（LockRows は Sort の上に来る）。両者が同じ順で
+ *   ロックを取るのでデッドロックしない。
+ *
+ * Supavisor のトランザクションモードでも、トランザクションは 1 本のサーバ接続に
+ * ピン留めされるので SELECT と DELETE が別接続に載ることはない。
+ */
 export async function deletePasskey(
   db: Db,
   userId: string,
   credentialId: string,
 ): Promise<void> {
-  const rows = await db
-    .select({ id: schema.passkeyCredentials.id })
-    .from(schema.passkeyCredentials)
-    .where(eq(schema.passkeyCredentials.userId, userId));
-  if (!rows.some((r) => r.id === credentialId)) {
-    throw new ApiException("NOT_FOUND", "パスキーが見つかりません。");
-  }
-  if (rows.length <= 1) {
-    // 最後の 1 つを消すとログイン手段が無くなる（復旧手段は存在しない）
-    throw new ApiException("LAST_PASSKEY", "最後のパスキーは削除できません。");
-  }
-  await db
-    .delete(schema.passkeyCredentials)
-    .where(
-      and(
-        eq(schema.passkeyCredentials.id, credentialId),
-        eq(schema.passkeyCredentials.userId, userId),
-      ),
-    );
+  await db.transaction(async (tx) => {
+    const rows = await tx
+      .select({ id: schema.passkeyCredentials.id })
+      .from(schema.passkeyCredentials)
+      .where(eq(schema.passkeyCredentials.userId, userId))
+      .orderBy(asc(schema.passkeyCredentials.id))
+      .for("update");
+    if (!rows.some((r) => r.id === credentialId)) {
+      // 他人のものも存在しないものも同じ 404（所有の有無を漏らさない）
+      throw new ApiException("NOT_FOUND", "パスキーが見つかりません。");
+    }
+    if (rows.length <= 1) {
+      // 最後の 1 つを消すとログイン手段が無くなる（復旧手段は存在しない）
+      throw new ApiException(
+        "LAST_PASSKEY",
+        "最後のパスキーは削除できません。",
+      );
+    }
+    const deleted = await tx
+      .delete(schema.passkeyCredentials)
+      .where(
+        and(
+          eq(schema.passkeyCredentials.id, credentialId),
+          eq(schema.passkeyCredentials.userId, userId),
+        ),
+      )
+      .returning({ id: schema.passkeyCredentials.id });
+    if (deleted.length === 0) {
+      // ロック済みなので本来起きない。消していないのに 200 を返さないための保険
+      throw new ApiException("NOT_FOUND", "パスキーが見つかりません。");
+    }
+  });
 }
 
 /**
