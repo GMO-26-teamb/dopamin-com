@@ -14,7 +14,7 @@ function renderSidebar(active?: SidebarNavKey, onLogout = vi.fn()) {
 }
 
 describe("Sidebar", () => {
-  it("5 つのナビ項目をそれぞれの href で並べる", () => {
+  it("ナビはダッシュボード / 移管 / 設定の 3 項目だけ並べる", () => {
     renderSidebar("dashboard");
 
     const nav = screen.getByRole("navigation", {
@@ -24,18 +24,31 @@ describe("Sidebar", () => {
 
     expect(links.map((link) => link.textContent)).toEqual([
       "ダッシュボード",
-      "ドメイン取得",
       "移管",
       "設定",
-      "ログ",
     ]);
     expect(links.map((link) => link.getAttribute("href"))).toEqual([
       "/dashboard",
-      "/domains/new",
       "/transfers",
       "/settings",
-      "/logs",
     ]);
+  });
+
+  it("ログはナビに出さない（設定の「開発者向け」から開く）", () => {
+    renderSidebar("dashboard");
+
+    expect(screen.queryByRole("link", { name: "ログ" })).toBeNull();
+  });
+
+  it("ドメイン取得のナビ項目は置かず、CTA を唯一の入口にする", () => {
+    renderSidebar("dashboard");
+
+    const toNew = screen.getAllByRole("link", {
+      name: "ドメインを取得",
+    });
+    expect(toNew).toHaveLength(1);
+    expect(toNew[0]).toHaveAttribute("href", "/domains/new");
+    expect(screen.queryByRole("link", { name: "ドメイン取得" })).toBeNull();
   });
 
   it("active のナビ項目にだけ aria-current=page が付く", () => {
@@ -45,31 +58,30 @@ describe("Sidebar", () => {
       "aria-current",
       "page",
     );
-    for (const name of ["ダッシュボード", "ドメイン取得", "設定", "ログ"]) {
+    for (const name of ["ダッシュボード", "設定", "ドメインを取得"]) {
       expect(screen.getByRole("link", { name })).not.toHaveAttribute(
         "aria-current",
       );
     }
   });
 
-  it("主要 CTA は /domains/new へのリンク", () => {
-    renderSidebar("dashboard");
+  it("取得フローにいるあいだは CTA が現在地を示す", () => {
+    renderSidebar("domains");
 
     expect(
       screen.getByRole("link", { name: "ドメインを取得" }),
-    ).toHaveAttribute("href", "/domains/new");
+    ).toHaveAttribute("aria-current", "page");
+    for (const name of ["ダッシュボード", "移管", "設定"]) {
+      expect(screen.getByRole("link", { name })).not.toHaveAttribute(
+        "aria-current",
+      );
+    }
   });
 
   it("active 未指定ならどの項目も光らせない", () => {
     renderSidebar();
 
-    for (const name of [
-      "ダッシュボード",
-      "ドメイン取得",
-      "移管",
-      "設定",
-      "ログ",
-    ]) {
+    for (const name of ["ダッシュボード", "移管", "設定", "ドメインを取得"]) {
       expect(screen.getByRole("link", { name })).not.toHaveAttribute(
         "aria-current",
       );
@@ -90,13 +102,14 @@ describe("Sidebar", () => {
 describe("activeNavKey", () => {
   it.each([
     ["/dashboard", "dashboard"],
-    // 取得フローだけが「ドメイン取得」（最長一致が勝つ）
+    // 取得フローは CTA が Active（最長一致が勝つ）
     ["/domains/new", "domains"],
     // 保有ドメインの画面はダッシュボードの続き（Figma S-30 / S-40）
     ["/domains/takutaku.com", "dashboard"],
     ["/domains/foo/subdomains", "dashboard"],
     ["/transfers", "transfers"],
     ["/settings/passkeys", "settings"],
+    // ナビには出さないが現在地としては持つ
     ["/logs", "logs"],
   ])("%s -> %s", (pathname, expected) => {
     expect(activeNavKey(pathname)).toBe(expected);

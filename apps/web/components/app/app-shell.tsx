@@ -2,11 +2,10 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter } from "next/navigation";
-import { type ReactNode, useCallback, useState } from "react";
+import { type ReactNode, useCallback } from "react";
 import { endAuthSession } from "@/features/auth/session";
 import { useMe } from "@/lib/api/hooks";
 import { useServices } from "@/lib/api/provider";
-import { AiLogPanel } from "./ai-log-panel";
 import { MobileNav } from "./mobile-nav";
 import { activeNavKey, Sidebar } from "./sidebar";
 
@@ -26,7 +25,6 @@ export function AppShell({ children }: AppShellProps) {
   const services = useServices();
   const queryClient = useQueryClient();
   const me = useMe();
-  const [aiLogsOpen, setAiLogsOpen] = useState(false);
 
   const handleLogout = useCallback(() => {
     // セッションが既に失効していて logout が失敗しても /login へは必ず戻す。
@@ -44,8 +42,6 @@ export function AppShell({ children }: AppShellProps) {
       });
   }, [queryClient, router, services]);
 
-  const openAiLogs = useCallback(() => setAiLogsOpen(true), []);
-
   const active = activeNavKey(pathname);
 
   return (
@@ -55,20 +51,17 @@ export function AppShell({ children }: AppShellProps) {
           {...(active === undefined ? {} : { active })}
           className="md:hidden"
           onLogout={handleLogout}
-          onOpenAiLogs={openAiLogs}
         />
         <Sidebar
           {...(active === undefined ? {} : { active })}
           className="sticky top-0 hidden h-dvh self-start md:flex"
           onLogout={handleLogout}
-          onOpenAiLogs={openAiLogs}
           userName={me.data?.user.displayName ?? ""}
         />
         <main className="flex min-w-0 flex-1 flex-col gap-4 bg-panel px-4 py-5 md:px-8 md:py-7 xl:px-10 xl:py-8">
           {children}
         </main>
       </div>
-      <AiLogPanel onOpenChange={setAiLogsOpen} open={aiLogsOpen} />
     </div>
   );
 }
