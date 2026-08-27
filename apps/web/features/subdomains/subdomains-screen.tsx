@@ -368,7 +368,7 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
         />
         {/* 上段は「設計する」（ツリー + 選択中ホストの編集）。反映は下段に分ける（#219） */}
         <div className="flex w-full flex-col items-start gap-4 lg:flex-row">
-          <div className="w-full min-w-0 flex-1">
+          <div className="flex w-full min-w-0 flex-1 flex-col border-2 border-line border-solid bg-panel px-4 py-3">
             <PlanTree
               canAdd={canAddHost(draft.hosts)}
               domain={domain}

@@ -72,10 +72,10 @@ export function ApplySection({
     <section className="flex w-full flex-col gap-3 border-2 border-line border-solid bg-panel px-4 py-3">
       <CardKicker>DNS 反映</CardKicker>
       <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-start sm:gap-6">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 sm:max-w-95">
           <NameserverBadge switched={nameserversSwitched} />
         </div>
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 sm:max-w-95">
           <KeyValueRow label="反映状況" value={applyStatusSummary(counts)} />
         </div>
       </div>
