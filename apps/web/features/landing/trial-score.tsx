@@ -83,8 +83,7 @@ export function TrialScore() {
           ためしてみる
         </label>
         <p className="text-caption text-muted">
-          名前を入れると、既存のサービスとどれくらい紛らわしいかを 0〜100
-          で返します。登録もログインも要りません。
+          ログイン不要。0〜100 で返します。
         </p>
       </div>
 
@@ -126,9 +125,6 @@ export function TrialScore() {
         result={preview.data ?? null}
       />
 
-      <p className="text-caption text-muted">
-        ↑ 有名サービスに似た名前は正直に低スコア。あなたの候補は?
-      </p>
     </section>
   );
 }
@@ -178,9 +174,6 @@ function TrialResult({
 function TrialEmpty({ onExample }: { onExample: (example: string) => void }) {
   return (
     <Card emphasis="muted">
-      <p className="text-body-sm text-muted">
-        スコアと、いちばん近い既存の名前が最大 3 件出ます。
-      </p>
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-caption text-muted">例</span>
         {EXAMPLES.map((example) => (

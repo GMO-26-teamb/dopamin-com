@@ -48,10 +48,10 @@ describe("TrialScore（S-00 お試しスコア）", () => {
     expect(screen.queryByText("ログイン後に利用可")).not.toBeInTheDocument();
   });
 
-  it("結果が出ていなくても、何が返るのかと試せる例を出す", () => {
+  it("結果が出ていなくても、そのまま押せる例を出す", () => {
     renderTrial();
 
-    expect(screen.getByText(/いちばん近い既存の名前/)).toBeInTheDocument();
+    expect(screen.getByText("例")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "gogle" })).toBeInTheDocument();
     expect(screen.queryByText("独自性スコア")).not.toBeInTheDocument();
   });
