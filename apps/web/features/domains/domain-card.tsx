@@ -112,8 +112,6 @@ interface PrimaryAction {
 
 interface CardPresentation {
   border: string;
-  /** Transferring / PendingDelete は全体を 75% に落とす */
-  faded: boolean;
   badge: {
     tone: NonNullable<BadgeProps["tone"]>;
     variant: NonNullable<BadgeProps["variant"]>;
@@ -163,7 +161,6 @@ function present(
     case "expiring":
       return {
         border: "border-warn",
-        faded: false,
         badge: {
           tone: "warn",
           variant: "outline",
@@ -177,7 +174,6 @@ function present(
     case "redeemable":
       return {
         border: "border-line",
-        faded: false,
         badge: { ...badgeStyle, label: DISPLAY_STATUS_LABEL.rgp },
         progress: null,
         meta:
@@ -189,7 +185,6 @@ function present(
     case "transferring":
       return {
         border: "border-soft",
-        faded: true,
         badge: { ...badgeStyle, label: "移管申請中" },
         progress: null,
         meta: "完了するまで変更できません",
@@ -204,7 +199,6 @@ function present(
     case "hold":
       return {
         border: "border-warn",
-        faded: false,
         badge: {
           ...badgeStyle,
           icon: <TriangleAlert />,
@@ -217,7 +211,6 @@ function present(
     case "inactive":
       return {
         border: "border-line",
-        faded: false,
         badge: {
           ...badgeStyle,
           label: DISPLAY_STATUS_LABEL.inactive,
@@ -229,7 +222,6 @@ function present(
     case "pendingDelete":
       return {
         border: "border-soft",
-        faded: true,
         badge: {
           ...badgeStyle,
           label: DISPLAY_STATUS_LABEL.pending_delete,
@@ -245,7 +237,6 @@ function present(
     case "locked":
       return {
         border: "border-line",
-        faded: false,
         badge: {
           ...badgeStyle,
           icon: <Lock />,
@@ -258,7 +249,6 @@ function present(
     case "active":
       return {
         border: "border-line",
-        faded: false,
         badge: {
           ...badgeStyle,
           label: DISPLAY_STATUS_LABEL.active,
@@ -388,8 +378,9 @@ export function DomainCard({
       aria-labelledby={titleId}
       className={cn(
         "group relative flex w-full flex-col gap-2 border-2 border-solid bg-panel px-4 py-3 transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-[0_6px_0_-2px_var(--color-line)] motion-reduce:transition-none motion-reduce:hover:translate-y-0",
+        // 控えめに見せたい状態（移管中 / 削除待ち）は枠を soft にするだけにする。
+        // 全体の不透明度を下げると本文のコントラストが 4.5:1 を割るため（#95）
         view.border,
-        view.faded && "opacity-[var(--opacity-muted)]",
         className,
       )}
     >

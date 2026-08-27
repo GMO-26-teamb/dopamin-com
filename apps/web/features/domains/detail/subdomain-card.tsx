@@ -8,7 +8,7 @@ import type { DomainDetail } from "@/lib/api/types";
 
 /**
  * Figma: S-30 サブドメイン設計カード（`83:2478`、Emphasis = Brand）
- * 設計あり → 「保存済み · n ホスト · 反映済み a/n」+「開く」（S-43）。
+ * 設計あり → 「n ホスト · 反映済み a/n」+「開く」（S-43）。
  * 未作成 → 「未作成」+「設計をはじめる」（S-40）。
  *
  * 画面で一番目立つカードなので、カード面のどこを押しても S-43 へ入れるようにする
@@ -34,7 +34,7 @@ export function SubdomainCard({
         <p className="min-w-0 text-body-sm text-ink">
           {plan === null
             ? "未作成"
-            : `保存済み · ${plan.hosts}ホスト · 反映済み ${plan.applied}/${plan.hosts}`}
+            : `${plan.hosts} ホスト · 反映済み ${plan.applied}/${plan.hosts}`}
         </p>
         {readOnly ? null : (
           <Button

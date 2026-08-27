@@ -39,7 +39,8 @@ const KIND_BORDER: Record<TransferKind, string> = {
   "out-received": "border-warn",
   "in-pending": "border-line",
   "import-pending": "border-line",
-  history: "border-soft opacity-[var(--opacity-muted)]",
+  // 不透明度で落とすと本文が 4.5:1 を割る（#95）
+  history: "border-soft",
 };
 
 /** 履歴行の日付（`MM-DD`）。ローカルタイムで出す。 */

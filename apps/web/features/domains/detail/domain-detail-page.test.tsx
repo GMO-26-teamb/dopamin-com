@@ -117,7 +117,7 @@ describe("DomainDetailPage", () => {
     renderPage("takutaku.com");
 
     expect(
-      await screen.findByText("保存済み · 4ホスト · 反映済み 2/4"),
+      await screen.findByText("4 ホスト · 反映済み 2/4"),
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /開く/ })).toHaveAttribute(
       "href",
