@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.6（2026-08-27） |
+| 版 | v0.7（2026-08-27） |
 | 対応要件 | `docs/requirements.md` v0.1.11 §4 FR-01〜19、§9.2、§10.3、§11.3 / 11.4、§15 |
 | Figma | `UI Design (Team B)` — ページ **Prototype / Screens**（全画面・全状態、Standard、Present で遷移可）/ **Prototype / Screens (極ドパ)** / **Prototype / Flow**（遷移図）。コンポーネントは同ファイルのデザインシステム（Getting Started 参照） |
 | アセット | `docs/ui-design/*.png`（抜粋スクリーンショット） |
@@ -51,7 +51,7 @@
 | S-10 | `/dashboard` | 通常 | Page Header（件数・最終同期・「最新化」）+ Domain Card 2 列グリッド。カードの表示項目: ドメイン名 / 状態バッジ / 進捗（残日数）/ レジストリ名 / 有効期限 or 残日数 / 最終同期（Meta 右端、キャッシュ時は「未同期」バッジ（`Badge` tone=muted）を最終同期テキストの左に置く）/ 操作。「詳細」→ S-30、「今すぐ更新」→ D-01、「復旧する」→ D-04、「状態を確認」→ S-50、「NS を設定」→ D-02 | Page Header, Domain Card |
 | S-11 | `/dashboard` | 0 件 | Empty State Neutral + CTA「ドメインを取得」→ S-20、「移管で持ち込む」→ S-50 | Empty State |
 | S-12 | `/dashboard` | 読み込み | Skeleton（ヘッダー + カード 4）。DB キャッシュを先に描画し、`POST /domains/sync` はバックグラウンド | Skeleton |
-| S-13 | `/dashboard` | 同期エラー（AC-18-1） | Banner Warn。`POST /domains/sync` は部分失敗でも 200 + `failures[]` を返すので、文言は `failures[].registry`（TLD から特定）から生成し、リクエストごとの失敗のときは `error.registry`、どちらも無ければ stale なカードのレジストリから推定する（「Kitaqsign が応答しません」「Kitaqnic が…」「両レジストリが応答しません」）。部分失敗のときは「n 件が最新化できませんでした」を本文に添える。Banner に最終同期時刻は書かない。同期に失敗したカードだけ「未同期」バッジ（`Badge` tone=muted）+「最終同期 n 分前」を Meta 右端に表示し、更新系操作は Disabled（参照系の「詳細 / 状態を確認」は塞がない） | Banner |
+| S-13 | `/dashboard` | 同期エラー（AC-18-1） | Banner Warn。`POST /domains/sync` は部分失敗でも 200 + `failures[]` を返すので、見出しと案内は `failures[].code`（+ リクエストごとの失敗なら `error.code`）で出し分ける（`REGISTRY_TIMEOUT` / `REGISTRY_UNAVAILABLE` →「〇〇が応答しません — 一覧はキャッシュを表示しています」+「参照系は自動で 2 回再試行しました」、`REGISTRY_SPEC_MISMATCH` →「〇〇の応答が想定と異なります — レジストリの仕様変更の可能性があります」+ 操作ログ導線、`REGISTRY_REJECTED` →「〇〇が最新化を拒否しました」+ 理由（API が `registry-codes.ts` の表から `message` に載せたもの。1 つに定まらなければ操作ログへ誘導）、`NOT_FOUND` →「〇〇に登録が見つかりません」（再試行の記述は出さない）、それ以外 →「一覧を最新化できませんでした」）。コードが混ざるときは最も重い区分（応答なし > 想定外の応答 > 拒否 > レジストリに未登録 > その他）の見出しを採り、本文に内訳（「応答なし 1 件・レジストリに未登録 2 件」）を添える。主語は見出しに採った区分の `failures[].registry`（TLD から特定）から生成し、リクエストごとの失敗のときは `error.registry`、どちらも無ければ stale なカードのレジストリから推定する（「Kitaqsign が…」「Kitaqnic が…」「両レジストリが…」）。部分失敗のときは「n 件が最新化できませんでした」を本文に添える。Banner に最終同期時刻は書かない。同期に失敗したカードだけ「未同期」バッジ（`Badge` tone=muted）+「最終同期 n 分前」を Meta 右端に表示し、更新系操作は Disabled（参照系の「詳細 / 状態を確認」は塞がない） | Banner |
 
 **Domain Card の Status（§9.2 `deriveDisplayStatus` と 1:1）**
 
@@ -290,3 +290,4 @@ Figma **Prototype / Screens** にプロトタイプ接続を設定済み（Prese
 | v0.4 | 2026-08-26 | FR-19（requirements v0.1.11）のモック決済を反映: **S-29**（登録のお支払い）/ **D-11**（更新のお支払い）を追加、S-25 / D-01 の主ボタンを「お支払いへ」に変更、S-26 の本文に支払い控え、S-28 の Banner 本文を支払い前提に更新、D-04 に `RESTORE_FEE` 参照を明記、遷移図に決済分岐を追加。詳細は `docs/specs/payment-mock.md` |
 | v0.5 | 2026-08-27 | 実装との乖離を修正: §1 の幅 / サイドバーを実装の 1280px / 224px（rem 基準・大画面で font-size 拡大）と `MobileNav` に合わせ、S-24 のルートを `/domains/new`（検索条件は URL に載らない）に訂正、S-10 / S-13 / §4 の「Stale」を実装の「未同期」バッジ表記に統一、§7 #6 の仮置きを現状に更新 |
 | v0.6 | 2026-08-27 | AI の時間制限の緩和（requirements v0.1.22）に追随: S-21 / S-23 の「10 秒」を「20 秒」、S-41 の「15 秒」を「30 秒」に更新。画面と状態そのものは変えていない |
+| v0.7 | 2026-08-27 | S-13 の Banner を `failures[].code` で出し分ける仕様に更新（#184）。固定文言だと `NOT_FOUND` などレジストリ障害でない失敗まで「〇〇が応答しません」と出て切り分けが空振りするため。画面と状態そのものは変えていない |
