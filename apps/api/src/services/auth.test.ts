@@ -8,7 +8,7 @@ import {
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
 } from "@simplewebauthn/server";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
   afterAll,
   afterEach,
@@ -26,6 +26,7 @@ import {
   createAuthenticationOptions,
   createRegistrationOptions,
   deletePasskey,
+  listPasskeys,
   verifyAddPasskey,
   verifyAuthentication,
   verifyRegistration,
@@ -581,5 +582,95 @@ describe("deletePasskey（FR-01 spec §3.4）", () => {
 
     const rest = await db.select().from(schema.passkeyCredentials);
     expect(rest.map((r) => r.id)).toEqual(["k-2"]);
+  });
+});
+
+/**
+ * #221: 一覧の並び順は API が保証する（作成日昇順、同時刻は id 昇順）。
+ * orderBy が無いと返却順が Postgres のプラン任せになり、ログインや名前変更で
+ * UPDATE された行が Seq Scan の末尾へ移動して画面の行が飛ぶ。
+ */
+describe("listPasskeys の並び順（#221 / FR-01 spec §4）", () => {
+  it("物理順ではなく created_at 昇順で返す", async () => {
+    const { userId } = await seedUserWithPasskey(db, { credentialId: "old" });
+    // 物理順（挿入順）と created_at の順をわざとずらす
+    await db
+      .update(schema.passkeyCredentials)
+      .set({ createdAt: new Date("2026-08-01T00:00:00.000Z") })
+      .where(eq(schema.passkeyCredentials.id, "old"));
+    await db.insert(schema.passkeyCredentials).values([
+      {
+        id: "newest",
+        userId,
+        publicKey: new Uint8Array([2]),
+        counter: 0,
+        createdAt: new Date("2026-08-03T00:00:00.000Z"),
+      },
+      {
+        id: "middle",
+        userId,
+        publicKey: new Uint8Array([3]),
+        counter: 0,
+        createdAt: new Date("2026-08-02T00:00:00.000Z"),
+      },
+    ]);
+
+    const list = await listPasskeys(db, userId);
+
+    expect(list.map((p) => p.id)).toEqual(["old", "middle", "newest"]);
+  });
+
+  it("created_at が同時刻なら id 昇順で安定させる", async () => {
+    const createdAt = new Date("2026-08-01T00:00:00.000Z");
+    const { userId } = await seedUserWithPasskey(db, { credentialId: "b" });
+    await db
+      .update(schema.passkeyCredentials)
+      .set({ createdAt })
+      .where(eq(schema.passkeyCredentials.id, "b"));
+    await db.insert(schema.passkeyCredentials).values([
+      {
+        id: "c",
+        userId,
+        publicKey: new Uint8Array([2]),
+        counter: 0,
+        createdAt,
+      },
+      {
+        id: "a",
+        userId,
+        publicKey: new Uint8Array([3]),
+        counter: 0,
+        createdAt,
+      },
+    ]);
+
+    expect((await listPasskeys(db, userId)).map((p) => p.id)).toEqual([
+      "a",
+      "b",
+      "c",
+    ]);
+  });
+
+  it("行を更新しても並びは変わらない（ログイン・名前変更で行が飛ばない）", async () => {
+    const { userId } = await seedUserWithPasskey(db, { credentialId: "a" });
+    await db.insert(schema.passkeyCredentials).values([
+      { id: "b", userId, publicKey: new Uint8Array([2]), counter: 0 },
+      { id: "c", userId, publicKey: new Uint8Array([3]), counter: 0 },
+    ]);
+    const before = (await listPasskeys(db, userId)).map((p) => p.id);
+    // 統計が無いと索引経由のプランになり症状が出ないので、本番と同じ Seq Scan を選ばせる
+    await db.execute(sql`ANALYZE "passkey_credentials"`);
+
+    // ログイン相当（counter / last_used_at の UPDATE）と名前変更相当
+    await db
+      .update(schema.passkeyCredentials)
+      .set({ counter: 1, lastUsedAt: new Date() })
+      .where(eq(schema.passkeyCredentials.id, "a"));
+    await db
+      .update(schema.passkeyCredentials)
+      .set({ name: "改名した" })
+      .where(eq(schema.passkeyCredentials.id, "b"));
+
+    expect((await listPasskeys(db, userId)).map((p) => p.id)).toEqual(before);
   });
 });

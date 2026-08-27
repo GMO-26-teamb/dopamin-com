@@ -1,6 +1,6 @@
 import { type Db, schema } from "@dopamin/db";
 import { passkeySummarySchema } from "@dopamin/shared";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import app from "../../src/index";
 import { setDbForTesting } from "../../src/lib/db";
@@ -181,5 +181,70 @@ describe("PATCH /api/v1/auth/passkeys/:id", () => {
     const res = await patch(ALICE_CRED, { name: "x" });
     expect(res.status).toBe(401);
     expect(await res.json()).toMatchObject({ error: { code: "UNAUTHORIZED" } });
+  });
+});
+
+/**
+ * このユーザーのパスキーを count 件（<prefix>-0 …）作り、セッション Cookie を返す。
+ * 既存の describe と行を共有しないよう、テストごとに新しいユーザーを作る。
+ */
+async function seedUserWithPasskeys(
+  prefix: string,
+  count: number,
+): Promise<{ userId: string; cookie: string; ids: string[] }> {
+  const session = await createTestSession(db, { displayName: prefix });
+  const ids = Array.from({ length: count }, (_, i) => `${prefix}-${i}`);
+  await db.insert(schema.passkeyCredentials).values(
+    ids.map((id, i) => ({
+      id,
+      userId: session.user.id,
+      publicKey: Buffer.from([i + 1]),
+      counter: 0,
+      name: `パスキー ${i}`,
+    })),
+  );
+  return { userId: session.user.id, cookie: session.cookie, ids };
+}
+
+/**
+ * #221: 一覧の並びを API が保証する（作成日昇順 → id 昇順）。
+ * orderBy が無いと Postgres のプラン任せになり、UPDATE された行が末尾へ飛ぶ。
+ */
+describe("GET /api/v1/auth/passkeys の並び順（#221）", () => {
+  async function listIds(cookie: string): Promise<string[]> {
+    const res = await app.request("/api/v1/auth/passkeys", {
+      headers: { cookie },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { passkeys: Array<{ id: string }> };
+    return body.passkeys.map((p) => p.id);
+  }
+
+  it("名前を変更しても一覧の並びが変わらない", async () => {
+    const { cookie, ids } = await seedUserWithPasskeys("order", 3);
+    // pglite は統計が無いと索引経由のプランになり症状が出ない。本番と同じ Seq Scan を選ばせる
+    await db.execute(sql`ANALYZE "passkey_credentials"`);
+    const before = await listIds(cookie);
+    expect(before).toEqual(ids);
+
+    const target = ids[0] ?? "";
+    expect((await patch(target, { name: "編集した名前" }, cookie)).status).toBe(
+      200,
+    );
+
+    expect(await listIds(cookie)).toEqual(before);
+  });
+
+  it("ログイン（counter / last_used_at の更新）でも並びが変わらない", async () => {
+    const { cookie, ids } = await seedUserWithPasskeys("order-login", 3);
+    await db.execute(sql`ANALYZE "passkey_credentials"`);
+    const before = await listIds(cookie);
+
+    await db
+      .update(schema.passkeyCredentials)
+      .set({ counter: 1, lastUsedAt: new Date() })
+      .where(eq(schema.passkeyCredentials.id, ids[0] ?? ""));
+
+    expect(await listIds(cookie)).toEqual(before);
   });
 });
