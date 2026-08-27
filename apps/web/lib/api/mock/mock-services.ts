@@ -7,6 +7,7 @@
  */
 
 import {
+  DEFAULT_REGISTRANT_PROFILE,
   DOPAMIN_NAMESERVERS,
   type DomainCheckRequest,
   deriveDisplayStatus,
@@ -586,12 +587,15 @@ export function createMockServices(
         }
         const store = getMockStore();
         const { sld, tld } = splitDomainName(input.name);
+        // S-25 の折りたたみで入力した NS・登録者をそのまま反映する。
+        // NS を送ったときは inactive にならない（レジストリと同じ扱い）
+        const nameservers = input.nameservers ?? [];
         const created = withDerivedStatus({
           name: input.name,
           sld,
           tld,
           registry: mockRegistryForName(input.name),
-          statuses: ["inactive"],
+          statuses: nameservers.length === 0 ? ["inactive"] : ["ok"],
           rgpStatuses: [],
           ownership: "owned",
           displayStatus: "inactive",
@@ -601,10 +605,14 @@ export function createMockServices(
           syncedAt: nowIso(),
           stale: false,
           transfer: null,
-          nameservers: [],
+          nameservers,
           registrant: {
-            name: "Taro Test",
-            email: "taro.test@example.com",
+            name:
+              input.contacts?.registrant.name ??
+              DEFAULT_REGISTRANT_PROFILE.name,
+            email:
+              input.contacts?.registrant.email ??
+              DEFAULT_REGISTRANT_PROFILE.email,
             migrated: true,
           },
           gracePeriods: [{ kind: "add", until: at(days(5)) }],
