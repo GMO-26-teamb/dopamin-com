@@ -32,7 +32,9 @@ import type { NotifySettings } from "./notice";
  * FR-01 のパスキー一覧・追加・名前変更・削除。
  * - 名前変更は行のインライン編集（鉛筆 Icon Button → Input + 保存 / キャンセル、1〜32 文字。
  *   spec §8。Figma フレームは無く、S-70 の行に Input `46:110` を差し込む）
- * - 最後の 1 つは削除ボタンを Disabled にする（API も 409 を返す。ui-screens §2.8）
+ * - 最後の 1 つは削除ボタンを Disabled にする（API も 409 を返す。ui-screens §2.8）。
+ *   押せない理由はアクセシブルネームにだけ持たせ、文言を増やさない
+ * - 追加・削除・名前変更の結果は自分では出さず、親の 1 本の面に投げる（notice.ts）
  */
 
 /** 骨組みの行数（fixtures のパスキー 2 件に合わせる） */
@@ -54,19 +56,20 @@ export function PasskeySection({ onNotify }: PasskeySectionProps) {
   /** 編集中の行（同時に 1 行だけ） */
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  /** 別の操作を始めるときに前の Error Card を消す */
+  /** 別の操作を始めるときに前の結果（Banner / Error Card）を消す */
   const resetMutations = () => {
     addPasskey.reset();
     deletePasskey.reset();
     renamePasskey.reset();
+    onNotify(null);
   };
 
   const handleAdd = () => {
-    deletePasskey.reset();
-    renamePasskey.reset();
+    resetMutations();
     addPasskey.mutate(undefined, {
       onSuccess: (created) => {
         onNotify({
+          kind: "banner",
           tone: "ok",
           title: "パスキーを追加しました",
           body: `${passkeyName(created)} でログインできます。`,
@@ -75,6 +78,7 @@ export function PasskeySection({ onNotify }: PasskeySectionProps) {
       onError: (error) => {
         // S-70b: 追加失敗は Banner Warn（WebAuthn のキャンセルもここに来る）
         onNotify({
+          kind: "banner",
           tone: "warn",
           title: "パスキーを追加できませんでした",
           body: toErrorCopy(error).body,
@@ -90,13 +94,17 @@ export function PasskeySection({ onNotify }: PasskeySectionProps) {
       onSuccess: () => {
         setTarget(null);
         onNotify({
+          kind: "banner",
           tone: "ok",
           title: "パスキーを削除しました",
           body: `${name} を削除しました。`,
         });
       },
       // 409（最後の 1 つ）などは D-09 を閉じて Error Card に出す（ui-screens §4）
-      onError: () => setTarget(null),
+      onError: (error) => {
+        setTarget(null);
+        onNotify({ kind: "error", error });
+      },
     });
   };
 
@@ -108,12 +116,14 @@ export function PasskeySection({ onNotify }: PasskeySectionProps) {
         onSuccess: (renamed) => {
           setEditingId(null);
           onNotify({
+            kind: "banner",
             tone: "ok",
             title: "パスキーの名前を変更しました",
             body: `${previous} を ${passkeyName(renamed)} に変更しました。`,
           });
         },
         // 失敗は編集中のまま Error Card を出す（直して再送できる。ui-screens §4「更新系エラー」）
+        onError: (error) => onNotify({ kind: "error", error }),
       },
     );
   };
@@ -174,12 +184,6 @@ export function PasskeySection({ onNotify }: PasskeySectionProps) {
               saving={renamePasskey.isPending && editingId === passkey.id}
             />
           ))}
-          {deletePasskey.error ? (
-            <ErrorCard error={deletePasskey.error} />
-          ) : null}
-          {renamePasskey.error ? (
-            <ErrorCard error={renamePasskey.error} />
-          ) : null}
           <div className="flex w-full">{addButton}</div>
         </>
       )}
@@ -271,7 +275,7 @@ function PasskeyRow({
         size="sm"
         variant="outline"
       >
-        {isLast ? "削除（最後の1つは不可）" : "削除"}
+        削除
       </Button>
     </div>
   );

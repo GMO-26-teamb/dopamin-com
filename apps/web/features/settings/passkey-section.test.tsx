@@ -123,12 +123,12 @@ describe("PasskeySection", () => {
     if (only === undefined) throw new Error("fixture が壊れている");
     renderSection({ listPasskeys: () => Promise.resolve([only]) });
 
-    // Disabled の理由はアクセシブルネームにも残す
+    // 見えるラベルは「削除」だけにして、押せない理由はアクセシブルネームにだけ残す
     const remove = await screen.findByRole("button", {
       name: "MacBook Touch ID のパスキーを削除（最後の1つは不可）",
     });
     expect(remove).toBeDisabled();
-    expect(remove).toHaveTextContent("削除（最後の1つは不可）");
+    expect(remove).toHaveTextContent(/^削除$/);
   });
 
   it("削除は D-09 を開いてから実行し、成功したら Banner Ok を親に渡す", async () => {
@@ -145,9 +145,7 @@ describe("PasskeySection", () => {
       await screen.findByText("パスキーを削除しますか？"),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(
-        "iPhone Face ID のパスキーを削除します。最後の 1 つは削除できません。",
-      ),
+      screen.getByText("iPhone Face ID のパスキーを削除します。"),
     ).toBeInTheDocument();
 
     await user().click(screen.getByRole("button", { name: "削除する" }));
@@ -155,6 +153,7 @@ describe("PasskeySection", () => {
     await waitFor(() => expect(deletePasskey).toHaveBeenCalledWith("pk_2"));
     await waitFor(() =>
       expect(onNotify).toHaveBeenCalledWith({
+        kind: "banner",
         tone: "ok",
         title: "パスキーを削除しました",
         body: "iPhone Face ID を削除しました。",
@@ -162,15 +161,13 @@ describe("PasskeySection", () => {
     );
   });
 
-  it("削除が 409 なら D-09 を閉じて CONFLICT の Error Card を出す", async () => {
+  it("削除が 409 なら D-09 を閉じて Error Card を親に渡す（自分では出さない）", async () => {
+    const error = new ApiClientError({
+      code: "CONFLICT",
+      message: "最後のパスキーは削除できません。",
+    });
     const { onNotify } = renderSection({
-      deletePasskey: () =>
-        Promise.reject(
-          new ApiClientError({
-            code: "CONFLICT",
-            message: "最後のパスキーは削除できません。",
-          }),
-        ),
+      deletePasskey: () => Promise.reject(error),
     });
 
     await user().click(
@@ -180,13 +177,14 @@ describe("PasskeySection", () => {
     );
     await user().click(await screen.findByRole("button", { name: "削除する" }));
 
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("CONFLICT");
-    expect(alert).toHaveTextContent("最後のパスキーは削除できません。");
+    await waitFor(() =>
+      expect(onNotify).toHaveBeenCalledWith({ kind: "error", error }),
+    );
     await waitFor(() =>
       expect(screen.queryByText("パスキーを削除しますか？")).toBeNull(),
     );
-    expect(onNotify).not.toHaveBeenCalled();
+    // 警告の面が積み重ならないよう、セクション内には出さない
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("追加に失敗したら S-70b の Banner Warn を親に渡す", async () => {
@@ -249,6 +247,7 @@ describe("PasskeySection", () => {
       screen.queryByRole("textbox", { name: "パスキーの名前" }),
     ).toBeNull();
     expect(onNotify).toHaveBeenCalledWith({
+      kind: "banner",
       tone: "ok",
       title: "パスキーの名前を変更しました",
       body: "iPhone Face ID を 仕事用 iPhone に変更しました。",
@@ -308,15 +307,13 @@ describe("PasskeySection", () => {
     expect(renamePasskey).not.toHaveBeenCalled();
   });
 
-  it("変更に失敗したら編集中のまま Error Card を出す", async () => {
+  it("変更に失敗したら編集中のまま Error Card を親に渡す", async () => {
+    const error = new ApiClientError({
+      code: "INTERNAL",
+      message: "パスキーの名前を変更できませんでした。",
+    });
     const { onNotify } = renderSection({
-      renamePasskey: () =>
-        Promise.reject(
-          new ApiClientError({
-            code: "INTERNAL",
-            message: "パスキーの名前を変更できませんでした。",
-          }),
-        ),
+      renamePasskey: () => Promise.reject(error),
     });
 
     await user().click(
@@ -329,12 +326,12 @@ describe("PasskeySection", () => {
     await user().type(input, "仕事用 iPhone");
     await user().click(screen.getByRole("button", { name: "保存" }));
 
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("INTERNAL");
-    expect(alert).toHaveTextContent("パスキーの名前を変更できませんでした。");
+    await waitFor(() =>
+      expect(onNotify).toHaveBeenCalledWith({ kind: "error", error }),
+    );
+    // 直して再送できるよう編集中のまま
     expect(screen.getByRole("textbox", { name: "パスキーの名前" })).toHaveValue(
       "仕事用 iPhone",
     );
-    expect(onNotify).not.toHaveBeenCalled();
   });
 });

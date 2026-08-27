@@ -16,8 +16,9 @@ import {
  *
  * 汎用 Dialog（ui-screens §2.8）。破壊的操作の再入力が要るのはドメイン廃止 / デモリセット /
  * 移管 OUT の承認だけなので（§5）、ここは確認テキストの入力を課さない。
- * 最後の 1 つは呼び出し側で Disabled にするが、競合で API が 409 を返したときは
- * ダイアログを閉じて呼び出し側が Error Card を出す（§4 の CONFLICT 行）。
+ * 最後の 1 つは呼び出し側が Disabled にする（理由はそのボタンのアクセシブルネームだけに置く）。
+ * 競合で API が 409 を返したときはダイアログを閉じて呼び出し側が Error Card を出す
+ * （§4 の CONFLICT 行）。
  */
 export interface DeletePasskeyDialogProps {
   open: boolean;
@@ -42,7 +43,7 @@ export function DeletePasskeyDialog({
           <DialogTitle>パスキーを削除しますか？</DialogTitle>
         </DialogHeader>
         <DialogDescription>
-          {passkeyName} のパスキーを削除します。最後の 1 つは削除できません。
+          {passkeyName} のパスキーを削除します。
         </DialogDescription>
         <DialogFooter>
           <DialogClose asChild>

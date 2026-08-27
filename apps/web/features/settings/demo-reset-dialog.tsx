@@ -11,9 +11,8 @@ import { DangerDialog } from "@/components/ui/dialog";
 export const DEMO_RESET_CONFIRM_TEXT = "reset";
 
 const SUBTITLE =
-  "あなたのドメイン・設計・ログを削除し、各状態のサンプル（Active / RGP / 期限間近 / 移管中）を再投入します。";
-const NOTE =
-  "DEMO_RESET_ENABLED=true の環境でのみ実行できます。レジストリ側の状態は戻せないため、デモ用ドメインは dopamin-demo-* として実登録するか mock レジストリに紐付けます。";
+  "いまのドメイン・サブドメイン設計・ログを削除し、各状態のサンプル（Active / 復旧猶予 / 期限間近 / 移管中）を再投入します。";
+const NOTE = "この操作は取り消せません。";
 
 export interface DemoResetDialogProps {
   open: boolean;
