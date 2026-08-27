@@ -17,13 +17,14 @@ import { describe, expect, it } from "vitest";
  * 判定の詳細（gold セット・攻撃回帰）は uniqueness.test.ts / default-corpus.test.ts が担う。
  * ここは「requirements の AC がそのまま守られているか」だけを見る。
  *
- * 計測方法について（#178）:
+ * 計測方法について（#181 / #178）:
  * GitHub Actions の共有ランナーは 2 コアで、vitest が複数のテストファイルを並列に走らせる。
  * このため壁時計の単発計測は CPU steal と GC で数倍に跳ね、AC を満たしていても CI が落ちる
- * （実測: ローカル約 0.1 秒 / CI で 1.7 秒）。ここでは
+ * （実測: ローカル約 0.1 秒 / CI で 1.7 秒。同じ run の中で cold 計測より warm 計測の方が
+ * 遅いという逆転も観測された = 実処理コストではなくスケジューリング由来）。ここでは
  *   1. ウォームアップぶんを捨て、
  *   2. 複数回計測して中央値を取り、
- *   3. 壁時計ではなくプロセスの CPU 時間で判定する
+ *   3. 取れる環境では壁時計ではなくプロセスの CPU 時間で判定する
  * ことで、スケジューリング由来のゆらぎを外しつつアルゴリズムの退行は検出できるようにする。
  * FR-05 は外部 I/O を持たない純 CPU 処理なので、本番（Vercel Functions）では
  * 壁時計 ≒ CPU 時間になり、CPU 時間で見ても AC の意味は保たれる。
@@ -39,29 +40,51 @@ const AC_05_3_BUDGET_MS = 1_500;
  */
 const CORPUS_PREPARE_BUDGET_MS = 5_000;
 
-/** 計測回数。単発だと共有 CI ランナーの 1 回のストールで落ちるので中央値で判定する。 */
+/** 計測回数。単発だと共有 CI ランナーの 1 回のストールで落ちるので中央値で判定する。奇数。 */
 const SAMPLES = 9;
 /** 捨てる先頭の計測回数（V8 の JIT ウォームアップぶん）。 */
 const WARMUP = 2;
+
+/**
+ * `process.cpuUsage`（Node）への参照。
+ * `packages/shared` はブラウザからも import されるので `lib` は ES2023 だけにしてあり、
+ * node / DOM の型を足さない。ここでだけ構造的に取り出して、無い環境では壁時計に落ちる。
+ */
+const nodeCpuUsage = (
+  globalThis as {
+    process?: { cpuUsage?: () => { user: number; system: number } };
+  }
+).process?.cpuUsage;
+
+/** 計測時刻をミリ秒で返す。CPU 時間が取れるならそれを、無ければ壁時計を使う。 */
+function elapsedSourceMs(): number {
+  if (nodeCpuUsage !== undefined) {
+    const { user, system } = nodeCpuUsage();
+    return (user + system) / 1000;
+  }
+  return Date.now();
+}
+
+/** どちらの時計で測ったかを失敗メッセージに出すためのラベル。 */
+const CLOCK = nodeCpuUsage !== undefined ? "cpu" : "wall";
 
 /** 計測ごとに違う語を使う（同じ入力を繰り返して有利な経路だけを測らないため）。 */
 function probeName(i: number): string {
   return `dopaminprobe${i}zx`;
 }
 
-/** このプロセスが消費した CPU 時間（user + system）をミリ秒で返す。 */
-function cpuMs(): number {
-  const { user, system } = process.cpuUsage();
-  return (user + system) / 1000;
-}
-
-/** 昇順ソートした中央値。 */
+/** 昇順ソートした中央値（SAMPLES は奇数なので中央の 1 件）。 */
 function median(values: readonly number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0
-    ? (sorted[mid - 1] + sorted[mid]) / 2
-    : sorted[mid];
+  const hi = sorted[mid];
+  if (hi === undefined) {
+    throw new Error("median: サンプルが空です");
+  }
+  if (sorted.length % 2 !== 0) {
+    return hi;
+  }
+  return ((sorted[mid - 1] ?? hi) + hi) / 2;
 }
 
 describe("FR-05 の AC（実コーパス）", () => {
@@ -76,29 +99,28 @@ describe("FR-05 の AC（実コーパス）", () => {
   it("AC-05-3: 1 件あたり 1.5 秒以内で算出できる", () => {
     // 準備済みコーパスでの 1 件あたり（画面が並べる候補 6 件ぶんも予算内に収まる想定）
     const corpus = getDefaultPreparedCorpus();
-    const cpuSamples: number[] = [];
-    const wallSamples: number[] = [];
+    const samples: number[] = [];
     for (let i = 0; i < WARMUP + SAMPLES; i++) {
-      const cpuStart = cpuMs();
-      const wallStart = performance.now();
+      const started = elapsedSourceMs();
       scoreDistinctiveness(probeName(i), corpus);
-      const cpuElapsed = cpuMs() - cpuStart;
-      const wallElapsed = performance.now() - wallStart;
+      const elapsed = elapsedSourceMs() - started;
       if (i >= WARMUP) {
-        cpuSamples.push(cpuElapsed);
-        wallSamples.push(wallElapsed);
+        samples.push(elapsed);
       }
     }
-    const detail = `cpu median=${Math.round(median(cpuSamples))}ms wall median=${Math.round(median(wallSamples))}ms cpu samples=[${cpuSamples.map(Math.round).join(",")}]`;
-    expect(median(cpuSamples), detail).toBeLessThan(AC_05_3_BUDGET_MS);
+    const detail = `${CLOCK} median=${Math.round(median(samples))}ms samples=[${samples.map(Math.round).join(",")}]`;
+    expect(median(samples), detail).toBeLessThan(AC_05_3_BUDGET_MS);
   });
 
   it("コーパスの準備が破滅的に遅くなっていない", () => {
     // getDefaultPreparedCorpus() はモジュール単位でメモ化されるので、
     // 準備そのものを測るには prepareCorpus を直接呼ぶ。
     const entries = buildDefaultCorpusEntries();
-    const started = cpuMs();
+    const started = elapsedSourceMs();
     prepareCorpus(entries, { version: DEFAULT_CORPUS_VERSION });
-    expect(cpuMs() - started).toBeLessThan(CORPUS_PREPARE_BUDGET_MS);
+    const elapsed = elapsedSourceMs() - started;
+    expect(elapsed, `${CLOCK} elapsed=${Math.round(elapsed)}ms`).toBeLessThan(
+      CORPUS_PREPARE_BUDGET_MS,
+    );
   });
 });
