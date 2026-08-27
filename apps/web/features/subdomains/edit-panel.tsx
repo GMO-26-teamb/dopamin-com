@@ -116,11 +116,12 @@ export function EditPanel({
           })}
         </fieldset>
         <span aria-hidden="true" className="min-w-0 flex-1" />
+        {/* 破壊的操作なので設定画面と同じ danger（#219） */}
         <Button
           leadingIcon={<Trash2 />}
           onClick={onRemove}
           size="sm"
-          variant="subtle"
+          variant="danger"
         >
           このホストを削除
         </Button>

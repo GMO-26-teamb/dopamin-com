@@ -19,16 +19,19 @@ import type { ApiClientError } from "@/lib/api/errors";
 import type { DnsDiff } from "@/lib/api/types";
 import { diffTotal, recordText } from "./apply-status";
 import { DnsDiffRow } from "./dns-diff-row";
-import { NameserverBadge } from "./nameserver-badge";
 
 /**
  * Figma: Dialog / Apply DNS `73:192`（S-44）
- * 反映前の差分確認（AC-13-7）。件数チップ → 差分行 → NS 状態 →「n 件を反映する」。
+ * 反映前の差分確認（AC-13-7）。件数チップ → 差分行 →「反映する」。
  * キャンセル / Esc では何も変更しない。
+ *
+ * 件数は上のチップだけが持つ（ボタンラベルで数を言い直さない）。ネームサーバーの
+ * 状態も呼び出し元の反映セクションが出しているので、ここでは切り替わる予告だけを 1 文で出す。
  */
 
-const APPLY_NOTE =
-  "取り消すには設計を編集して再反映します。実インターネットの名前解決には影響しません。";
+const APPLY_NOTE = "取り消すには設計を編集して反映し直します。";
+const NAMESERVER_NOTE =
+  "反映と同時にネームサーバーをドパ民 DNS に切り替えます。";
 
 /** 0 件のチップは目立たせない（Figma の「削除 0」）。 */
 function countTone(
@@ -133,7 +136,9 @@ export function ApplyDnsDialog({
             ) : null}
 
             <Divider weight="thin" />
-            <NameserverBadge switched={nameserversSwitched} />
+            {nameserversSwitched ? null : (
+              <p className="w-full text-caption text-warn">{NAMESERVER_NOTE}</p>
+            )}
             <p className="w-full text-caption text-muted">{APPLY_NOTE}</p>
           </>
         )}
@@ -153,7 +158,7 @@ export function ApplyDnsDialog({
             onClick={onApply}
             variant="primary"
           >
-            {`${total} 件を反映する`}
+            反映する
           </Button>
         </DialogFooter>
       </DialogContent>

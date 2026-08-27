@@ -13,14 +13,24 @@ import {
 
 /**
  * Figma: Tree Node `54:33`
- * ホスト 1 件。ホスト名 + レコード種別 + 優先度 + 反映状態バッジ（FR-13）。
+ * ホスト 1 件。ホスト名 + 優先度 + 反映状態（FR-13）。
  * クリックすると右の編集パネル（S-43）の対象になる。
+ *
+ * バッジは優先度の 1 枚だけにする。反映状態は色付きの記号（読み上げ用のテキスト付き）で足り、
+ * レコード種別は選ぶと編集パネルに出るので、ノードでは重ねて見せない。
  */
 
 const APPLY_STATUS_ICON: Record<SubdomainHost["applyStatus"], ReactNode> = {
   applied: <Check />,
   changed: <TriangleAlert />,
   pending: <CircleDashed />,
+};
+
+/** `APPLY_STATUS_TONE` の Tone を記号の色に写す（バッジと同じ意味づけ）。 */
+const TONE_TEXT: Record<"ok" | "warn" | "muted", string> = {
+  ok: "text-ok",
+  warn: "text-warn",
+  muted: "text-muted",
 };
 
 const PRIORITY_TONE: Record<SubdomainHost["priority"], "brand" | "neutral"> = {
@@ -47,19 +57,26 @@ export function TreeNode({ host, selected, onSelect }: TreeNodeProps) {
       type="button"
     >
       <span className="text-domain-sm text-ink">{host.host}</span>
-      <Badge tone="muted">{host.recordType}</Badge>
       <Badge
         tone={PRIORITY_TONE[host.priority]}
         variant={host.priority === "required" ? "solid" : "outline"}
       >
         {PRIORITY_LABEL[host.priority]}
       </Badge>
-      <Badge
-        icon={APPLY_STATUS_ICON[host.applyStatus]}
-        tone={APPLY_STATUS_TONE[host.applyStatus]}
+      <span
+        className={cn(
+          "inline-flex size-3.5 shrink-0 items-center justify-center",
+          TONE_TEXT[APPLY_STATUS_TONE[host.applyStatus]],
+        )}
       >
-        {APPLY_STATUS_LABEL[host.applyStatus]}
-      </Badge>
+        <span
+          aria-hidden="true"
+          className="inline-flex size-full [&_svg]:size-full"
+        >
+          {APPLY_STATUS_ICON[host.applyStatus]}
+        </span>
+        <span className="sr-only">{APPLY_STATUS_LABEL[host.applyStatus]}</span>
+      </span>
     </button>
   );
 }

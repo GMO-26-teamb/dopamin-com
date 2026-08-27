@@ -36,7 +36,7 @@ export function ApproveTransferDialog({
       busy={busy}
       confirmLabel="確認のためドメイン名を入力"
       confirmText={transfer.domainName}
-      note="承認するとこのドメインは相手レジストラに移り、保有一覧から外れます。承認後は取り消せません。"
+      note="承認するとドメインは相手に移り、取り消せません。"
       onOpenChange={onOpenChange}
       onPrimary={() => onConfirm(transfer)}
       open={open}
@@ -61,7 +61,7 @@ export function RejectTransferDialog({
 
   return (
     <ConfirmDialog
-      body="拒否すると相手レジストラの申請は取り下げられ、ドメインは自分の保有のままになります。自動承認までに操作しないと、サーバが自動で承認します。"
+      body="拒否すると申請は取り下げられ、ドメインは自分の保有のままです。何もしないと自動承認されます。"
       busy={busy}
       busyLabel="拒否中…"
       onOpenChange={onOpenChange}

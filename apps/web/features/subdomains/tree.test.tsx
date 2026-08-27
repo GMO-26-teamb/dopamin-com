@@ -56,22 +56,28 @@ describe("PlanTree（S-43）", () => {
     expect(screen.getByText("takutaku.com")).toBeInTheDocument();
   });
 
-  it("ホストごとに反映状態バッジを出す（FR-13）", () => {
+  it("ホストごとに反映状態を出す（FR-13）", () => {
     renderTree();
 
+    // 反映状態は色付きの記号 + 読み上げ用テキスト（バッジは使わない）
     expect(screen.getByText("反映済み")).toBeInTheDocument();
     expect(screen.getByText("変更あり")).toBeInTheDocument();
     expect(screen.getByText("未反映")).toBeInTheDocument();
   });
 
-  it("優先度とレコード種別をバッジで出す", () => {
+  it("優先度をバッジで出す", () => {
     renderTree();
 
     expect(screen.getByText("必須")).toBeInTheDocument();
     expect(screen.getByText("推奨")).toBeInTheDocument();
     expect(screen.getByText("任意")).toBeInTheDocument();
-    expect(screen.getAllByText("A")).toHaveLength(2);
-    expect(screen.getByText("CNAME")).toBeInTheDocument();
+  });
+
+  it("レコード種別はノードに重ねて出さない（編集パネルが持つ）", () => {
+    renderTree();
+
+    expect(screen.queryByText("CNAME")).toBeNull();
+    expect(screen.queryAllByText("A")).toHaveLength(0);
   });
 
   it("選択中のノードだけ aria-pressed が立つ", () => {

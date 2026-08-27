@@ -42,15 +42,37 @@ describe("SubdomainsScreen", () => {
     expect(
       screen.getByText("反映済み 2・変更あり 1・未反映 1"),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText("未切替 — 反映時に切り替えます"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("未切替")).toBeInTheDocument();
 
     await waitFor(() => {
       expect(
         screen.getByRole("button", { name: "DNS に反映（差分 2 件）" }),
       ).toBeEnabled();
     });
+  });
+
+  it("S-43: 反映の Primary は 1 つだけ（Page Header には置かない）", async () => {
+    renderScreen("takutaku.com");
+
+    await screen.findByText("反映済み 2・変更あり 1・未反映 1");
+    // 「DNS に反映」を名乗るボタンは反映セクションの 1 つだけ
+    expect(screen.getAllByRole("button", { name: /DNS に反映/ })).toHaveLength(
+      1,
+    );
+  });
+
+  it("S-43: 手動設定のコードは既定で畳んでおく", async () => {
+    const user = renderScreen("takutaku.com");
+
+    await screen.findByText("反映済み 2・変更あり 1・未反映 1");
+    const toggle = screen.getByRole("button", { name: "手動で設定する場合" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText(/3600 IN/)).toBeNull();
+
+    await user.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText(/3600 IN/)).toBeInTheDocument();
   });
 
   it("S-40: 設計が無ければ案内の Empty State を出す", async () => {
@@ -60,7 +82,8 @@ describe("SubdomainsScreen", () => {
       await screen.findByText("リポジトリを解析して構成を提案します"),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "設計を保存" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "DNS に反映" })).toBeDisabled();
+    // 設計が無い間は反映するものが無いので、反映の導線自体を出さない
+    expect(screen.queryByRole("button", { name: /DNS に反映/ })).toBeNull();
   });
 
   it("S-40 → S-43: リポジトリを解析すると提案が出る", async () => {
@@ -92,17 +115,15 @@ describe("SubdomainsScreen", () => {
 
     await screen.findByText("反映済み 0・未反映 4");
     expect(screen.getByRole("button", { name: "設計を保存" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "DNS に反映" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^DNS に反映/ })).toBeDisabled();
     expect(
-      screen.getByText(
-        "未保存の変更があります。先に「設計を保存」してください。",
-      ),
+      screen.getByText("未保存の変更があります。先に設計を保存してください。"),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "設計を保存" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "DNS に反映" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: /^DNS に反映/ })).toBeEnabled();
     });
     // 保存後は差分が無くなるまで再保存の必要が無い
     expect(screen.getByRole("button", { name: "設計を保存" })).toBeDisabled();
@@ -176,7 +197,7 @@ describe("SubdomainsScreen", () => {
     expect(screen.getByText("削除 0")).toBeInTheDocument();
     expect(screen.getByText("変更なし 2（www・api）")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "2 件を反映する" }));
+    await user.click(screen.getByRole("button", { name: "反映する" }));
 
     // S-45: Banner Ok + 全ノード「反映済み」+ CTA Disabled
     const banner = await screen.findByRole("status");
@@ -187,10 +208,9 @@ describe("SubdomainsScreen", () => {
     await waitFor(() => {
       expect(screen.getByText("反映済み 4・差分なし")).toBeInTheDocument();
     });
-    expect(screen.getByText("ドパ民 DNS に切替済み")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "反映済み — 差分なし" }),
-    ).toBeDisabled();
+    expect(screen.getByText("切替済み")).toBeInTheDocument();
+    // ボタンは動作名のまま Disabled。差分が無いことは「反映状況」行が言う
+    expect(screen.getByRole("button", { name: "DNS に反映" })).toBeDisabled();
   });
 
   it("S-46: NS 切替に失敗したら Banner Warn を出しレコードは変えない（AC-13-5）", async () => {
@@ -204,9 +224,7 @@ describe("SubdomainsScreen", () => {
     await user.click(
       screen.getByRole("button", { name: "DNS に反映（差分 2 件）" }),
     );
-    await user.click(
-      await screen.findByRole("button", { name: "2 件を反映する" }),
-    );
+    await user.click(await screen.findByRole("button", { name: "反映する" }));
 
     const banner = await screen.findByRole("alert");
     expect(banner).toHaveTextContent("ネームサーバーの切替に失敗しました");
@@ -214,9 +232,7 @@ describe("SubdomainsScreen", () => {
     expect(
       screen.getByText("反映済み 2・変更あり 1・未反映 1"),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText("未切替 — 反映時に切り替えます"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("未切替")).toBeInTheDocument();
   });
 
   it("編集して保存すると該当ホストが「変更あり」になる（AC-13-6）", async () => {
@@ -229,9 +245,7 @@ describe("SubdomainsScreen", () => {
 
     // 未保存のうちは反映できない（反映対象は保存済み設計）
     expect(
-      screen.getByText(
-        "未保存の変更があります。先に「設計を保存」してください。",
-      ),
+      screen.getByText("未保存の変更があります。先に設計を保存してください。"),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "設計を保存" }));
@@ -257,9 +271,7 @@ describe("SubdomainsScreen", () => {
     expect(screen.getByText("向き先を入力してください")).toBeInTheDocument();
     // 保存されていないので未保存のままで、反映もできない
     expect(
-      screen.getByText(
-        "未保存の変更があります。先に「設計を保存」してください。",
-      ),
+      screen.getByText("未保存の変更があります。先に設計を保存してください。"),
     ).toBeInTheDocument();
   });
 

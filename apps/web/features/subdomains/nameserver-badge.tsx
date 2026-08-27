@@ -5,8 +5,8 @@ import { Check, TriangleAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 /**
- * S-43 右パネルと S-44 ダイアログで共通の「ネームサーバー」行。
- * 切替状況のバッジと、切替先のネームサーバ名（`DOPAMIN_NAMESERVERS`）を出す。
+ * S-43 反映セクションの「ネームサーバー」行。
+ * バッジは状態名だけにして、切替先や予告は下の 1 文で伝える（バッジに文を入れない）。
  * 名前はハードコードせず `@dopamin/shared` の定数を唯一の出どころにする。
  */
 
@@ -23,16 +23,18 @@ export function NameserverBadge({ switched }: NameserverBadgeProps) {
         <span className="shrink-0 text-muted">ネームサーバー</span>
         {switched ? (
           <Badge icon={<Check />} tone="ok">
-            ドパ民 DNS に切替済み
+            切替済み
           </Badge>
         ) : (
           <Badge icon={<TriangleAlert />} tone="warn">
-            未切替 — 反映時に切り替えます
+            未切替
           </Badge>
         )}
       </div>
       <p className="w-full break-all text-caption text-muted">
-        {NAMESERVER_NAMES}
+        {switched
+          ? NAMESERVER_NAMES
+          : `反映時に ${NAMESERVER_NAMES} に切り替えます`}
       </p>
     </div>
   );

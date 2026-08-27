@@ -58,13 +58,15 @@ describe("S-50 一覧", () => {
       screen.getByRole("heading", { name: "申請中（移管 IN）" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "履歴" })).toBeInTheDocument();
-    expect(
-      screen.getByText("受信 1 · 申請中 1 · 履歴 1 · Poll 消化済み"),
-    ).toBeInTheDocument();
+    // meta は件数だけ（内部語彙を出さない）
+    expect(screen.getByText("受信 1 · 申請中 1 · 履歴 1")).toBeInTheDocument();
     // fixtures: 受信 = tkt-lab.net(out/pending) / 申請中 = harupika.xyz(import_pending)
-    expect(screen.getByText("tkt-lab.net")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "tkt-lab.net" })).toHaveAttribute(
+      "href",
+      "/domains/tkt-lab.net",
+    );
     expect(
-      screen.getByRole("button", { name: "harupika.xyz の取り込みを再試行" }),
+      screen.getByRole("button", { name: "harupika.xyz の状態を確認" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "old-blog.xyz" }),
@@ -183,13 +185,12 @@ describe("S-53 更新エラー（FR-18）", () => {
       screen.getByRole("button", { name: "tkt-lab.net の移管を拒否" }),
     ).toBeDisabled();
     expect(screen.getByRole("button", { name: "申請" })).toBeDisabled();
-    // 再照会（状態を確認 / 再試行）は spec S-53 の Disabled 対象ではないので残す
+    // 再照会（状態を確認）は spec S-53 の Disabled 対象ではないので残す
     expect(
-      screen.getByRole("button", { name: "harupika.xyz の取り込みを再試行" }),
+      screen.getByRole("button", { name: "harupika.xyz の状態を確認" }),
     ).toBeEnabled();
-    expect(
-      screen.getByText("受信 1 · 申請中 1 · 履歴 1 · 最終更新に失敗"),
-    ).toBeInTheDocument();
+    // 更新に失敗した事実は Banner が言う。meta では繰り返さない（#219）
+    expect(screen.getByText("受信 1 · 申請中 1 · 履歴 1")).toBeInTheDocument();
   });
 
   it("キャッシュが無い取得失敗は Error Card + 再試行", async () => {
@@ -280,7 +281,7 @@ describe("D-08 取消 / D-06 承認", () => {
     });
   });
 
-  it("承認の失敗は対象を明示し、再試行はダイアログを開き直す（§15.2）", async () => {
+  it("承認の失敗は対象を添え、再試行はダイアログを開き直す（§15.2）", async () => {
     const base = servicesFor("default");
     const services: Services = {
       ...base,
@@ -312,10 +313,9 @@ describe("D-08 取消 / D-06 承認", () => {
     );
     await user.click(within(dialog).getByRole("button", { name: "承認する" }));
 
+    // 失敗の見出しは ErrorCard の title だけ。ここには対象と操作だけを添える
     await waitFor(() => {
-      expect(
-        screen.getByText("tkt-lab.net の承認に失敗しました"),
-      ).toBeInTheDocument();
+      expect(screen.getByText("tkt-lab.net の承認")).toBeInTheDocument();
     });
     expect(screen.queryByRole("dialog")).toBeNull();
 

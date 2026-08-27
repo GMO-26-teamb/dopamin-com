@@ -5,11 +5,11 @@
  *
  * Figma: S-50 `85:5523` / S-51 `85:5760` / S-52 `85:5888` / S-53 `93:7717` / D-08 `85:6029`
  *
- * - S-50 一覧: Page Header（件数・「状態を更新」= Poll 消化）+ 移管 IN フォーム + 3 セクション
+ * - S-50 一覧: Page Header（件数・「状態を更新」）+ 移管 IN フォーム + 3 セクション
  * - S-51 0 件: フォーム + Empty State
  * - S-52 申請エラー（AC-12-2）: フォーム下に Error Card（再試行なし）
  * - S-53 更新エラー（FR-18）: Banner Warn + キャッシュ表示、承認 / 拒否 / 取消 / 申請は Disabled
- *   （「状態を確認」/「再試行」＝再照会は残す）
+ *   （「状態を確認」＝再照会は残す）
  * - D-08 取消ダイアログ、D-06 同型の承認（再入力）/ 拒否ダイアログ
  *
  * 60 日ルールは UI で強制しない（要件 FR-12「移管可否は EPP ステータスのみで判定する」）。
@@ -67,7 +67,7 @@ const ACTION_BANNER: Record<
   }),
   cancel: (transfer) => ({
     title: "移管申請を取り消しました",
-    body: `${transfer.domainName} の申請を取り消しました。再申請には AuthCode の再発行が必要な場合があります。`,
+    body: `${transfer.domainName} は申請中から外れました。`,
   }),
 };
 
@@ -123,7 +123,7 @@ function TransfersView() {
     refresh.error ?? (transfers.data === undefined ? null : transfers.error);
   const busy = refresh.isPending || request.isPending || action.isPending;
   // S-53 で Disabled にするのは承認 / 拒否 / 取消 / 申請だけ。
-  // 「状態を確認」/「再試行」＝再照会は、更新に失敗しているときこそ必要なので残す。
+  // 「状態を確認」＝再照会は、更新に失敗しているときこそ必要なので残す。
   const updateFailed = updateError !== null;
   const submitDisabled = busy || updateFailed;
 
@@ -161,7 +161,7 @@ function TransfersView() {
       onSuccess: (created) => {
         setBanner({
           title: "移管を申請しました",
-          body: `${created.domainName} を「申請中（移管 IN）」に追加しました。相手レジストラの承認（または 20 分後の自動承認）で取り込まれます。`,
+          body: `${created.domainName} を申請中に追加しました。`,
         });
       },
     });
@@ -207,12 +207,11 @@ function TransfersView() {
   const updateErrorCopy =
     updateError === null ? null : toErrorCopy(updateError);
   const groups = groupTransfers(transfers.data ?? []);
+  // 更新の失敗は下の Banner Warn が言う（meta で二重に言わない）。件数だけを短く出す
   const meta =
     transfers.data === undefined
       ? undefined
-      : `受信 ${groups.received.length} · 申請中 ${groups.pending.length} · 履歴 ${groups.history.length} · ${
-          updateFailed ? "最終更新に失敗" : "Poll 消化済み"
-        }`;
+      : `受信 ${groups.received.length} · 申請中 ${groups.pending.length} · 履歴 ${groups.history.length}`;
 
   return (
     <>
@@ -274,9 +273,10 @@ function TransfersView() {
 
       {action.error === null ? null : (
         <div className="flex w-full flex-col gap-1.5">
+          {/* 失敗の見出しは ErrorCard の title 1 つ。ここは「どの移管の・どの操作か」だけを添える */}
           {lastAttempt === null ? null : (
-            <p className="text-caption text-warn">
-              {`${lastAttempt.transfer.domainName} の${ACTION_LABEL[lastAttempt.action]}に失敗しました`}
+            <p className="text-caption text-muted">
+              {`${lastAttempt.transfer.domainName} の${ACTION_LABEL[lastAttempt.action]}`}
             </p>
           )}
           <ErrorCard
@@ -307,7 +307,7 @@ function TransfersView() {
 
       {transfers.data !== undefined && transfers.data.length === 0 ? (
         <EmptyState
-          body="他社で取得したドメインは、上のフォームにドメイン名と AuthCode を入れて持ち込めます。相手レジストラから届いた移管申請もここに表示されます。"
+          body="他社のドメインは上のフォームから持ち込めます。受信した申請もここに出ます。"
           secondary={
             <Button asChild size="sm" variant="outline">
               <Link href="/dashboard">保有ドメインを見る</Link>
