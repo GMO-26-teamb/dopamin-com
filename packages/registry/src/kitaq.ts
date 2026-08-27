@@ -21,7 +21,8 @@ import { RegistryError } from "./errors";
 import { type KitaqAdapterConfig, KitaqHttpClient } from "./http";
 
 /** Swagger 取得日（docs/registry/*.openapi.json）。仕様変更時に更新し /health で確認できるようにする。 */
-const SPEC_VERSION = "v1 (2026-08-25)";
+// v2: 2026-08-27 の .org / .info 管轄移管（kitaqsign → kitaqnic。docs/registry/*/CHANGELOG.md）
+const SPEC_VERSION = "v2 (2026-08-27)";
 
 // ---- resData スキーマ（未知フィールドは許容、必須欠落は REGISTRY_SPEC_MISMATCH）----
 // 契約テスト（envelope.test.ts）が fixture を本番スキーマで検証できるよう export する。

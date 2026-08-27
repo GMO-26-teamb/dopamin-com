@@ -13,7 +13,7 @@ loadEnvLocal();
 const config = kitaqConfigFromEnv("kitaqsign");
 
 /**
- * kitaqsign（.com .net .org .info）への疎通テスト。
+ * kitaqsign（.com .net。8/27 に .org / .info は kitaqnic へ移管）への疎通テスト。
  * REGISTRY_CONNECT_TEST=1 のときだけ実行される（実データに反映されるため）。
  * 実行方法: docs/testing.md
  */

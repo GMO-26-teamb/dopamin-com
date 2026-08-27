@@ -11,6 +11,22 @@
 
 ---
 
+## 2026-08-27 — `.org` / `.info` の管轄を kitaqsign から引き継いだ
+
+| 項目 | 内容 |
+|---|---|
+| 種別 | 運営からの事前周知（8/27 16:00〜、数分程度のメンテナンス。作業中は両レジストリとも一時停止） |
+| `specVersion` | `v2 (2026-08-27)` に更新（対応 TLD という契約レベルの変更のため） |
+| fixture 更新 | `../fixtures/hello.kitaqnic.json`（`supportedTlds` に `org` / `info` を追加） |
+| 影響 FR | FR-04 / FR-05（候補生成・空き確認のルーティング）/ FR-06〜FR-12（`.org` / `.info` の全ドメイン操作） |
+
+- kitaqnic の管轄 TLD は **20 種**になった（従来の 18 gTLD + `.org` `.info`）。接続先は従来どおり
+  EPP: `epp.kitaqnic.com` / コンパネ: `console.kitaqnic.com` / RDAP: `rdap.kitaqnic.com`（環境変数の変更は不要）。
+- 既存の `.org` / `.info` ドメインは**コンタクト・ホスト含むデータごと kitaqnic に引き継がれる**
+  （保有者・コンタクト ID は変わらない）。アプリ側は `domains.registry` / `transfers.registry` を
+  付け替えるデータマイグレーションで追随（`packages/db/drizzle`）。
+- kitaqsign 側の記録は [`../kitaqsign/CHANGELOG.md`](../kitaqsign/CHANGELOG.md) 同日エントリ。
+
 ## 2026-08-27 — Poll 移管通知の実測形が判明し、`add.statuses` も反映されるようになった
 
 | 項目 | 内容 |

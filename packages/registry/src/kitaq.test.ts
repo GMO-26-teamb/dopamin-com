@@ -78,7 +78,7 @@ describe("hello（レジストリごとの resData 形状差の吸収）", () =>
     const result = await createKitaqAdapter(CONFIG).hello();
     expect(result).toEqual({
       registry: "kitaqsign",
-      tlds: ["com", "net", "org", "info"],
+      tlds: ["com", "net"],
     });
     expect(requestAt(0)).toMatchObject({
       method: "GET",
@@ -96,7 +96,9 @@ describe("hello（レジストリごとの resData 形状差の吸収）", () =>
     }).hello();
     expect(result.registry).toBe("kitaqnic");
     expect(result.tlds).toContain("xyz");
-    expect(result.tlds).toHaveLength(18);
+    expect(result.tlds).toContain("org");
+    expect(result.tlds).toContain("info");
+    expect(result.tlds).toHaveLength(20);
   });
 
   it("TLD は小文字化される", async () => {
