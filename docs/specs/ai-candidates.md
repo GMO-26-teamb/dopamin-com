@@ -93,129 +93,40 @@ AC-04-2 は「AI 応答は 10 秒以内」。再生成があるので、**1 リ�
 `packages/shared/src/api.ts` の `domainCheckResultSchema` に切り出して共有する。
 FR-05 のスコアはインメモリの lexical 計算なのでレジストリ通信と独立して付く（AC-05-2）。
 
-### 2.5 プロバイダ別の味付け
+### 2.5 プロバイダ別の味付け（xai だけ）
 
-FR-17 で選んだ AI プロバイダを、**作風の選択としても扱う**。
-`apps/api/src/prompts/domain-candidates.ts` の `PROVIDER_FLAVOR` がプロバイダごとの
-追加指示を持ち、`buildDomainCandidatesInstructions(provider)` が
-`DOMAIN_CANDIDATES_INSTRUCTIONS` の末尾に連結する。
+`xai`（Grok）を選んでいるときだけ、システムプロンプトに**ユーモアの個性付け**を足す。
+Grok を選ぶ動機は「無難な候補ではなく、思わず笑える名前が欲しい」であることが多いため、
+プロバイダの選択をそのまま作風の選択として扱う。
 
-**変えないもの**（味付けは文体にだけ効かせ、上の制約を上書きしない）:
+- **候補名**: 無難な組み合わせより「なんでそれ!?」と言いたくなる意外性を優先する。
+  覚えやすい造語、遊び心のある接尾辞（`inu` を付ける等）、語呂・ダジャレを歓迎する。
+- **`reason`**: ユーモア文体の短い 1 文。基本は大げさな持ち上げで、毎回ちょうど 1 件だけを
+  はっきり皮肉と分かる文体の「皮肉枠」にする（どれを皮肉枠にするかはモデルの裁量。
+  皮肉枠でも人格攻撃は禁止で、茶化す対象は名前や状況に限る）。
 
-- 出力スキーマ（`domainCandidatesOutputSchema`）と件数・重複・除外リストの扱い（§2.1 / §2.2）
-- `reason` の文字数上限（`DOMAIN_CANDIDATE_REASON_MAX_LENGTH`）
-- 「既存の有名サービスやブランドと紛らわしい名前は避ける」
-- 空きチェックと独自性スコアの付け方（§2.4）
+**変えないもの**（味付けは文体だけに効かせ、契約には触らない）:
 
-| プロバイダ | 味付け |
+| 対象 | 扱い |
 |---|---|
-| `google` / `anthropic` | **無し**。`buildDomainCandidatesInstructions()` の戻り値は `DOMAIN_CANDIDATES_INSTRUCTIONS` と**文字列として完全に同一**になる（`domain-candidates.test.ts` が文字列一致で担保） |
-| `xai`（Grok） | 意外性のある造語・遊び心のある接尾辞・語呂を優先し、`reason` はユーモア文体の短い 1 文にする。下品・攻撃的・人を傷つける表現は使わない（誰かに見せている画面にそのまま出ても問題ない範囲） |
+| 出力契約（§2.1 の 3 層スキーマ） | 不変。`rawDomainCandidateSchema` → `domainCandidateSchema` の再検証もそのまま |
+| 件数（`DOMAIN_CANDIDATE_COUNT`） | 不変 |
+| §13.2 の制約（RFC 1035 / 許可 TLD / 重複禁止 / 除外リスト / `reason` 40 字） | **厳守**。味付けは制約の上書きではなく追加 |
+| 10 秒予算（§2.3） | 不変 |
+| `google` / `anthropic` のプロンプト | **一切変えない**（味付け文は xai の分岐内に閉じる） |
 
-xai にだけ味付けを置くのは、Grok を選ぶ動機が「無難な候補ではなく思わず笑える名前が欲しい」
-だから。プロバイダの選択をそのまま作風の選択として扱う。
+**禁止**: 下品・攻撃的・人格攻撃・人を傷つける表現。発表デモでそのまま見せられるラインを守らせる。
+`reason` は既存の候補カードに収まる長さ（40 字上限は §13.2 の制約がそのまま効く）。
 
-**フォールバックしても味付けは切り替えない。** `runStructured` が §13.1 のフォールバックで
-別プロバイダに切り替えても、渡す `instructions` は**ユーザーが選んだプロバイダ**のもののまま
-（`candidates.service.ts`）。作風はモデルではなくユーザーの選択に紐づくため。
-したがって xai を選んだ状態で google にフォールバックすると、味付け付きプロンプトが
-google に送られる。これは意図した挙動。
+> **皮肉枠が 1 件である保証**: 「ちょうど 1 件」はプロンプトでの指示であって、
+> 出力契約では担保していない（`reason` は文字列としてしか検証しない）。
+> 0 件や 2 件になっても API はエラーにせず、そのまま返す。
 
-新しいプロバイダを足したときは、`PROVIDER_FLAVOR` に載せなければ味付け無し
-（= 従来と同じプロンプト）になる。
+> **フォールバック時の扱い**: 味付けは「ユーザーが選んだプロバイダ」で決まり、
+> `runStructured` が別プロバイダにフォールバックしても切り替えない（§13.1 のフォールバックは
+> 呼び出しの途中で起きるため）。xai を選んで google に落ちた場合は、味付き文のまま
+> google が答える。作風はユーザーの選択に紐づくものなので、これを意図した挙動とする。
 
-## 3. 画面・UI / Web の配線
-
-候補カード自体の実装は #88 の範囲。本節は**サービス層の配線**（`NEXT_PUBLIC_API_MODE=http` で
-実 API を叩く経路）を定める。モックモードの挙動は変えない。
-
-### 3.1 `candidates.generate` → `POST /ai/domain-candidates`
-
-`apps/web/lib/api/http/http-services.ts` の `candidates.generate` を Hono RPC で
-`POST /api/v1/ai/domain-candidates` に繋ぐ。ブラウザは同一オリジンの `/api/*` だけを叩き、
-`next.config.ts` の rewrites が API に転送する（§6.3）。
-
-応答は `packages/shared` の `domainCandidatesResponseSchema` で検証してから ViewModel に写す。
-スキーマは shared が SSOT で、`client.ts` では re-export するだけにする（ワイヤ形式を二重定義しない）。
-検証に落ちた場合は `INTERNAL`——レジストリの仕様変更ではないので `REGISTRY_SPEC_MISMATCH` にはしない。
-
-### 3.2 `toCheckedFields` を検索経路と共有する
-
-API は候補 1 件ごとに `POST /domains/check` と**同じ `check` の形**を返す（§2.4）。
-そのため空き確認と独自性スコアの写像を `toCheckedFields` に切り出し、
-検索経路（`domains.check` → `SearchResult`）と候補経路（→ `Candidate`）で共有する。
-
-| 写像 | 内容 |
-|---|---|
-| `registry` | `null`（未対応 TLD / 障害）は ViewModel が `null` を持てないため `"mock"` に倒す。その行は必ず `availability: "error"` |
-| `availability` | そのまま |
-| `uniqueness` | `topSimilar` → `nearest` に写す。`null` はそのまま通す（unavailable / error の行） |
-| `alternatives` | 実 API は返さないので `[]` |
-
-同じ写像を 2 か所に持たないことが目的。特に `topSimilar → nearest` は FR-05 のレビュー（#155）で
-一度直した箇所なので、二重管理にすると次の修正で片方が取り残される。
-
-### 3.3 失敗は `"ai"` origin として扱う
-
-AI 呼び出しの失敗は、レジストリの失敗と**同じエラーコードで返ってくる**
-（`REGISTRY_TIMEOUT` / `REGISTRY_UNAVAILABLE`。§10.3 の統一形式は「相手」を持たない）。
-相手を明示しないと `apps/web/lib/error-messages.ts` の `AI_COPY` に入らず、
-S-23 でレジストリ向けの文言が出てしまう。
-
-そこで `unwrap` と `toApiClientError` に任意の `origin` を通し、AI ルートでは `"ai"` を渡す。
-
-- 既に `ApiClientError` なものは**上書きしない**（`notImplemented` が自分で `origin` を持つため）
-- 統一エラー形式から組み立てる経路・ネットワーク失敗・素の Error のいずれでも載せられる
-
-### 3.4 デモ経路（本番）
-
-`NEXT_PUBLIC_API_MODE` は未設定だと `mock` に倒れる（`apps/web/lib/api/mode.ts`）。
-本番で実 AI を見せるには `http` を明示設定する必要がある（requirements §17 に追記済み）。
-
-## 4. API 契約
-
-| メソッド | パス | リクエスト | レスポンス | エラー |
-|---|---|---|---|---|
-| POST | `/ai/domain-candidates` | `{ nickname: 1..64, purpose?: ≤200, tlds?: ≤22, exclude?: ≤30 }` | `{ candidates: [{ sld, tld, reason, check }] }` | 401 / 400（`nickname` 必須）/ 503 `AI_UNAVAILABLE` / 429 `RATE_LIMITED` |
-
-- スキーマは `packages/shared/src/ai-candidates.ts`。`check` は `domainCheckResultSchema`。
-- UI ラベルは「ニックネームまたはアプリ名」だが API のパラメータ名は `nickname`（§10.1）。
-- `candidates` が 0 件の 200 もあり得る（AC-04-1 の 6 件は上限であって保証ではない）。
-
-## 5. データ変更
-
-なし（`ai_logs` への記録は `runStructured` が行う）。
-
-## 6. 受け入れ条件
-
-- [x] AC-04-1: 候補は 6 件・重複なし・バリデーション通過のみ
-- [x] AC-04-2: 上限 10 秒。超過は `AI_UNAVAILABLE`
-- [x] AC-04-3: 成功・失敗とも `ai_logs` に記録される（試行ごとに 1 行）
-- [x] AC-05-2: レジストリ障害時も候補と独自性スコアは返る
-
-## 7. テスト観点
-
-| 種別 | 内容 |
-|---|---|
-| unit | `packages/shared/src/ai-candidates.test.ts`: 入力の正規化、不正 SLD の拒否、素の出力を捨てないこと、`excludeKey` |
-| 契約 / 統合 | `apps/api/test/routes/ai-candidates.test.ts`: 6 件 + check + スコア、重複 / 不正 SLD / 許可外 TLD の除去と 1 回だけの再生成、`exclude`、`tlds` 絞り込み、`ai_logs` 記録、AI 失敗時 503、レジストリ障害時のスコア、401 / 400 |
-| 契約 / 統合（Web） | `apps/web/lib/api/http/http-services.test.ts`: 叩く URL と送信 JSON、`check` の写像（`topSimilar → nearest`）、unavailable 行の `uniqueness: null`、レジストリ障害行でもスコアが付くこと（AC-05-2）、0 件、契約ずれの `INTERNAL`、503 / 504 / 401 が `origin: "ai"` 付きで返ること |
-| 手動 | 「もう一度考える」で前回と違う候補が出ること。`NEXT_PUBLIC_API_MODE=http` で候補（最大 6 件。§8 #1 のとおり 6 件は保証ではない）とスコアが実データで出ること。2026-08-27 に実キーで確認済み（#185 / #186） |
-
-## 8. 未決事項・要確認
-
-| # | 事項 | 本書の仮置き | 選択肢 |
-|---|---|---|---|
-| 1 | 2 回とも応答があったが 6 件に届かない場合の扱い | 揃った分だけ返す（0 件も 200。画面は件数を前提にしない） | 3 回目を試す / 明示エラーにする |
-| 2 | 2 回目の生成が失敗したときに 1 回目の部分結果を返すか | 現状は部分結果を捨てて 503 / 429 | 2 回目を捕捉して部分返却に倒す（実装変更が必要） |
-
----
-
-## 更新履歴
-
-| 版 | 日付 | 内容 |
-|---|---|---|
-| v0.1 | 2026-08-27 | 初版（#66 の実装に合わせて起票） |
-| v0.1.1 | 2026-08-27 | 実装との乖離を修正。再生成が失敗したときは部分結果を捨てて 503 / 429 になること、再検証で全件落ちれば 0 件の 200 になることを明記 |
-| v0.2 | 2026-08-27 | §1 を API 実装済みの実態に更新。§3 に Web 配線（`candidates.generate` → `POST /ai/domain-candidates`、`toCheckedFields` の検索経路との共有、`"ai"` origin によるエラー文言の出し分け、本番の `NEXT_PUBLIC_API_MODE=http`）を追記。§7 に Web の契約テスト行を追加。#185 |
-| v0.2.1 | 2026-08-27 | §2.5「プロバイダ別の味付け」を追加。#193 の実装（`PROVIDER_FLAVOR` / `buildDomainCandidatesInstructions`）が §2.5 を正として参照していたが節が存在しなかった。変えないもの・xai だけに味付けを置く理由・フォールバックしても切り替えない理由を明記 |
+新しいプロバイダを足したときは、`PROVIDER_FLAVOR`（`apps/api/src/prompts/domain-candidates.ts`）に
+載せなければ味付け無し = `DOMAIN_CANDIDATES_INSTRUCTIONS` と文字列として完全に同一になる
+（`domain-candidates.test.ts` が文字列一致で担保している）。

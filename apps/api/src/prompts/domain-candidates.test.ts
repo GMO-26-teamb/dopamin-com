@@ -47,12 +47,33 @@ describe("buildDomainCandidatesInstructions（§2.5 プロバイダ別の味付�
     const instructions = buildDomainCandidatesInstructions("xai");
     expect(instructions).toContain("下品");
     expect(instructions).toContain("攻撃的");
+    expect(instructions).toContain("人格攻撃");
     expect(instructions).toContain("人を傷つける");
+  });
+
+  it("reason は基本が持ち上げで、皮肉枠はちょうど 1 件と指示している", () => {
+    const instructions = buildDomainCandidatesInstructions("xai");
+    expect(instructions).toContain("基本は大げさに持ち上げる");
+    expect(instructions).toContain("ちょうど 1 件だけを「皮肉枠」にする");
+    expect(instructions).toContain("残りの候補はすべて持ち上げにする");
+  });
+
+  it("皮肉枠は「はっきり皮肉と分かる」文体を求めている（ほのめかしで終わらせない）", () => {
+    const instructions = buildDomainCandidatesInstructions("xai");
+    expect(instructions).toContain("はっきり皮肉だと分かる");
+    expect(instructions).toContain("ほのめかす程度ではなく");
+  });
+
+  it("皮肉枠でも茶化す対象を名前や状況に限っている（人格に向けない）", () => {
+    const instructions = buildDomainCandidatesInstructions("xai");
+    expect(instructions).toContain("茶化す対象は名前や状況");
   });
 
   it("トーン例は xai の分岐にだけ現れる（他プロバイダに漏れない）", () => {
     const xai = buildDomainCandidatesInstructions("xai");
-    expect(xai).toContain("会社の犬");
+    // 持ち上げ側と皮肉枠側の両方の例が入っている
+    expect(xai).toContain("ふわふわ可愛いあなたにぴったり！");
+    expect(xai).toContain("会社の犬のあなたにそっくりな名前。");
     // 味付けの本体である DOMAIN_CANDIDATES_INSTRUCTIONS 側には一切入っていない
     expect(DOMAIN_CANDIDATES_INSTRUCTIONS).not.toContain("会社の犬");
     expect(DOMAIN_CANDIDATES_INSTRUCTIONS).not.toContain("作風");
