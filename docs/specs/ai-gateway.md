@@ -96,6 +96,17 @@ Gateway のカタログが正だから。
 `aiProviderApiKey()` は従来どおり固有キーだけを返し、**値を外に出さない**性質を保つ
 （`hasApiKey` が見るのは有無だけ）。
 
+### 2.5 レイテンシの注意
+
+gateway は中継が 1 段増えるぶん、直接プロバイダを叩くより遅くなる。2026-08-27 の実測は
+1 回の生成で約 8 秒で、`AI_CALL_TIMEOUT_MS`（10 秒。§13.1 / AC-04-2）に対して余裕が小さい。
+
+FR-04 は 6 件に満たなければ 1 回だけ再生成するため、**残り予算が
+`AI_FALLBACK_MIN_BUDGET_MS` を割って 2 回目が始まらない / 打ち切られる**ことが実際に起きる
+（`docs/specs/ai-candidates.md` §8 #1「揃った分だけ返す」の経路）。
+本番のネットワーク次第では 10 秒を超えて `AI_UNAVAILABLE` になり得る。
+予算やモデル（より高速な系）の見直しが要るかはチーム判断。
+
 ## 3. 画面・UI
 
 なし。画面の変更を伴わない（FR-17 の設定画面に並ぶ選択肢が増えるのは §2.2 の結果で、
@@ -125,7 +136,7 @@ UI 側の実装変更は無い）。
 - [x] AC-G-3: gateway に渡すモデル ID が `<provider>/<model>` になり、スラッシュ付きの値は二重前置されない
 - [x] AC-G-4: gateway キーだけの環境で FR-17 の有効プロバイダに両方が並ぶ
 - [x] AC-G-5: キーが 1 本も無ければ従来どおり `AI_UNAVAILABLE`（503）
-- [ ] AC-G-6: **実キーでの疎通**（モデル ID が Gateway のカタログと一致すること）
+- [x] AC-G-6: **実キーでの疎通**（モデル ID が Gateway のカタログと一致すること）— 2026-08-27 確認。`google/gemini-2.5-flash` で成功（`ai_log`: `status=success` / tokensIn 約 326 / tokensOut 約 1,191 / latency 約 8 秒）。`anthropic/claude-sonnet-4-5` は**未実証**（命名規約は同じ `<provider>/<model>` なので同様に通る想定）
 
 ## 7. テスト観点
 
@@ -134,7 +145,7 @@ UI 側の実装変更は無い）。
 | unit | `apps/api/src/lib/env.test.ts`: `AI_GATEWAY_API_KEY` が既定 undefined / 値が読める / 空文字は未設定扱い（キーがあると誤判定して 503 を隠さない） |
 | unit | `apps/api/src/services/settings.test.ts`: gateway だけで全プロバイダ有効・gateway だけで anthropic を実効値にできる・固有キー併用・キー無しは従来どおり |
 | unit | `apps/api/test/lib/ai-provider.test.ts`: gateway だけで 503 にならない・モデル ID の前置・二重前置の回避・固有キー優先で gateway を挟まない（`setAiModelFactoryForTesting(null)` で既定ファクトリを通す） |
-| 手動 | **未実施**。実キーを `apps/api/.env.local` に入れ、`/domains/new` から候補生成が通ることを確認する（AC-G-6） |
+| 手動 | **実施済み（2026-08-27）**。実キーを `apps/api/.env.local` に入れ、`/domains/new` から候補生成が通ることを確認（AC-G-6）。10 秒予算の残りで行う追加生成がタイムアウトし、揃った分を返す挙動も確認（`docs/specs/ai-candidates.md` §8 #1 のとおり） |
 
 いずれの自動テストも**実プロバイダを呼ばない**。gateway 経路の検証は
 `resolveModel()` が返す `LanguageModel` のモデル ID で行う。
@@ -146,7 +157,7 @@ UI 側の実装変更は無い）。
 | # | 事項 | 本書の仮置き | 選択肢 |
 |---|---|---|---|
 | 1 | `docs/requirements.md` §17 の環境変数表への `AI_GATEWAY_API_KEY` 追加 | **本 PR では追記しない**（別 PR で人間が提案） | 本 PR に含める / 別 PR で追随 |
-| 2 | Gateway のモデル ID 命名が `KNOWN_MODELS` と一致するか | `<provider>/<model>` で一致する前提 | 一致しなければ `gatewayModelId` に対応表を持たせる |
+| 2 | Gateway のモデル ID 命名が `KNOWN_MODELS` と一致するか | **解消**（2026-08-27）。`google/gemini-2.5-flash` で実証。anthropic 側は未実証 | 一致しなければ `gatewayModelId` に対応表を持たせる |
 | 3 | 固有キーと gateway の優先順位 | 固有キー優先（既存環境の挙動を変えない） | gateway 優先 / 環境変数で切替 |
 
 ---
@@ -156,3 +167,4 @@ UI 側の実装変更は無い）。
 | 版 | 日付 | 内容 |
 |---|---|---|
 | v0.1 | 2026-08-27 | 初版（#179 / PR #186 の実装に合わせて起票） |
+| v0.1.1 | 2026-08-27 | 実キーでの疎通確認を反映。AC-G-6 を満たし、未決事項 #2（モデル ID 命名）を解消。§7 の手動テストを実施済みに更新。レイテンシ約 8 秒（10 秒予算に対し余裕が小さい）を注記 |
