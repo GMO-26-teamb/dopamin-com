@@ -116,6 +116,28 @@ Poll は**常に最古の未 ack メッセージを 1 件**返す FIFO（未 ack
 **ack するまで同じメッセージが返り続け、新しい通知を受け取れない。** 自動失効なし。
 移管の承認/拒否は専用 API で行うため、ack は業務処理をブロックしない（消し込み専用）。
 
+**移管通知の実測（kitaqnic 2026-08-27、#176。kitaqsign はメンテナンス中で未実測）**:
+
+```json
+{
+  "resData": {
+    "count": 1,
+    "message": {
+      "id": 522,
+      "msgType": "domain:transfer",
+      "payload": { "op": "reject", "domain": "dopamin-trf-mtayaan3.xyz", "counterpartyRegistrar": "teamb" },
+      "qdate": "2026-08-27T12:16:52.607727"
+    }
+  }
+}
+```
+
+- `msgType` は `"domain:transfer"` 固定、動詞は `payload.op`。相手レジストラは
+  `counterpartyRegistrar`（受信者から見た相手）1 個だけで、gaining / losing の区別や日時は載らない。
+- 宛先: `request` は losing に、`approve` / `reject` は gaining に積まれる。
+- アダプタ（`packages/registry` の `toPollMessage`）は `op` → 種別、`counterpartyRegistrar` →
+  requesting（request / cancel）/ acting（approve / reject）に写す。詳細は §3 要確認 #12 の解決記録。
+
 ### 自動更新（Auto-Renew）
 
 exDate 超過でも廃止されず、レジストリが自動で 1 年延長（毎分のバッチ）。
@@ -187,19 +209,23 @@ exDate 超過でも廃止されず、レジストリが自動で 1 年延長（�
    上限は Swagger に記載なし（アプリ側は 20 件に制限して運用）。
 9. **レジストラ ID はチームごとに別か** — 別でなければ他チームとの移管は同一レジストラ内の操作になり成立しない。
    テスト用の第 2 レジストラ資格情報が出るかも併せて確認（requirements §21.2 #11）。
-10. **`domain:update` の `add.statuses` が反映されない** — Swagger は clientHold 等 5 種の設定・解除に
-    対応と記述しているが、実測（2026-08-25・両レジストリ）では 1000 成功を返しつつ status が変化しない。
-    レジストリ側の未実装かバグの疑い。運営に確認する。解決までは FR-09 の「ロック」トグルは動作しない前提。
-11. **非スポンサーからの `domain:info` の応答** — 2201 で拒否されるのか、限定情報が返るのか。
-    `clID`（現スポンサー）はレスポンスに含まれるか。移管 OUT 完了の検知がこれに依存する（§21.2 #12）。
-12. **Poll 通知の種別と中身** — transfer request / approve / reject / 自動承認のそれぞれで何が積まれるか、
-    gaining 側にも積まれるか（§21.2 #13）。
-    **形は両レジストリで完全に同一**と openapi.json で確定済み:
-    `PollResponse { count: int32（必須）, message?: PollMessageDto }`、
-    `PollMessageDto { id: int64, msgType: string, payload: object, qdate: string }`（すべて必須）。
-    未確定なのは `msgType` に入る値と `payload` の中身で、どちらにも enum・example・description が無い。
-    `DomainTransferResponse.status` も同様に `string` としか宣言されていない。
-    そのため正規化型（`PollMessage.type`）は独自語彙にし、対応づけられない通知は `unknown` に倒す（ADR-0002）。
+10. ~~`domain:update` の `add.statuses` が反映されない~~ → **解決**（運営が 2026-08-27 に修正をアナウンス。
+    kitaqnic 実測 8/27 で確認）: `add.statuses: ["clientTransferProhibited"]` が `domain:info` に反映され、
+    ロック中の `transfer/request` は **result 2304**（Object status prohibits operation）で拒否される。
+    `rem.statuses` で解除も動く。FR-09 の「ロック」トグルは動作可能になった。kitaqsign はメンテナンス中で未実測。
+11. ~~非スポンサーからの `domain:info` の応答~~ → **解決**（kitaqnic 実測 8/27、#176 検証）: 拒否されず
+    **成功し、全ステータスが見える**。`clID`（現スポンサー）は引き続き含まれない。
+    そのため移管 OUT 完了の検知は Poll の承認通知が主のまま（§21.2 #12）。kitaqsign 未実測。
+12. ~~Poll 通知の種別と中身~~ → **解決**（kitaqnic 実測 8/27、#176。kitaqsign はメンテナンス中で未実測）:
+    `msgType` は **`"domain:transfer"` 固定**で、動詞は `payload.op`（`request` / `approve` / `reject`。
+    `cancel` は op の enum から推定・未実測）。`payload` は
+    `{ op, domain, counterpartyRegistrar }` の 3 フィールドのみ（`counterpartyRegistrar` は**受信者から
+    見た相手** 1 個。Swagger 推測にあった `status` / `gainingRegistrar` / `losingRegistrar` / `reDate` /
+    `acDate` は来ない）。`qdate` はタイムゾーン無しのマイクロ秒精度（例 `2026-08-27T12:16:52.607727`）。
+    宛先の実測: `request` は losing に、`approve` / `reject` は gaining に積まれる。
+    形そのものは openapi.json どおり
+    `PollResponse { count, message? }` / `PollMessageDto { id: int64, msgType, payload, qdate }`。
+    正規化型（`PollMessage.type`）は独自語彙のまま、対応づけられない通知は `unknown` に倒す（ADR-0002）。
 13. **移管時のコンタクトの扱い** — 相手レジストラ発行のコンタクト ID を参照したまま `domain:update` できるか、
     自コンタクトへの差し替えが必須か。非スポンサーの `contact:info` は可か（§21.2 #14）。
 14. **同一レジストラ ID からの `transfer/request`** — 自分がスポンサーのドメインに送ったときの result code（§21.2 #15）。

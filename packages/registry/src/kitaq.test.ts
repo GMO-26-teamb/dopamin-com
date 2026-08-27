@@ -713,7 +713,9 @@ describe("poll / ackMessage（§11.1 / FR-12 AC-12-4。レジストリ差はエ�
     expect(message?.transfer?.actByAt).toBeUndefined();
   });
 
-  it("kitaqnic: GET /messages から取り出し、msgType だけで種別が決まる", async () => {
+  it("kitaqnic: 実測形（msgType 固定 + payload.op）の reject 通知を正規化する", async () => {
+    // 実測（2026-08-27、#176）: msgType は "domain:transfer" 固定で動詞は payload.op、
+    // 相手レジストラは counterpartyRegistrar（受信者から見た相手）1 個だけが入る
     fetchMock.mockResolvedValueOnce(
       jsonResponse(loadFixture("poll.kitaqnic.json")),
     );
@@ -726,8 +728,116 @@ describe("poll / ackMessage（§11.1 / FR-12 AC-12-4。レジストリ差はエ�
       path: "/api/v1/epp/messages",
     });
     expect(message).toMatchObject({
-      id: "2087",
+      id: "522",
       count: 1,
+      queuedAt: "2026-08-27T12:16:52.607727",
+      type: "transfer_rejected",
+      domainName: "dopamin-trf-mtayaan3.xyz",
+      transfer: {
+        name: "dopamin-trf-mtayaan3.xyz",
+        status: "rejected",
+        // status フィールドが無いので復元元は op
+        registryStatus: "reject",
+        // 拒否は相手（losing）が対応した通知なので acting に写す
+        actingRegistrarId: "teamb",
+      },
+    });
+    expect(message?.transfer?.requestingRegistrarId).toBeUndefined();
+  });
+
+  it("kitaqnic: 実測形の request 通知は transfer_request + 申請側 = 相手になる（AC-12-4）", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(loadFixture("poll.kitaqnic.request.json")),
+    );
+    const message = await createKitaqAdapter({
+      ...CONFIG,
+      id: "kitaqnic",
+    }).poll();
+    expect(message).toMatchObject({
+      id: "521",
+      type: "transfer_request",
+      domainName: "dopamin-trf-mtayaan3.xyz",
+      transfer: {
+        status: "pending",
+        registryStatus: "request",
+        // 申請通知の相手 = 申請側（gaining）なので requesting に写す
+        requestingRegistrarId: "teamb-2",
+      },
+    });
+    expect(message?.transfer?.actingRegistrarId).toBeUndefined();
+  });
+
+  it.each([
+    ["approve", "transfer_approved", "approved", "acting"],
+    ["cancel", "transfer_cancelled", "cancelled", "requesting"],
+  ] as const)(
+    "kitaqnic: payload.op が %s の通知は %s に正規化する",
+    async (op, type, status, counterpartSlot) => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse(
+          envelope({
+            count: 1,
+            message: {
+              id: 900,
+              msgType: "domain:transfer",
+              payload: {
+                op,
+                domain: "example.xyz",
+                counterpartyRegistrar: "teamb-2",
+              },
+              qdate: "2026-08-27T12:00:00.000000",
+            },
+          }),
+        ),
+      );
+      const message = await createKitaqAdapter({
+        ...CONFIG,
+        id: "kitaqnic",
+      }).poll();
+      expect(message).toMatchObject({
+        type,
+        domainName: "example.xyz",
+        transfer: { status, registryStatus: op },
+      });
+      const expectRequesting = counterpartSlot === "requesting";
+      expect(message?.transfer?.requestingRegistrarId).toBe(
+        expectRequesting ? "teamb-2" : undefined,
+      );
+      expect(message?.transfer?.actingRegistrarId).toBe(
+        expectRequesting ? undefined : "teamb-2",
+      );
+    },
+  );
+
+  it("kitaqnic: 旧想定形（msgType に動詞 + gaining / losing）も引き続き読める", async () => {
+    // #44 時点の想定（Swagger 由来の推測）。kitaqsign が同型で来る可能性が
+    // 残っている（メンテナンス中で未実測）ため後方互換を維持する
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        envelope({
+          count: 1,
+          message: {
+            id: 2087,
+            msgType: "transferApproved",
+            payload: {
+              domain: "example.xyz",
+              status: "clientApproved",
+              gainingRegistrar: "REG-DOPAMIN",
+              losingRegistrar: "REG-OTHER",
+              reDate: "2026-08-26T10:00:00Z",
+              acDate: "2026-08-26T10:20:00Z",
+            },
+            qdate: "2026-08-26T10:05:00Z",
+          },
+        }),
+      ),
+    );
+    const message = await createKitaqAdapter({
+      ...CONFIG,
+      id: "kitaqnic",
+    }).poll();
+    expect(message).toMatchObject({
+      id: "2087",
       type: "transfer_approved",
       domainName: "example.xyz",
       transfer: {

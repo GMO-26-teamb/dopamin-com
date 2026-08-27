@@ -3,19 +3,19 @@
   "resData": {
     "count": 1,
     "message": {
-      "id": 522,
+      "id": 521,
       "msgType": "domain:transfer",
       "payload": {
-        "op": "reject",
+        "op": "request",
         "domain": "dopamin-trf-mtayaan3.xyz",
-        "counterpartyRegistrar": "teamb"
+        "counterpartyRegistrar": "teamb-2"
       },
-      "qdate": "2026-08-27T12:16:52.607727"
+      "qdate": "2026-08-27T12:15:47.100000"
     }
   },
   "extension": null,
   "trID": {
-    "clTRID": "capture-1787800612657",
-    "svTRID": "KQNIC-20260827-000286"
+    "clTRID": "capture-1787800612000",
+    "svTRID": "KQNIC-20260827-000285"
   }
 }
