@@ -14,7 +14,8 @@
  * - `restore`: RGP 復旧。可否の SSOT は {@link isRestorable}（RGP ベース）で、
  *   `isOperationAllowed` はそこへ委譲したうえで transferred_out / pendingTransfer 等の
  *   横断ルールを重ねて判定する。判定ロジックを二重に持たないため、
- *   RGP そのものの条件を変える場合は {@link isRestorable} だけを変更する。
+ *   RGP そのものの条件を変える場合は {@link isInRedemptionPeriod} だけを変更する
+ *   （表示側の `deriveDisplayStatus` も同じ関数を見る）。
  */
 export type DomainOperation =
   | "renew"
@@ -171,7 +172,14 @@ export function isOperationAllowed(
   return { allowed: blockedBy.size === 0, blockedBy: [...blockedBy] };
 }
 
-function isInRedemptionPeriod(
+/**
+ * RGP（RFC 3915 の Redemption Grace Period）中か。復旧可否と表示の両方がここを見る。
+ *
+ * `redemptionPeriod` を載せる場所はレジストリで違う（kitaqsign 実測は `statuses` 側、
+ * mock は `rgpStatuses` 側）ため、必ず両方を見る（§11.3）。RGP 中は EPP の `pendingDelete`
+ * が必ず共存するので、`pendingDelete` の有無から RGP を判定してはいけない（#171）。
+ */
+export function isInRedemptionPeriod(
   rgpStatuses: readonly string[],
   statuses: readonly string[],
 ): boolean {

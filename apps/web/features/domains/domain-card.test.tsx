@@ -115,9 +115,11 @@ describe("DomainCard の 8 ステータス（ui-screens §2.2）", () => {
     expect(screen.getByText(/^\d{4}-\d{2}-\d{2}$/)).toBeInTheDocument();
   });
 
-  it("Redeemable: 復旧猶予の残日数 + 復旧する", () => {
+  it("Redeemable: 復旧猶予の残日数 + 復旧する（AC-10-1）", () => {
     renderCard({
       name: "demo-app.online",
+      // RGP 中は EPP 仕様上 pendingDelete が共存する（mock の形・#171）
+      statuses: ["pendingDelete"],
       rgpStatuses: ["redemptionPeriod"],
       expiresAt: at(-45),
       rgpUntil: at(18),
@@ -127,6 +129,19 @@ describe("DomainCard の 8 ステータス（ui-screens §2.2）", () => {
     expect(screen.getByRole("link", { name: "復旧する" })).toBeInTheDocument();
     expect(screen.getByText("廃止済み — 復旧可能")).toBeInTheDocument();
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+  });
+
+  it("Redeemable: 実レジストリ形（statuses 側に redemptionPeriod）でも同じ（#171）", () => {
+    renderCard({
+      name: "demo-app.online",
+      statuses: ["pendingDelete", "redemptionPeriod"],
+      rgpStatuses: [],
+      expiresAt: at(-45),
+      rgpUntil: at(18),
+    });
+
+    expect(screen.getByText("復旧猶予 残18日")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "復旧する" })).toBeInTheDocument();
   });
 
   it("Transferring: 移管申請中 + 状態を確認（/transfers へ）。詳細は出さない", () => {

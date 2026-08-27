@@ -54,7 +54,11 @@ function addYears(iso: string, years: number): string {
 /** ステータスは状態から決定的に導出する（ok は他ステータスと排他）。 */
 function deriveStatuses(state: MockDomainState): string[] {
   if (state.pendingDelete) {
-    return ["pendingDelete"];
+    // RGP 中は EPP 仕様（RFC 3915）上 pendingDelete と共存する。実レジストリ（kitaqsign 実測）
+    // も statuses 側に redemptionPeriod を載せるので、mock も同じ形にする（#171）
+    return state.rgpStatuses.includes("redemptionPeriod")
+      ? ["pendingDelete", "redemptionPeriod"]
+      : ["pendingDelete"];
   }
   const statuses: string[] = [];
   if (state.pendingTransfer !== null) {

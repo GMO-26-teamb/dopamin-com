@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.8（2026-08-27） |
+| 版 | v0.9（2026-08-27） |
 | 対応要件 | `docs/requirements.md` v0.1.11 §4 FR-01〜19、§9.2、§10.3、§11.3 / 11.4、§15 |
 | Figma | `UI Design (Team B)` — ページ **Prototype / Screens**（全画面・全状態、Standard、Present で遷移可）/ **Prototype / Screens (極ドパ)** / **Prototype / Flow**（遷移図）。コンポーネントは同ファイルのデザインシステム（Getting Started 参照） |
 | アセット | `docs/ui-design/*.png`（抜粋スクリーンショット） |
@@ -60,7 +60,7 @@
 | Active | `active` | Active（Ok） | Brand | 更新 / 詳細 |
 | Expiring | `active` かつ残 30 日以内（AC-02-2） | ⚠ 残 n 日（Warn）、枠 Warn | Warn | 今すぐ更新 / 詳細 |
 | Redeemable | `rgp` | 復旧猶予 残 n 日（Warn）（AC-10-1） | — | 復旧する / 詳細 |
-| PendingDelete | `pending_delete` | 削除待ち（Muted Solid）、75% | — | 詳細のみ |
+| PendingDelete | `pending_delete` | 削除待ち（Muted Solid）、75% | — | 詳細のみ（`redemptionPeriod` を伴わない場合のみ。伴うなら Redeemable） |
 | Transferring | `transfer_out_pending`（受信）/ `transfer_in_pending` は `/transfers` のみ | 移管申請中（Muted）、75% | — | 状態を確認 |
 | Hold | `hold` | 停止中（Warn）、枠 Warn | — | 情報修正 / 詳細 |
 | Inactive | `inactive` | NS 未設定（Neutral） | Brand | NS を設定 / 詳細 |
@@ -102,10 +102,10 @@
 | S-30 | `/domains/[name]` | Active | ヘッダー（ドメイン名 + 状態バッジ + ロックバッジ + 最終同期 / 再同期）。基本情報カード: レジストリ / EPP ステータス一覧（バッジ + 日本語説明ツールチップ）/ 登録日 / 有効期限（残日数 + 進捗）/ Grace Period（Renew / Transfer / Auto-Renew GP は種別と残日数を表示のみ）/ 移管可能日（ツールチップ「ICANN 実運用の参考。可否判定には使いません」）。ネームサーバー / コンタクト / サブドメイン設計カード（`反映済み n / m`、未作成時は「未作成 → 設計をはじめる」）。右: 操作パネル（更新 / 情報修正 / 移管 OUT / 廃止 / 復旧 + 移管ロック表示）。不可操作は Disabled + 理由（AC-07-1） | Card, Key Value Row, Progress Bar, Badge, Button |
 | S-31 | `/domains/[name]` | info 失敗（AC-07-2） | Banner Warn + キャッシュ表示（最終同期時刻）。操作ボタンは全て Disabled、「再同期」で S-35 → 成功なら S-30 | Banner |
 | S-32 | `/domains/[name]` | 移管申請を受信（AC-07-3） | Banner Warn + 状態バッジ「移管中（申請受信）」。操作パネル先頭に「拒否」「承認」+「自動承認まで mm:ss」（1 秒更新）。他操作は Disabled。タイマーが 0 になったらボタンを Disabled にし「状態を確認中…」→ 再照会 → S-34 | Banner, Button |
-| S-33 | `/domains/[name]` | 復旧猶予（RGP） | Banner Info「残り n 日」、バッジ「復旧猶予 残 n 日」。操作は「復旧する」のみ有効 → D-04 | Banner, Badge |
+| S-33 | `/domains/[name]` | 復旧猶予（RGP・`redemptionPeriod`） | Banner Info「残り n 日」、バッジ「復旧猶予 残 n 日」。操作は「復旧する」のみ有効 → D-04。EPP ステータス欄に `pendingDelete` が並んでいても（RGP 中は必ず共存する）S-36 ではなくこちら | Banner, Badge |
 | S-34 | `/domains/[name]` | 移管済み（AC-12-5） | バッジ「移管済み」、操作パネルなし、Banner Info「表示のみ」。自ユーザーの `transferred_out` 行のみ | Banner |
 | S-35 | `/domains/[name]` | 読み込み | Skeleton。`info` 取得後 S-30 | Skeleton |
-| S-36 | `/domains/[name]` | 削除待ち（`pendingDelete`） | バッジ「削除待ち」、Banner Warn「完全削除まで残り n 日」。操作パネルなし（復旧ボタンは表示しない・AC-11-2） | Banner, Badge |
+| S-36 | `/domains/[name]` | 削除待ち（`redemptionPeriod` を伴わない `pendingDelete`） | バッジ「削除待ち」、Banner Warn「完全削除まで残り n 日」。操作パネルなし（復旧ボタンは表示しない・AC-11-2）。`redemptionPeriod` が付いている間は S-33 | Banner, Badge |
 | S-37 | `/domains/[name]` | 停止中（`clientHold` / `serverHold`） | バッジ Warn「停止中」、Banner Warn「名前解決されません。運営の案内を確認」。更新・情報修正は可 | Banner, Badge |
 | S-38 | `/domains/[name]` | NS 未設定（`inactive`） | バッジ「NS 未設定」、Banner Info + CTA「NS を設定」→ D-02。NS カードは「—（未設定）」 | Banner, Button |
 | S-39 | `/domains/[name]` | コンタクト未移行（移管 IN 後） | Banner Warn「登録者情報が旧レジストラのままです」+ CTA「情報修正」（登録者プロファイルへ差し替えを再実行）。要確認 #14 が解決するまでの暫定表示 | Banner |
@@ -292,3 +292,4 @@ Figma **Prototype / Screens** にプロトタイプ接続を設定済み（Prese
 | v0.6 | 2026-08-27 | AI の時間制限の緩和（requirements v0.1.22）に追随: S-21 / S-23 の「10 秒」を「20 秒」、S-41 の「15 秒」を「30 秒」に更新。画面と状態そのものは変えていない |
 | v0.7 | 2026-08-27 | S-13 の Banner を `failures[].code` で出し分ける仕様に更新（#184）。固定文言だと `NOT_FOUND` などレジストリ障害でない失敗まで「〇〇が応答しません」と出て切り分けが空振りするため。画面と状態そのものは変えていない |
 | v0.8 | 2026-08-27 | 文言と実結果の不一致を修正（#173）: S-25 の NS helper から実際には適用されない `DOPAMIN_NAMESERVERS` を外し、S-26 は実際の `nameservers` を出す（空なら「未設定」）、D-03 の AGP 分岐の注記から「即時に削除され、元に戻せません」の断定を外す（採番が衝突していたため v0.6 から採り直した）|
+| v0.9 | 2026-08-27 | RGP の状態を requirements v0.1.23 に追随（#171）。S-33 / S-36 / §2.2 の Status 表を「RGP 中は `pendingDelete` が共存する」前提に直し、S-36 の対象を「`redemptionPeriod` を伴わない `pendingDelete`」に限定した（採番が衝突していたため v0.6 から採り直した）|
