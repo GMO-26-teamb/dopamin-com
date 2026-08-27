@@ -232,7 +232,9 @@
 
 - **概要**: 空きドメインを登録する（EPP `create`）。
 - **振る舞い**:
-  - 登録ダイアログの入力: 期間（1〜10年、既定 1年）/ ネームサーバー（既定: レジストリ既定値または空、後から FR-09 で設定可）/ コンタクト（ユーザーの登録者プロファイルを自動適用、ダミー PII）。
+  - 登録ダイアログの入力: 期間（1〜10年、既定 1年）。**ネームサーバーとコンタクト（登録者）は任意入力**で、既定では畳んだ 1 行にまとめ、開いたときだけ入力できる。畳んだ行には適用される内容の要約を出す。
+    - ネームサーバー: 未指定なら送らない（レジストリ既定値または空。後から FR-09 で設定可）。指定するなら 2〜13 件。
+    - コンタクト（登録者）: 未指定ならユーザーの登録者プロファイルをそのまま使う（未作成なら既定のダミー値で作る）。**未指定を「既定値で上書き」と解釈しない**（コンタクトはユーザー × レジストリで 1 件を共有するので、上書きすると既存ドメインの登録者まで変わる）。指定した場合は FR-09 と同じ経路でプロファイルを差し替える。ダミー PII のみ（値域は §15.2 と同じ）。
   - 期間を選んだあとに **お支払いステップ（FR-19、モック決済）** を挟む。決済が成立したときだけ `create` に進む。
   - 実行順: 直前に `check` を再実行 → 空きなら決済（モック）→ `create` → 成功後 `info` で確定情報を取得し DB に保存。
   - 成功画面で「サブドメイン設計に進む」（FR-13）と「詳細を見る」を提示。
@@ -241,6 +243,9 @@
   - AC-06-1: 登録成功後、一覧（FR-02）に即時反映され、状態が `Active`（`ok`）になる。
   - AC-06-2: `create` がタイムアウトした場合、二重登録を避けるため再送せず、`info` で存在確認して結果を確定する。
   - AC-06-3: 登録操作は操作ログ（FR-15）に request / response を記録する。
+  - AC-06-4: 登録時にネームサーバーを指定した場合、登録直後の詳細（FR-07）にその値が出る。
+  - AC-06-5: 登録時に登録者を指定した場合、登録直後の詳細のコンタクトにその値が出る。許可外のダミー PII は決済に進む前に画面で弾く。
+  - AC-06-6: 登録時にコンタクトを指定しなかった場合、既存の登録者プロファイルは変わらない。
 
 ### FR-07 ドメイン詳細・情報参照【P0】
 
@@ -780,7 +785,7 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。アプリのテーブル
 | POST | `/domains/sync` | 要 | 全保有ドメインを `info` で再同期し、Poll を消化する | FR-02/12 |
 | POST | `/domains/check` | 要 | `{ sld, tlds[] }` または `{ names[] }` → 各結果（空き・レジストリ・スコア） | FR-03/05 |
 | POST | `/uniqueness/preview` | **不要** | `{ sld }` または `{ name }` → `{ sld, uniqueness }`。独自性スコアだけを返す（レジストリに問い合わせないので空き状況は含まない）。ランディング（S-00）のお試し用。IP 単位のレート制限つき | FR-05 |
-| POST | `/domains` | 要 | `{ name, period, nameservers? }` → check → create → info | FR-06 |
+| POST | `/domains` | 要 | `{ name, period, nameservers?, contacts? }` → check → create → info。`contacts` は `{ registrant }` のみ（値域は `PATCH /domains/:name` と同じ）。省略時は既存の登録者プロファイルを維持する | FR-06 |
 | GET | `/domains/:name` | 要 | `info` で最新化して返す（失敗時はキャッシュ + `stale: true`）。応答には登録者コンタクトの中身 `registrantProfile` を添える（`info` は ID しか返さないため。そのドメインがアプリのコンタクトを参照していなければ `null`）。更新系（`POST /domains`・`renew`・`PATCH`・`restore`）の応答も同じ形 | FR-07 / FR-09 |
 | POST | `/domains/:name/renew` | 要 | `{ period }` | FR-08 |
 | PATCH | `/domains/:name` | 要 | `{ nameservers?, contacts?, clientStatuses? }` | FR-09 |
@@ -1029,7 +1034,7 @@ Server ステータスは Client ステータスより優先される。
 ### 12.1 方針
 
 - Supabase Auth は使わない。WebAuthn の Relying Party は `apps/api`（SimpleWebAuthn）。資格情報は `passkey_credentials`、セッションは `sessions` テーブルで管理する。
-- RP ID = Web の本番ドメイン（例: `dopamin.vercel.app` または独自ドメイン）。`WEBAUTHN_RP_ID` / `WEBAUTHN_ORIGIN` は環境変数。
+- RP ID = Web の本番ドメイン（現状 `dopamin.ut42tech.com`。§16.1 / §17 と揃える）。`WEBAUTHN_RP_ID` / `WEBAUTHN_ORIGIN` は環境変数。
 - `authenticatorSelection`: `residentKey: 'required'`, `userVerification: 'preferred'`。ログイン時は `allowCredentials` を空にして Discoverable Credential を使う。
 
 ### 12.2 登録シーケンス

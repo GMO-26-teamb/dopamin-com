@@ -24,6 +24,7 @@
 | サイドバー | 224px（`size/sidebar` = `--size-sidebar` = 14rem）。Logo → 主要 CTA「+ ドメインを取得」→ ナビ（ダッシュボード / 移管 / 設定）→ 下部にテーマトグル（Segmented Small）+ ユーザー名 + ログアウト。「ドメイン取得」は CTA と同じ `/domains/new` を指すため、ナビ項目には出さず CTA 1 本にする（CTA は現在地のとき Active 表示）。「ログ」は開発者向けなのでナビに出さず `/settings` の「開発者向け」から入る。Active は `Sidebar` の `Active` バリアント。`md` 未満ではサイドバーの代わりに `MobileNav`（横ナビ）を上部に出す |
 | メイン | padding 20/24、gap 12–16。先頭に `Page Header`（Title / Meta / Action）または見出し行 |
 | バナー | 画面内の結果・警告は `Banner`（Ok / Warn / Info）をメイン先頭に 1 つだけ置く。トーストは使わない |
+| テーマ切替 | サイドバー下部（認証後）に加えて、**Top Bar（`/`・S-80・S-81）と認証カード（S-01 / S-02）にも置く**。未認証のまま極ドパモードに触れられるようにするため。狭い幅では Top Bar の Sticker を畳み、収まらないぶんを次の行に送る |
 | 認証 | `/`・`/signup`・`/login` 以外の全ルートが認証必須。未認証は `/login?next=<path>`（S-02、reason なし）、API 401（セッション失効）は `/login?reason=expired&next=<path>`（S-03）。ログイン / サインアップ成功後は `next` へ戻る（AC-01-3） |
 | 非対応環境 | `window.PublicKeyCredential` 不在時は S-01c / S-02c を表示。S-00 の CTA 押下時にも同判定を行う |
 | 所有権なし / 未登録 | `/domains/[name]` で `FORBIDDEN` / `NOT_FOUND` → S-80（「ダッシュボードへ」） |
@@ -34,7 +35,7 @@
 
 | ID | ルート | 状態 | 表示 / 振る舞い | 使用コンポーネント |
 |---|---|---|---|---|
-| S-00 | `/` | ランディング | Top Bar、ヒーロー（CTA「パスキーではじめる」→ S-01、「ログイン」→ S-02）、お試しスコア（§7-1 参照：未認証 API が決まるまでは「ログイン後に利用可」の表示） | Top Bar, Button, Input, Score Gauge, Similarity Row |
+| S-00 | `/` | ランディング | Top Bar、左カラムにヒーロー（CTA「パスキーではじめる」→ S-01、「ログイン」→ S-02）、右カラムにお試しスコア。**右カラムは `lg` 以上でブランドグラデーション（`--gradient-brand`）の地**にし、入力ブロックは半透明のカード（`bg-panel/85`）に載せる。大きな面なので極ドパの RGB のパンは周期を伸ばす（`.brand-field`）。`lg` 未満は 1 カラムに積み、地は敷かない | Top Bar, Button, Input, Card, Score Gauge, Similarity Row |
 | S-01 | `/signup` | 通常 | 表示名（1〜32 文字、超過はクライアント + サーバーで弾く）+「パスキーを作成する」。成功で `next` または S-11（初回はドメイン 0 件） | Logo, Input, Button, Divider |
 | S-01b | `/signup` | パスキー作成失敗 | Banner Warn「パスキーを作成できませんでした」。キャンセル / タイムアウト / 非対応を同一文言で扱い、再試行可 | Banner |
 | S-01c | `/signup` | 非対応環境（AC-01-5） | Empty State Warn。フォールバック認証は提供しない | Empty State |
@@ -76,7 +77,7 @@
 | S-22 | `/domains/new` | 候補表示 | Candidate Card ×6。各カード: ドメイン名（TLD はブランド色）/ Rarity / Score Gauge（静止。最も近い既存名 3 件は「似ている名前」トグルで開閉 = Similarity Row ×3）/ 理由（40 字、Caption）/ 空きバッジ / 操作。「登録へ」→ S-25、「もう一回考える」→ S-21（前回候補を除外）、「自分で入力して探す」→ S-24 | Candidate Card, Score Gauge, Similarity Row |
 | S-23 | `/domains/new` | AI エラー（AC-04-2） | Banner Warn。`REGISTRY_TIMEOUT`→「AI が 20 秒以内に応答しませんでした」、`AI_UNAVAILABLE`→「AI が利用できません。手入力で探せます」、`RATE_LIMITED`→「利用上限に達しました。n 秒後に再試行」。直接検索へ誘導。AI ログに記録 | Banner |
 | S-24 | `/domains/new` | 直接検索の結果 | S-20〜S-23 と同一 URL（直接検索カードの開閉と結果表示のみが変わる）。検索条件・結果は URL に載らない（画面内 state のため、リロード・URL 共有では復元されない）。入力は `SLD + TLD 複数選択` または FQDN（`.` を含む場合は FQDN として 1 件で check）。結果は Search Result Row（Available / Taken / Error）。**独自性スコアは SLD 単位で決まるので、結果カードの見出しに 1 つだけ出す**（行ごとには出さない）。読み込み中は行ごとに Skeleton + レジストリ名。部分失敗は「確認不可」+ 注記。「登録へ」→ S-25、「代替を見る」→ 別 TLD・綴り違いを展開、「再試行」→ 当該レジストリのみ再 check | Search Result Row, Score Gauge, Rarity |
-| S-25 | `/domains/new`（dialog） | 登録ダイアログ | Dialog / Register：空き（再確認済み）+ スコア + レア度（ゲージクリックで内訳）→ 期間 Select（helper に税込合計）→ NS・コンタクトは読み取り専用の説明のみ（**NS は `create` に送らない**ので placeholder は「未設定」、helper は「あとから「情報修正」で設定できます」。ドパ民 DNS（`DOPAMIN_NAMESERVERS`）は FR-13 の反映時に切り替える NS で、登録時の既定値ではない）→ 「お支払いへ」→ S-29。直前に check 再実行 | Dialog / Register |
+| S-25 | `/domains/new`（dialog） | 登録ダイアログ | Dialog / Register：空き（再確認済み）+ スコア + レア度（ゲージクリックで内訳）→ 期間 Select（helper に税込合計）→ NS・コンタクト（登録者）は**既定では畳んだ 1 行**で、開いたときだけ入力できる（畳んだ行には適用される内容の要約: NS は「未設定のまま登録」または「ns1… ほか n 件」、コンタクトは登録者名）。NS は 2〜13 件で空なら送らない。コンタクトは氏名・メールのみ（住所・国は既定のダミー値で補う）。値域違反は「お支払いへ」で弾き、該当の欄を開いて理由を出す。ドパ民 DNS（`DOPAMIN_NAMESERVERS`）は FR-13 の反映時に切り替える NS で、登録時の既定値ではない → 「お支払いへ」→ S-29。直前に check 再実行 | Dialog / Register |
 | S-29 | `/domains/new`（dialog） | お支払い（FR-19・モック） | 同じ Dialog 内でステップ切替。ご注文内容（Card + Key Value Row：品目 / 期間 / 単価 / 小計 / 消費税 10% / 税込合計）→ カード入力（番号 / 有効期限 / CVC / 名義。デモ用カードが入力済み・AC-19-4）。「¥n を支払って登録する」→ 決済成立で `create` → S-26 /「戻る」→ S-25。入力エラーは欄ごとの warn helper、拒否は Banner Warn「お支払いに失敗しました」でダイアログは開いたまま（AC-19-3。`create` は呼ばない）。末尾 `0002` のカードで拒否を再現 | Dialog / Form, Card, Key Value Row, Input, Banner, Badge |
 | S-26 | `/domains/new`（dialog） | 登録成功 | Dialog / Success：状態・有効期限・**実際の NS**（`domain.nameservers` が空なら「ネームサーバーは未設定（あとから設定できます）」）に加えお支払いの控え（金額・ブランド・下 4 桁・受付番号・モックである旨）。「サブドメイン設計に進む」→ S-40（登録直後は設計なし）、「詳細を見る」→ S-30。閉じた場合は元の S-22 / S-24 に戻り、当該カードは Taken（「取得しました → 詳細」）に更新。一覧は即時反映（AC-06-1） | Dialog / Success |
 | S-27 | `/domains/new`（dialog） | 取得済み（CONFLICT 409） | 汎用 Dialog：直前の再確認で他者が取得済みだった場合。代替候補 3 件を本文に列挙、「代替候補を見る」→ S-24 | Dialog |
@@ -144,7 +145,7 @@
 
 | ID | ルート | 状態 | 表示 / 振る舞い | 使用コンポーネント |
 |---|---|---|---|---|
-| S-60 | `/logs`（S-70 の「開発者向け」から入る） | 操作ログ | Tabs（操作ログ / AI ログ、件数バッジ）+ Log Row（Kind=Operation: 日時 / コマンド / レジストリ / 対象 / 結果コード / レイテンシ）。行クリックで Log Detail（request / response、マスク済み）を展開 | Tabs, Log Row, Log Detail |
+| S-60 | `/logs`（S-70 の「開発者向け」から入る） | 操作ログ | Tabs（操作ログ / AI ログ、件数バッジ）+ Log Row（Kind=Operation: 日時 / コマンド / レジストリ / 対象 / 結果コード / レイテンシ）。行クリックで Log Detail（request / response、マスク済み）を展開。**6 列は合計 600px を超えるので `lg` 未満は 2 行に折る**（`lg` では Figma の列順に戻す） | Tabs, Log Row, Log Detail |
 | S-61 | `/logs?tab=ai` | AI ログ | Log Row（Kind=AI: 機能 / プロバイダ・モデル / 入力要約 / 結果 / レイテンシ）。クリックで出力要約 + トークン数 + 生 JSON | Log Row |
 | S-62 | `/logs` | 0 件 | Empty State | Empty State |
 | S-63 | `/logs` | 読み込み / 取得失敗 | Skeleton 行 ×6 / Banner Warn + 再試行。Figma フレームなし（§4 の規則で表現） | Skeleton, Banner |
