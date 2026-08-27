@@ -12,6 +12,8 @@ import {
  *
  * ドメイン名の再入力が一致するまで実行できない（要件 §15.2）。
  * AGP 内（登録後 5 日）は見出し・本文を「無課金で取消扱い」に切り替える（FR-10）。
+ * 取消後に即時削除になるか RGP に入るかはレジストリ次第（mock / kitaqsign は RGP）なので、
+ * 予告ではどちらとも断定しない（#173）。分岐後の実結果は完了バナー側で出す。
  */
 export interface DeleteDialogProps {
   open: boolean;
@@ -28,7 +30,7 @@ export function deleteCopy(name: string, withinAgp: boolean) {
     ? {
         title: `${name} を取り消しますか？`,
         subtitle: `登録から ${ADD_GRACE_PERIOD_DAYS} 日以内のため、無課金で取消扱いになります（Add Grace Period）。`,
-        note: "取消後はドメインが即時に削除され、元に戻せません。ダッシュボードからも消えます。",
+        note: "取消後の扱いはレジストリ次第です。復旧猶予（RGP）に入れば「復旧」から戻せますが、即時に削除された場合は元に戻せず、ダッシュボードからも消えます。",
         primaryLabel: "取り消す",
       }
     : {

@@ -61,10 +61,16 @@ export function RegisterSuccessDialog({
   const status = DISPLAY_STATUS_LABEL[domain.displayStatus];
   const expires =
     domain.expiresAt === null ? "—" : domain.expiresAt.slice(0, 10);
+  // 登録時に NS は送っていない（レジストリ既定）ので、実際に返ってきた値を出す。
+  // 「既定値」と書くと ns1/ns2.dopamin… が付いたように読めてしまう（#173）。
+  const nameservers =
+    domain.nameservers.length === 0
+      ? "ネームサーバーは未設定（あとから設定できます）"
+      : `ネームサーバー ${domain.nameservers.join(" / ")}`;
 
   return (
     <SuccessDialog
-      body={`${status} になりました。有効期限 ${expires}・ネームサーバーは既定値。お支払い ${formatJpy(receipt.amount)}（${receipt.brand} •••• ${receipt.last4}・受付 ${receipt.id}・モック）。次はサブドメインの構成を決めましょう。`}
+      body={`${status} になりました。有効期限 ${expires}・${nameservers}。お支払い ${formatJpy(receipt.amount)}（${receipt.brand} •••• ${receipt.last4}・受付 ${receipt.id}・モック）。次はサブドメインの構成を決めましょう。`}
       domain={domain.name}
       onOpenChange={onOpenChange}
       onPrimary={() => onGoToSubdomains(domain.name)}

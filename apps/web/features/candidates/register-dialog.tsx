@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  DOPAMIN_NAMESERVERS,
-  formatJpy,
-  quoteOrder,
-  rarityTier,
-} from "@dopamin/shared";
+import { formatJpy, quoteOrder, rarityTier } from "@dopamin/shared";
 import { Check } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -32,7 +27,8 @@ import { uniquenessText } from "./labels";
  * Figma: S-25 `81:1437`（Dialog / Register `53:53`）
  * ui-screens S-25 → S-29。開いた直後に check を再実行して「空き・再確認済み」を出し、
  * 期間だけ選んで「お支払いへ」→ お支払いステップ（S-29、モック決済）→ 決済成功で
- * `POST /domains`。NS / コンタクトは既定値の表示のみ（あとから情報修正で変える）。
+ * `POST /domains`。NS は送らない（レジストリ既定 = 実質未設定）ので欄は説明だけ、
+ * コンタクトは登録者プロファイルを自動適用。どちらもあとから情報修正で変える（#173）。
  */
 
 /** 登録期間は 1〜10 年（domainCreateRequestSchema / AC-08-2）。 */
@@ -214,9 +210,9 @@ export function RegisterDialog({
           />
           <Input
             disabled
-            helper={`既定: ${DOPAMIN_NAMESERVERS.join(" / ")}`}
+            helper="登録時は未設定。あとから「情報修正」で設定できます"
             label="ネームサーバー"
-            placeholder="既定値のまま（あとから変更できます）"
+            placeholder="未設定のまま登録します"
             readOnly
             surface="panel"
             value=""
