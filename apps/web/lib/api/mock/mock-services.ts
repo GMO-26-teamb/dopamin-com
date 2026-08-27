@@ -94,8 +94,14 @@ function similarityFromPercent(percent: number): number {
  * 独自性スコアは SLD だけで決まる（API は 1 回の check の中で SLD ごとにメモ化し、
  * 近い既存名も SLD の corpus から選ぶ）。TLD 違いの行は同じ値になる。
  */
-function uniquenessFor(name: string): UniquenessScore {
-  const { sld } = splitDomainName(name);
+/**
+ * SLD（TLD を含まない）からモックのスコアを組み立てる。
+ *
+ * FQDN を渡してはいけない。`splitDomainName("gogle")` は TLD として "gogle" を取り、
+ * SLD が空文字になる（`/uniqueness/preview` が SLD をそのまま渡していて、
+ * 類似候補が「s」「-app」「the」になっていた）。
+ */
+function uniquenessForSld(sld: string): UniquenessScore {
   const value = pseudoScore(sld);
   return {
     score: value,
@@ -112,6 +118,11 @@ function uniquenessFor(name: string): UniquenessScore {
       },
     ],
   };
+}
+
+/** FQDN 用。TLD を落としてから SLD で計算する。 */
+function uniquenessFor(name: string): UniquenessScore {
+  return uniquenessForSld(splitDomainName(name).sld);
 }
 
 /** 詳細から一覧用の項目だけを取り出す（一覧に詳細の項目を漏らさない）。 */
@@ -724,7 +735,7 @@ export function createMockServices(
         }
         const sld =
           "sld" in input ? input.sld : splitDomainName(input.name).sld;
-        return { sld, uniqueness: uniquenessFor(sld) };
+        return { sld, uniqueness: uniquenessForSld(sld) };
       },
     },
 
