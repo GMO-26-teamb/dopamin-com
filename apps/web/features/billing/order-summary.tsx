@@ -1,10 +1,10 @@
 import { formatJpy, type OrderQuote } from "@dopamin/shared";
-import { Badge } from "@/components/ui/badge";
 import { Card, Divider, KeyValueRow } from "@/components/ui/card";
 
 /**
  * ui-screens S-29 / D-11 の「ご注文内容」。
  * 金額は `quoteOrder()`（packages/shared）の値をそのまま出し、ここで計算しない。
+ * モック決済の断り書きは重ねず、お支払いステップ側にまとめる（#218）。
  */
 export interface OrderSummaryProps {
   quote: OrderQuote;
@@ -39,7 +39,6 @@ export function OrderSummary({ quote }: OrderSummaryProps) {
           {formatJpy(quote.total)}
         </span>
       </div>
-      <Badge tone="muted">固定ダミー価格</Badge>
     </Card>
   );
 }

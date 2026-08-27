@@ -29,8 +29,7 @@ export type ParseResult =
   | { ok: true; query: SearchQuery }
   | { ok: false; message: string };
 
-const SLD_ERROR =
-  "英数字とハイフンのみ、1〜63 文字で入力してください（RFC 1035）";
+const SLD_ERROR = "英数字とハイフンだけを使い、63 文字以内で入力してください";
 const FQDN_ERROR = "ドメイン名の形式が不正です（例: takutaku.com）";
 
 /** TLD を 1 つも選ばずに一括確認しようとしたとき（`tlds` は最小 1 件）。 */
