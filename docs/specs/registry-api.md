@@ -47,6 +47,11 @@
   (3) スコア算出自体が例外になったとき（付随情報なので握りつぶして check 結果は返す）の 3 つだけで、
   レジストリのタイムアウト・障害・応答欠落による `availability: "error"` の行にはスコアが付く
   （AC-05-2。UI は [`docs/specs/ui-screens.md`](ui-screens.md) の Unknown バリアント）。
+  なお requirements v0.1.27 で、**認証なしで叩ける `POST /uniqueness/preview`** が別に追加された
+  （ランディング S-00 のお試しスコア）。同じ `scoreDistinctiveness` + 既定コーパスを使うが
+  レジストリには一切問い合わせない（空き確認をしないので `uniqueness` が `null` になることもない）ため、
+  本 spec の対象外。認証の代わりに接続元 IP 単位のレート制限
+  （`apps/api/src/middleware/rate-limit.ts`。毎分 10 回）で守る。
 
 ## 2. API 契約（実装済みルート）
 
@@ -56,7 +61,7 @@
 | POST | `/domains/check` | ✅ | `{sld, tlds[]}` or `{names[]}`。レジストリ単位で並列、部分失敗許容（AC-03-2）。独自性スコア `uniqueness`（FR-05）も同時に返す（レジストリ障害の行にも付く。AC-05-2 / ADR-0003） |
 | POST | `/domains` | ✅ | check 再実行 → contact 作成 → create → info（AC-06 系）。authInfo はサーバー生成 |
 | POST | `/domains/sync` | ✅ | Poll を消化してから保有ドメイン（`ownership = 'owned'` のみ）を `info` で再同期する（#58）。`info` の `pendingTransfer` から受信中の申請を拾って `transfers(out)` を作り、`sponsoringRegistrarId` が自レジストラと違えば `transferred_out` に倒す（clID が取れるまで後者は効かない。【要確認 §21.2 #12】）。応答は `domainSyncWithPollResponseSchema`（`domains` / `failures` + `pollProcessed`）。順序が Poll → 同期なのは、先に消化しないと移管 OUT 済みの行がこの応答の保有一覧に残ってしまうため（AC-02-4） |
-| GET | `/domains/:name` | ✅ | `info` で最新化して DB キャッシュに write-through。応答の契約は `domainDetailResponseSchema`（#53）。レジストリに繋がらない（`REGISTRY_TIMEOUT` / `REGISTRY_UNAVAILABLE` / `REGISTRY_SPEC_MISMATCH`）ときは DB キャッシュを `stale: true` + `syncedAt` + `error`（理由）付きで返す（AC-07-2、#129）。`NOT_FOUND` や拒否応答はそのまま返す。**`ownership = 'transferred_out'` の行はレジストリに問い合わせずキャッシュを返す**（#57。自レジストラが非スポンサーで `info` を信頼できず、`upsertDomainFromInfo` が常に `owned` で書くため部分一意インデックスをすり抜けて保有行が復活する） |
+| GET | `/domains/:name` | ✅ | `info` で最新化して DB キャッシュに write-through。応答の契約は `domainDetailResponseSchema`（#53。`subdomainPlan: { hosts, applied } \| null` を含む。§3-17）。レジストリに繋がらない（`REGISTRY_TIMEOUT` / `REGISTRY_UNAVAILABLE` / `REGISTRY_SPEC_MISMATCH`）ときは DB キャッシュを `stale: true` + `syncedAt` + `error`（理由）付きで返す（AC-07-2、#129）。`NOT_FOUND` や拒否応答はそのまま返す。**`ownership = 'transferred_out'` の行はレジストリに問い合わせずキャッシュを返す**（#57。自レジストラが非スポンサーで `info` を信頼できず、`upsertDomainFromInfo` が常に `owned` で書くため部分一意インデックスをすり抜けて保有行が復活する） |
 | POST | `/domains/:name/renew` | ✅ | `{period}`。curExpDate は API 側で `info` から取得。10 年上限ガード（AC-08-2） |
 | PATCH | `/domains/:name` | ✅ | `{nameservers?（全量指定→差分変換）, clientStatuses?{add,remove}, contacts?{registrant?, tech?}}`。`contacts` はコンタクト ID ではなく**プロファイル**を受け取り、ID の用意（作成 or 更新）は API 側で行う（#72）。Admin / Billing は扱わない |
 | DELETE | `/domains/:name` | ✅ | 削除ロック中 409（AC-10-2）。削除後の状態（RGP）を返す |
@@ -206,11 +211,19 @@ result code ごとの**ユーザー向け理由文**は `packages/shared/src/reg
     （`packages/shared`）が導出の SSOT。API も計算済みの値を返すと 2 系統になり、
     片方だけ直る事故になる（`domainSummarySchema` が表示ステータスを持たないのと同じ理由）。
     `pendingTransfer` は導出できないので `summary.transfer`（`{ direction, actByAt }`）として返す。
-    導出できない値はもう 1 つあり、**登録者コンタクトの中身**（`registrantProfile`）は
-    `info` が ID しか返さないため API が `contacts` から引いて添える（#172）。
-    `domain.registrant`（ID）がアプリのコンタクトと一致するときだけ値を入れ、
-    移管 IN 直後のように相手レジストラの ID を参照したままなら `null`（中身を知らない。
-    非スポンサーの `contact info` 可否は【要確認 §21.2 #14】）。
+    一方、**この応答から導出できない事実は API が添える**。現状 2 つある。
+    (a) **登録者コンタクトの中身**（`registrantProfile`）: `info` が ID しか返さないため
+    API が `contacts` から引いて添える（#172）。`domain.registrant`（ID）がアプリの
+    コンタクトと一致するときだけ値を入れ、移管 IN 直後のように相手レジストラの ID を
+    参照したままなら `null`（中身を知らない。非スポンサーの `contact info` 可否は
+    【要確認 §21.2 #14】）。
+    (b) **保存済みサブドメイン設計の件数**（`subdomainPlan: { hosts, applied } | null`、#217 /
+    requirements v0.1.27）: `subdomain_plans` / `dns_records` にある別テーブルの事実で、
+    未保存なら `null`。S-30 の設計カードは「保存済み · n ホスト · 反映済み a/n」しか出さないので、
+    詳細を開くたびに設計 API を追加で呼ばずに済ませる。算出は
+    `getSubdomainPlanSummary`（`apps/api/src/services/subdomain-plan.service.ts`）で、
+    反映済みの判定は `GET /domains/:name/subdomain-plan` と同じ `subdomainApplyState`
+    （2 画面で件数が食い違わない）。中身が要る画面（S-43）は従来どおり設計 API を読む。
 18. **照合できない操作はタイムアウトで確定させない**（#57）。移管の承認 / 拒否 / 取消のうち、
     `transferQuery` + `info` から成立を証明できるのは**承認だけ**（trDate が申請の窓の中で動く）。
     「`pendingTransfer` が消えた」は承認 / 拒否 / 取消・相手の取下げ・サーバ自動承認のどれでも起きるので、
@@ -242,8 +255,9 @@ result code ごとの**ユーザー向け理由文**は `packages/shared/src/reg
   `{sld, tlds[]}` は `tlds` 最大 22 件（対応 TLD の全量。`packages/shared/src/tlds.ts`）に制限している。
   実際に 1 回のレジストリ呼び出しへ載る件数は `checkDomains` がレジストリ別にまとめるので最大 20 件
   （`{sld, tlds[]}` 形式なら kitaqsign 最大 4 件 / kitaqnic 最大 18 件。`REGISTRY_TLDS`）。
-- コンタクト更新（FR-09 の一部）は未実装。移管の承認 / 拒否 / 取消（#57）と
-  Poll 消化（#58）は実装済み。
+- ~~コンタクト更新（FR-09 の一部）は未実装~~: 実装済み。`PATCH /domains/:name` の `contacts`
+  （#72 のプロファイル受け取り）を D-02 から叩けるようにした（#172 / #205）。
+  移管の承認 / 拒否 / 取消（#57）と Poll 消化（#58）も実装済み。
 - Poll 消化の失敗時は **ack しない**（`services/poll.service.ts`）。FIFO なのでキューは
   その 1 件で止まるが、ack して通知を失うと移管の状態を復元する手段が無くなるため。
   失敗は応答の `failures` と operation_logs（FR-15）に残り、次の消化で再試行される。
