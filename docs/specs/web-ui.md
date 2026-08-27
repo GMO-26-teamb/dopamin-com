@@ -123,17 +123,17 @@ Figma の code syntax（`var(--color-bg)` 等）は Dev Mode で確認できる�
 |---|---|---|
 | `--size-sidebar` | `14rem`（224px） | `w-sidebar` |
 | `--size-page` | `80rem`（1280px） | `max-w-page` |
-| `--size-auth-card` | `440px` | `max-w-auth-card` |
-| `--size-dialog` | `420px` | `w-dialog` |
-| `--size-control-sm` | `28px` | `h-control-sm` |
-| `--size-control-md` | `36px` | `h-control-md` |
-| `--size-control-lg` | `44px` | `h-control-lg` |
+| `--size-auth-card` | `28.75rem`（460px） | `max-w-auth-card` |
+| `--size-dialog` | `28.75rem`（460px） | `w-dialog` |
+| `--size-control-sm` | `1.875rem`（30px） | `h-control-sm` |
+| `--size-control-md` | `2.375rem`（38px） | `h-control-md` |
+| `--size-control-lg` | `2.875rem`（46px） | `h-control-lg` |
 
-その他の `dimensions`（`tokens.json`）は `:root` に px 固定値の CSS 変数として出力されるだけで、Tailwind の名前付きユーティリティには登録しない:
+その他の `dimensions`（`tokens.json`）は `:root` に CSS 変数として出力されるだけで、Tailwind の名前付きユーティリティには登録しない（寸法は rem（16px 基準）で出力され、px 固定なのは線幅 `--stroke-*` のみ）:
 
 - `--space-2`〜`--space-48` は Tailwind 既定の 4px グリッド（`p-0.5`〜`p-12` 等）と同じ値になるため、既定のスペーシングユーティリティ（`gap-3` `px-4` `py-2` 等）をそのまま使う。
-- `--size-icon-sm/md/lg`（14/16/20px）も Tailwind 既定スケール（`size-3.5` / `size-4` / `size-5`）と一致するため同様。
-- 既定クラスと一致しないのは `--stroke-medium`（1.5px）と `--stroke-accent`（3px）だけで、この 2 つは Tailwind の任意値で CSS 変数を直接参照する（例 `border-[length:var(--stroke-medium)]`、`border-l-[length:var(--stroke-accent)]`）。`--stroke-thin`（1px）は素の `border`、`--stroke-strong`（2px）は `border-2`、`--size-bar-thin`（4px）/ `--size-bar`（6px）は `h-1` / `h-1.5` を使う。
+- `--size-icon-sm/md/lg` は 15/17/21px（`tokens.css` では `0.9375rem` / `1.0625rem` / `1.3125rem`）で、Tailwind 既定スケール（`size-3.5` / `size-4` / `size-5` = 14/16/20px）とは一致しない。実装はアイコン枠に既定クラスをそのまま当てており（`components/ui/button.tsx` / `components/ui/icon-button.tsx` の `ICON_SIZE`）、このトークンは `:root` に出力されるだけで現状どこからも参照していない。
+- 既定クラスと一致せず、Tailwind の任意値で CSS 変数を直接参照するのは `--stroke-medium`（1.5px）と `--stroke-accent`（3px）の 2 つ（例 `border-[length:var(--stroke-medium)]`、`border-l-[length:var(--stroke-accent)]`）。`--stroke-thin`（1px）は素の `border`、`--stroke-strong`（2px）は `border-2`、`--size-bar-thin`（4px）/ `--size-bar`（6px）は `h-1` / `h-1.5` を使う。
 - `--radius-none`（`0px`）は角丸を使わない、という宣言のためのトークンで、実装では `rounded-*` を一切付けない（`globals.css` のコメント参照）。
 - `--opacity-disabled` / `--opacity-muted` は `opacity-[var(--opacity-disabled)]` のように任意値で参照する。
 
@@ -150,35 +150,35 @@ next/font のインスタンス（`--font-noto-sans-jp` 等）は `app/layout.ts
 
 ### 3.4 テキストスタイル（25、`tokens.json` の `textStyles` と 1:1）
 
-`weight / size / line-height / tracking` は px（tracking は 0 以外のみ意味あり）。
+`weight / size / line-height / tracking` は px（tracking は 0 以外のみ意味あり）。値は `apps/web/lib/theme/tokens.json` の `textStyles` の写しで、そちらが正。`tokens.css` / `globals.css` には 16px 基準の rem として出力される（§4 のとおり大画面では `html` の font-size ごと拡大する）。トークンを変えたらこの表も同時に更新する。
 
 | Figma スタイル | Tailwind クラス | font | weight / size / line-height / tracking |
 |---|---|---|---|
-| Display/Hero | `text-display-hero` | jp | 900 / 36 / 48 / -0.36 |
-| Display/Score | `text-display-score` | latin | 800 / 26 / 28 / 0 |
-| Display/Score Small | `text-display-score-sm` | latin | 800 / 16 / 18 / 0 |
-| Heading/Page | `text-heading-page` | jp | 900 / 20 / 28 / 0 |
-| Heading/Section | `text-heading-section` | jp | 700 / 18 / 24 / 0 |
-| Heading/Card | `text-heading-card` | jp | 700 / 15 / 20 / 0 |
-| Domain/Large | `text-domain-lg` | latin | 700 / 20 / 24 / 0 |
-| Domain/Card | `text-domain-card` | latin | 700 / 15 / 20 / 0 |
-| Domain/Small | `text-domain-sm` | latin | 700 / 13 / 16 / 0 |
-| Brand/Logo | `text-brand-logo` | jp | 900 / 16 / 20 / 0 |
-| Brand/Logo Latin | `text-brand-logo-latin` | latin | 900 / 16 / 20 / 0 |
-| Brand/Goku | `text-brand-goku` | goku | 400 / 18 / 18 / 0 |
-| Brand/Goku Small | `text-brand-goku-sm` | goku | 400 / 14 / 14 / 0 |
-| Body/Lead | `text-body-lead` | jp | 400 / 14 / 26 / 0 |
-| Body/Default | `text-body` | jp | 400 / 14 / 22 / 0 |
-| Body/Small | `text-body-sm` | jp | 400 / 13 / 20 / 0 |
-| Label/Default | `text-label` | jp | 700 / 13 / 16 / 0 |
-| Label/Small | `text-label-sm` | jp | 700 / 12 / 16 / 0 |
-| Label/Tiny | `text-label-xs` | jp | 700 / 11 / 14 / 0 |
-| Caption/Default | `text-caption` | jp | 400 / 11 / 16 / 0 |
-| Caption/Small | `text-caption-sm` | jp | 400 / 10 / 14 / 0 |
-| Overline | `text-overline` | jp | 700 / 10 / 14 / 1.2 |
-| Code/Default | `text-code` | mono | 400 / 11 / 19 / 0 |
-| Code/Label | `text-code-label` | mono | 700 / 11 / 16 / 0 |
-| Code/Input | `text-code-input` | mono | 400 / 13 / 20 / 0 |
+| Display/Hero | `text-display-hero` | jp | 900 / 44 / 56 / -0.44 |
+| Display/Score | `text-display-score` | latin | 800 / 30 / 32 / 0 |
+| Display/Score Small | `text-display-score-sm` | latin | 800 / 18 / 20 / 0 |
+| Heading/Page | `text-heading-page` | jp | 900 / 24 / 32 / 0 |
+| Heading/Section | `text-heading-section` | jp | 700 / 20 / 28 / 0 |
+| Heading/Card | `text-heading-card` | jp | 700 / 16 / 22 / 0 |
+| Domain/Large | `text-domain-lg` | latin | 700 / 22 / 28 / 0 |
+| Domain/Card | `text-domain-card` | latin | 700 / 16 / 22 / 0 |
+| Domain/Small | `text-domain-sm` | latin | 700 / 14 / 18 / 0 |
+| Brand/Logo | `text-brand-logo` | jp | 900 / 18 / 22 / 0 |
+| Brand/Logo Latin | `text-brand-logo-latin` | latin | 900 / 18 / 22 / 0 |
+| Brand/Goku | `text-brand-goku` | goku | 400 / 20 / 20 / 0 |
+| Brand/Goku Small | `text-brand-goku-sm` | goku | 400 / 15 / 15 / 0 |
+| Body/Lead | `text-body-lead` | jp | 400 / 16 / 28 / 0 |
+| Body/Default | `text-body` | jp | 400 / 15 / 24 / 0 |
+| Body/Small | `text-body-sm` | jp | 400 / 14 / 21 / 0 |
+| Label/Default | `text-label` | jp | 700 / 14 / 18 / 0 |
+| Label/Small | `text-label-sm` | jp | 700 / 13 / 17 / 0 |
+| Label/Tiny | `text-label-xs` | jp | 700 / 12 / 15 / 0 |
+| Caption/Default | `text-caption` | jp | 400 / 12 / 17 / 0 |
+| Caption/Small | `text-caption-sm` | jp | 400 / 11 / 15 / 0 |
+| Overline | `text-overline` | jp | 700 / 11 / 15 / 1.3 |
+| Code/Default | `text-code` | mono | 400 / 12 / 20 / 0 |
+| Code/Label | `text-code-label` | mono | 700 / 12 / 17 / 0 |
+| Code/Input | `text-code-input` | mono | 400 / 14 / 21 / 0 |
 
 ## 4. テーマの扱い
 

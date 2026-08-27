@@ -80,6 +80,8 @@ export function isDemoDomainName(name: string): boolean {
  * 行が残るため、`user_id` で明示的に消す。
  * `operation_logs` の `user_id` は ON DELETE SET NULL（退会後も恒久保存）だが、
  * デモリセットは「この画面をきれいにする」操作なので、本人の行は消す。
+ * `ai_logs` も同じ理由で本人の行を消す（FK は ON DELETE CASCADE なので退会時は
+ * 自動で落ちるが、`domains` を消すだけでは残る）。
  */
 export async function clearDemoData(db: Db, userId: string): Promise<void> {
   await db.transaction(async (tx) => {

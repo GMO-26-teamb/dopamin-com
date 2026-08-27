@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v1（2026-08-26） |
+| 版 | v1.1（2026-08-27。§4.1〜§4.6 のデータ層の記述を実装に追随させた） |
 | 入力 | `docs/specs/ui-screens.md` v0.2（全 60 画面・状態）、Figma `UI Design (Team B)`（file `3gv0voomQ7jVtBzVUbnoZj`）、`docs/requirements.md` v0.1.5 |
 | ゴール | Figma プロトタイプの全画面を `apps/web` に実装し、データ取得を **Service インターフェース** の裏に隠す。既定はモック実装で全状態（通常 / 空 / 読み込み / エラー）を再現でき、API が揃ったら HTTP 実装に差し替えるだけで済む状態にする |
 | 非ゴール | API（apps/api）の追加実装、DB、本物の DNS。モバイル対応（ui-screens §7-6）。Storybook |
@@ -65,10 +65,10 @@ test/setup.ts, vitest.config.ts
 
 ### 4.1 型（`lib/api/types.ts`）
 
-`packages/shared` の `DomainInfo` / `AuthUser` / `PasskeySummary` / `ApiErrorBody` を再利用し、画面用の ViewModel を追加する。
+`packages/shared` の `DomainInfo` / `AuthUser` / `PasskeySummary` / `ApiError` を再利用し、画面用の ViewModel を追加する。
 
 ```ts
-import type { DisplayStatus } from "@dopamin/shared";
+import type { ApiError, AuthUser, DisplayStatus, ErrorCode, OrderQuote } from "@dopamin/shared";
 
 export type Ownership = "owned" | "transferred_out";
 
@@ -80,6 +80,8 @@ export interface DomainSummary {
   syncedAt: string; stale: boolean;         // 直近の sync に失敗したらキャッシュ表示
   transfer: { direction: "in" | "out"; actByAt: string } | null;
 }
+export interface SyncFailure { name: string; code: ErrorCode; message: string; registry: Exclude<DomainSummary["registry"], "mock"> | null }
+export interface SyncResult { domains: DomainSummary[]; failures: SyncFailure[] }  // 部分失敗はここに載せる（S-13）
 export interface GracePeriod { kind: "add" | "renew" | "transfer" | "autoRenew" | "redemption" | "pendingDelete"; until: string }
 export interface DomainDetail extends DomainSummary {
   nameservers: string[];
@@ -87,10 +89,11 @@ export interface DomainDetail extends DomainSummary {
   gracePeriods: GracePeriod[]; transferableFrom: string | null;
   subdomainPlan: { hosts: number; applied: number } | null;
 }
+export interface DomainContactsInput { registrant: { name: string; email: string } }  // PATCH の contacts。登録者のみ（S-39 の再実行）
 export interface UniquenessScore { score: number; label: "high" | "medium" | "low"; nearest: { name: string; similarity: number }[] }
 export type Availability = "available" | "unavailable" | "error";
 export interface Candidate { sld: string; tld: string; reason: string; registry: DomainSummary["registry"]; availability: Availability; uniqueness: UniquenessScore | null; alternatives: string[] }
-export interface SearchResult { name: string; sld: string; tld: string; registry: DomainSummary["registry"]; availability: Availability; uniqueness: UniquenessScore | null; alternatives: string[]; error: ApiErrorBody["error"] | null }
+export interface SearchResult { name: string; sld: string; tld: string; registry: DomainSummary["registry"]; availability: Availability; uniqueness: UniquenessScore | null; alternatives: string[]; error: ApiError["error"] | null }
 export type ApplyStatus = "applied" | "changed" | "pending";
 export interface SubdomainHost { id: string; host: string; purpose: string; recordType: "A" | "CNAME" | "ALIAS"; target: string; priority: "required" | "recommended" | "optional"; applyStatus: ApplyStatus }
 export interface SubdomainPlan { domain: string; repoUrl: string | null; policy: string; hosts: SubdomainHost[]; nameserversSwitched: boolean; savedAt: string | null; appliedAt: string | null }
@@ -101,11 +104,19 @@ export interface OperationLog { id: string; at: string; command: string; registr
 export interface AiLog { id: string; at: string; feature: "domain_candidates" | "uniqueness" | "subdomain_plan"; provider: string; model: string; inputSummary: string; outputSummary: string; status: "success" | "error"; latencyMs: number; tokens: number | null; raw: unknown }
 export interface AiSettings { provider: "google" | "anthropic"; model: string; providers: { id: "google" | "anthropic"; models: string[] }[] }
 export interface Me { user: AuthUser; features: { demoReset: boolean }; ai: AiSettings }
+// 決済（FR-19、モック）。`OrderQuote` は `@dopamin/shared`
+export interface PaymentCardInput { number: string; expiry: string; cvc: string; holder: string }
+export interface PaymentChargeInput { quote: OrderQuote; card: PaymentCardInput }
+export interface PaymentReceipt { id: string; paidAt: string; amount: number; currency: OrderQuote["currency"]; brand: string; last4: string; description: string }
+export type PaymentErrorCode = "CARD_DECLINED";
+export type PaymentResult = { ok: true; receipt: PaymentReceipt } | { ok: false; code: PaymentErrorCode; message: string };
 ```
 
 ### 4.2 サービスインターフェース（`lib/api/services.ts`）
 
 ```ts
+// PATCH /domains/:name の入力。nameservers は変更後の全量（0 件で全解除、または 2〜13 件）
+export interface DomainUpdateInput { nameservers?: string[]; contacts?: DomainContactsInput }
 export interface AuthService {
   isSupported(): boolean;
   signup(displayName: string): Promise<AuthUser>;
@@ -114,15 +125,16 @@ export interface AuthService {
   addPasskey(): Promise<PasskeySummary>;
   listPasskeys(): Promise<PasskeySummary[]>;
   deletePasskey(id: string): Promise<void>;
+  renamePasskey(id: string, name: string): Promise<PasskeySummary>; // PATCH /auth/passkeys/:id（FR-01、1〜32 文字、他人 / 不在は NOT_FOUND）
 }
 export interface DomainService {
-  list(): Promise<DomainSummary[]>;                 // GET /domains（未実装 → NOT_IMPLEMENTED）
-  sync(): Promise<DomainSummary[]>;                 // POST /domains/sync
+  list(): Promise<DomainSummary[]>;                 // GET /domains
+  sync(): Promise<SyncResult>;                      // POST /domains/sync（部分失敗は例外にせず failures に載せて返す・S-13 / AC-18-1。例外はリクエスト自体が失敗したとき = 401 / 5xx / ネットワークだけ）
   get(name: string): Promise<DomainDetail>;         // GET /domains/:name
   check(input: DomainCheckRequest): Promise<SearchResult[]>;   // POST /domains/check
   register(input: { name: string; period: number }): Promise<DomainDetail>; // POST /domains
   renew(name: string, input: { period: number }): Promise<DomainDetail>;
-  update(name: string, input: { nameservers?: string[] }): Promise<DomainDetail>;
+  update(name: string, input: DomainUpdateInput): Promise<DomainDetail>;
   remove(name: string): Promise<{ outcome: "rgp" | "deleted" }>;
   restore(name: string): Promise<DomainDetail>;
   authCode(name: string): Promise<{ authCode: string }>;
@@ -142,12 +154,15 @@ export interface TransferService {
 }
 export interface LogService { operations(): Promise<OperationLog[]>; ai(): Promise<AiLog[]> }
 export interface SettingsService { me(): Promise<Me>; updateAi(input: { provider: AiSettings["provider"]; model: string }): Promise<AiSettings>; demoReset(): Promise<void> }
-export interface Services { auth: AuthService; domains: DomainService; candidates: CandidateService; subdomains: SubdomainService; transfers: TransferService; logs: LogService; settings: SettingsService }
+// FR-19。API 側にルートは無く、mock / http どちらの実装も `lib/api/payments/mock-gateway.ts` の
+// `createMockPaymentService` を使う。拒否は例外ではなく `PaymentResult`（`{ ok: false, code: "CARD_DECLINED" }`）で返す
+export interface PaymentService { charge(input: PaymentChargeInput): Promise<PaymentResult> }
+export interface Services { auth: AuthService; domains: DomainService; candidates: CandidateService; subdomains: SubdomainService; transfers: TransferService; logs: LogService; settings: SettingsService; payments: PaymentService }
 ```
 
 ### 4.3 エラー（`lib/api/errors.ts`）と文言（`lib/error-messages.ts`）
 
-- `class ApiClientError extends Error { code: ErrorCode | "NOT_IMPLEMENTED" | "NETWORK"; retryable; registry?; registryCode?; requestId?; details? }`。HTTP 実装は §10.3 の JSON を zod（`apiErrorBodySchema`）で検証して変換。fetch 失敗は `NETWORK`。
+- `class ApiClientError extends Error { code: ErrorCode | "NOT_IMPLEMENTED" | "NETWORK"; retryable; registry?; registryCode?; requestId?; details? }`。HTTP 実装は §10.3 の JSON を zod（`apiErrorSchema`）で検証して変換。fetch 失敗は `NETWORK`。
 - `toErrorCopy(err): { title: string; body: string; action: "retry" | "login" | "dashboard" | "none" }` — ui-screens §4 の表を 1 か所に。`registry` があれば文言に「Kitaqsign / Kitaqnic」を差し込む。
 
 ### 4.4 モック（`lib/api/mock/`）
@@ -159,11 +174,11 @@ export interface Services { auth: AuthService; domains: DomainService; candidate
 
 ### 4.5 hooks（`lib/api/hooks.ts`）
 
-TanStack Query。queryKey は `["domains"]`, `["domain", name]`, `["candidates", input]`, `["subdomain-plan", domain]`, `["transfers"]`, `["logs", "operations"]`, `["logs", "ai"]`, `["me"]`。mutation は成功時に関連 key を invalidate。`useDomains()` は `{ data, isPending, error, refetch }` をそのまま返す（画面側で `loading | empty | error | ready` に分岐）。
+TanStack Query。queryKey は先頭に必ずスコープが付く `[scope, …]` 形式（`scope` = `?mock=` のシナリオ名、`NEXT_PUBLIC_API_MODE=http` のときは `"http"`。シナリオを切り替えたときに前のシナリオのキャッシュを掴まないようにするため）。定義は `queryKeys(scope)` に集約し、画面側は現在のスコープを閉じ込めた `useQueryKeys()` を使う。キーは `[scope, "me"]`, `[scope, "passkeys"]`, `[scope, "domains"]`, `[scope, "domain", name]`, `[scope, "candidates", input]`, `[scope, "subdomain-plan", domain]`, `[scope, "dns-diff", domain]`, `[scope, "transfers"]`, `[scope, "logs", "operations"]`, `[scope, "logs", "ai"]` の 10 種。mutation は成功時に関連 key を invalidate（invalidate / setQueryData も `useQueryKeys()` 経由）。`useDomains()` は `{ data, isPending, error, refetch }` をそのまま返す（画面側で `loading | empty | error | ready` に分岐）。
 
 ### 4.6 HTTP 実装（`lib/api/http/`）
 
-`hc<AppType>("")` で同一オリジン `/api/v1/*` を叩く。存在するルート（check / register / get / renew / update / delete / restore / auth-code / transfers request+get、auth 系）は実装し、未実装（domains list / sync / candidates / subdomain-plan / logs / settings / transfers list・approve・reject・cancel）は `ApiClientError("NOT_IMPLEMENTED")` を投げる。各メソッドの上に要件 §10.1 のルートをコメントで書く。
+`hc<AppType>("")` で同一オリジン `/api/v1/*` を叩く。実 API に繋がっているのは auth 系全部（signup / login / logout / addPasskey / listPasskeys / deletePasskey / renamePasskey）、domains の list・sync・get・check・register・renew・update（`nameservers` のみ）・remove・restore・authCode、transfers の list・refresh・request・approve・reject・cancel、settings の me（`GET /auth/me`）・updateAi（`PATCH /settings/ai`）。まだクライアントを繋いでいない candidates（`POST /ai/domain-candidates`）／subdomains（get・propose・save・diff・apply）／logs（operations・ai）／settings.demoReset（`POST /demo/reset`）と、`update` に `contacts` を渡した場合は `ApiClientError("NOT_IMPLEMENTED")` を投げる。決済（`payments`）は API にルートが無く、HTTP モードでもブラウザ内モック（`payments/mock-gateway.ts`）で完結する。各メソッドの上に要件 §10.1 のルートをコメントで書く。
 
 ## 5. UI プリミティブ（`components/ui`、Figma 名 1:1）
 

@@ -95,9 +95,10 @@ CLAUDE.md の規約のうち機械的に強制できるものを hook にして�
 ## 使い方の流れ（このリポジトリの規約に沿って）
 
 1. `docs/requirements.md` と `docs/specs/<feature>.md` を読ませる（`CLAUDE.md` で指示済み）。
-2. 実装依頼は `superpowers` の流れに乗せる: brainstorming → plan → TDD で実装。
-3. 完了前に `pnpm check`、`/code-review` でレビュー、`/simplify` で整理。
-4. `feat/<fr-id>-<slug>` ブランチで PR。`main` へ直接 push しない。
+2. 実装・修正の依頼は着手前に `issue-checker` サブエージェントで既存 issue に該当するかを確認する。該当があればその issue 番号に紐づけ（`blocked:要確認` 付きなら解消してから着手）、無ければ新規に起票してから着手する（`CLAUDE.md` の必須規約）。
+3. 実装依頼は `superpowers` の流れに乗せる: brainstorming → plan → TDD で実装。
+4. 完了前に `pnpm check`、`/code-review` でレビュー、`/simplify` で整理。
+5. `feat/<fr-id>-<slug>` ブランチで PR。`main` へ直接 push しない。
 
 ## 確認コマンド
 
