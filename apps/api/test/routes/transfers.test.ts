@@ -213,6 +213,9 @@ describe("POST /api/v1/transfers（FR-12 移管 IN）", () => {
     if (!owned) {
       throw new Error("theirs.com の保有行がありません");
     }
+    // 所有者が変わるときは新しい行を作る（§6.5）。upsert は他ユーザーの保有行を
+    // 乗っ取らない（#222）ので、旧行を捨ててから作り直す
+    await domainStore.remove("theirs.com");
     await domainStore.upsert({ ...owned, userId: OTHER_USER.id });
 
     const res = await sendJson("/transfers", { name: "theirs.com", authCode });
@@ -749,6 +752,8 @@ describe("POST /api/v1/transfers/:id/approve・reject（FR-12 移管 OUT）", ()
     if (!existing) {
       throw new Error("保有行が見つからない");
     }
+    // 同上（#222）: 旧行を捨ててから他ユーザーの保有行として作り直す
+    await domainStore.remove("notyours.com");
     await domainStore.upsert({ ...existing, userId: OTHER_USER.id });
 
     const res = await api(`/transfers/${record.id}/approve`, {
