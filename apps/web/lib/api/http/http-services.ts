@@ -14,6 +14,7 @@ import {
   type DnsZoneResponse,
   type DomainCheckRequest,
   type DomainCheckResult,
+  type DomainCreateRequest,
   type DomainSyncResponse,
   type DomainUniqueness,
   type DomainUpdateRequest,
@@ -48,13 +49,18 @@ import {
   withErrorOrigin,
 } from "../errors";
 import { createMockPaymentService } from "../payments/mock-gateway";
-import type { DomainUpdateInput, Services } from "../services";
+import type {
+  DomainRegisterInput,
+  DomainUpdateInput,
+  Services,
+} from "../services";
 import type {
   AiLog,
   ApplyStatus,
   Candidate,
   DnsDiff,
   DnsRecord,
+  DomainContactsInput,
   DomainDetail,
   DomainSummary,
   OperationLog,
@@ -142,14 +148,48 @@ function toDomainDetail({
 }
 
 /**
+ * 画面のコンタクト入力（氏名・メール）→ API の登録者プロファイル（FR-06 / FR-09）。
+ *
+ * `street` / `city` / `countryCode` は D-02 / S-25 に入力欄が無いので
+ * `DEFAULT_REGISTRANT_PROFILE`（レジストリが許可するダミー値）で埋める。
+ * この 3 つを画面から編集させる予定は無いため、往復で保つ必要も無い。
+ */
+function toContactsBody(
+  contacts: DomainContactsInput,
+): NonNullable<DomainCreateRequest["contacts"]> {
+  return {
+    registrant: {
+      ...DEFAULT_REGISTRANT_PROFILE,
+      name: contacts.registrant.name,
+      email: contacts.registrant.email,
+    },
+  };
+}
+
+/**
+ * `DomainService.register` の入力（ViewModel）→ `POST /domains` の body（FR-06）。
+ *
+ * NS とコンタクトは S-25 の折りたたみを開いて入力したときだけ載せる。
+ * 載せなければレジストリ既定の NS・既定の登録者プロファイルになる。
+ */
+function toDomainCreateBody(input: DomainRegisterInput): DomainCreateRequest {
+  return {
+    name: input.name,
+    period: input.period,
+    ...(input.nameservers === undefined || input.nameservers.length === 0
+      ? {}
+      : { nameservers: input.nameservers }),
+    ...(input.contacts === undefined
+      ? {}
+      : { contacts: toContactsBody(input.contacts) }),
+  };
+}
+
+/**
  * `DomainService.update` の入力（ViewModel）→ `PATCH /domains/:name` の body（FR-09）。
  *
  * 渡された項目だけを載せる。未変更の項目まで送ると、ロック解除だけの要求が
  * API の `unlockOnly` 経路（`clientUpdateProhibited` 中でも解除を通す）から外れる。
- *
- * `street` / `city` / `countryCode` は D-02 に入力欄が無いので
- * `DEFAULT_REGISTRANT_PROFILE`（レジストリが許可するダミー値）で埋める。
- * この 3 つを画面から編集させる予定は無いため、往復で保つ必要も無い。
  */
 function toDomainUpdateBody(input: DomainUpdateInput): DomainUpdateRequest {
   return {
@@ -158,15 +198,7 @@ function toDomainUpdateBody(input: DomainUpdateInput): DomainUpdateRequest {
       : { nameservers: input.nameservers }),
     ...(input.contacts === undefined
       ? {}
-      : {
-          contacts: {
-            registrant: {
-              ...DEFAULT_REGISTRANT_PROFILE,
-              name: input.contacts.registrant.name,
-              email: input.contacts.registrant.email,
-            },
-          },
-        }),
+      : { contacts: toContactsBody(input.contacts) }),
     ...(input.clientStatuses === undefined
       ? {}
       : { clientStatuses: input.clientStatuses }),
@@ -625,11 +657,11 @@ export function createHttpServices(): Services {
         });
       },
 
-      /** POST /domains（FR-06） */
+      /** POST /domains（FR-06。NS・コンタクトは S-25 の任意入力） */
       async register(input) {
         return toDomainDetail(
           await unwrap(
-            apiClient.api.v1.domains.$post({ json: input }),
+            apiClient.api.v1.domains.$post({ json: toDomainCreateBody(input) }),
             domainEnvelopeSchema,
           ),
         );

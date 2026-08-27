@@ -1,39 +1,40 @@
 "use client";
 
-import {
-  ALLOWED_CONTACT_NAMES,
-  type ClientStatus,
-  hostNameSchema,
-  type RegistrantProfile,
-} from "@dopamin/shared";
-import { Plus, X } from "lucide-react";
+import type { ClientStatus } from "@dopamin/shared";
 import { useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Divider } from "@/components/ui/card";
 import { FormDialog } from "@/components/ui/dialog";
-import { IconButton } from "@/components/ui/icon-button";
-import { Input } from "@/components/ui/input";
 import type { DomainUpdateInput } from "@/lib/api/services";
 import type { DomainDetail } from "@/lib/api/types";
 import { isTransferLocked } from "../detail/derive";
+import {
+  compact,
+  isAllowedContactName,
+  MAX_NAMESERVERS,
+  MIN_NAMESERVERS,
+  NameserverRows,
+  type NsRow,
+  newRow,
+  RegistrantFields,
+  validateNameservers,
+  validateRegistrantEmail,
+  validateRegistrantName,
+} from "./ns-contact-fields";
 
 /**
  * Figma: D-02 `83:3628`（Dialog / Form）
  *
  * ネームサーバー 2〜13 件（追加行）+ コンタクト（登録者）+ 移管ロック
- * （ui-screens D-02 / FR-09）。
+ * （ui-screens D-02 / FR-09）。入力欄と検証は S-25 登録ダイアログと共有する
+ * （`ns-contact-fields.tsx`）。
  *
  * **送るのは変更した項目だけ。** 未変更の NS やコンタクトまで載せると、
  * ロック解除だけの要求が API の `unlockOnly` 経路（`clientUpdateProhibited` 中でも
  * 解除を通す）から外れる。何も変わっていないときだけ NS を載せて
  * 「変更内容を 1 つ以上」（`domainUpdateRequestSchema`）を満たす。
  */
-export const MIN_NAMESERVERS = 2;
-export const MAX_NAMESERVERS = 13;
-
-/** レジストリが許可するダミー PII のメールドメイン（`RegistrantProfile`）。 */
-const ALLOWED_EMAIL_DOMAINS = ["example.com", "example.net", "example.org"];
 
 /** 移管ロックとして付け外しする Client ステータス（FR-09 / §11.3）。 */
 const TRANSFER_LOCK: ClientStatus = "clientTransferProhibited";
@@ -44,85 +45,6 @@ export interface NsEditDialogProps {
   domain: DomainDetail;
   busy: boolean;
   onSubmit: (input: DomainUpdateInput) => void;
-}
-
-/** 入力行。並べ替え・削除しても React のキーが崩れないよう id を持たせる。 */
-interface NsRow {
-  id: string;
-  value: string;
-}
-
-let rowSequence = 0;
-
-function newRow(value: string): NsRow {
-  rowSequence += 1;
-  return { id: `ns-${rowSequence}`, value };
-}
-
-/** 空行を落としたネームサーバー。 */
-function compact(rows: readonly string[]): string[] {
-  return rows.map((row) => row.trim()).filter((row) => row.length > 0);
-}
-
-/** ネームサーバーの検証（0 件 = 全解除、または 2〜13 件）。 */
-export function validateNameservers(rows: readonly string[]): string | null {
-  const values = compact(rows);
-  if (values.length === 0) {
-    return null;
-  }
-  if (values.length < MIN_NAMESERVERS) {
-    return `ネームサーバーは 0 件（全解除）または ${MIN_NAMESERVERS}〜${MAX_NAMESERVERS} 件で指定してください`;
-  }
-  if (values.length > MAX_NAMESERVERS) {
-    return `ネームサーバーは ${MAX_NAMESERVERS} 件までです`;
-  }
-  const invalid = values.find(
-    (value) => !hostNameSchema.safeParse(value).success,
-  );
-  if (invalid !== undefined) {
-    return `ホスト名の形式が不正です: ${invalid}`;
-  }
-  if (new Set(values.map((v) => v.toLowerCase())).size !== values.length) {
-    return "同じネームサーバーが重複しています";
-  }
-  return null;
-}
-
-/** レジストリが受け付ける架空ダミー氏名か（`ALLOWED_CONTACT_NAMES` が値域の正）。 */
-function isAllowedContactName(
-  value: string,
-): value is RegistrantProfile["name"] {
-  return (ALLOWED_CONTACT_NAMES as readonly string[]).includes(value);
-}
-
-/**
- * 登録者の氏名の検証（ダミー PII のみ・docs/registry/spec-notes.md）。
- *
- * 値域は `registrantProfileSchema` と同じ 8 種。ここで弾かないと API が
- * `VALIDATION_ERROR` を返すだけになり、理由が画面に出ない。
- */
-export function validateRegistrantName(name: string): string | null {
-  const value = name.trim();
-  if (value.length === 0) {
-    return "登録者の氏名は必須です";
-  }
-  if (!isAllowedContactName(value)) {
-    return `氏名に使えるのは ${ALLOWED_CONTACT_NAMES.join(" / ")} のみです（ダミー PII）`;
-  }
-  return null;
-}
-
-/** 登録者のメールアドレスの検証（配送不能な予約ドメインのみ）。 */
-export function validateRegistrantEmail(email: string): string | null {
-  const normalized = email.trim().toLowerCase();
-  if (normalized.length === 0) {
-    return "登録者のメールアドレスは必須です";
-  }
-  const domain = normalized.split("@")[1];
-  if (domain === undefined || !ALLOWED_EMAIL_DOMAINS.includes(domain)) {
-    return `メールアドレスは ${ALLOWED_EMAIL_DOMAINS.map((d) => `@${d}`).join(" / ")} のみ使えます（ダミー PII）`;
-  }
-  return null;
 }
 
 /**
@@ -200,12 +122,6 @@ export function NsEditDialog({
     !domain.registrant.migrated;
   const lockChanged = lockOn !== lockedNow;
 
-  function updateRow(id: string, value: string) {
-    setRows((prev) =>
-      prev.map((row) => (row.id === id ? { ...row, value } : row)),
-    );
-  }
-
   function submit() {
     setSubmitted(true);
     if (nsError !== null || nameError !== null || emailError !== null) {
@@ -244,70 +160,21 @@ export function NsEditDialog({
       subtitle={`${domain.name}・${MIN_NAMESERVERS}〜${MAX_NAMESERVERS} 件。ホストオブジェクトは自動作成します`}
       title="情報修正（NS・コンタクト）"
     >
-      {rows.map((row, index) => (
-        <div className="flex w-full items-end gap-2" key={row.id}>
-          <div className="min-w-0 flex-1">
-            <Input
-              autoComplete="off"
-              label={`ネームサーバー ${index + 1}`}
-              monospace
-              onChange={(event) => updateRow(row.id, event.target.value)}
-              placeholder="ns1.example.com"
-              surface="panel"
-              value={row.value}
-            />
-          </div>
-          <IconButton
-            aria-label={`ネームサーバー ${index + 1} を削除`}
-            disabled={rows.length <= 1}
-            icon={<X />}
-            onClick={() =>
-              setRows((prev) => prev.filter((item) => item.id !== row.id))
-            }
-            size="sm"
-            variant="subtle"
-          />
-        </div>
-      ))}
-      <div className="flex w-full items-center justify-between gap-2">
-        <Button
-          disabled={rows.length >= MAX_NAMESERVERS}
-          leadingIcon={<Plus />}
-          onClick={() => setRows((prev) => [...prev, newRow("")])}
-          size="sm"
-          variant="subtle"
-        >
-          ネームサーバーを追加
-        </Button>
-        {submitted && nsError !== null ? (
-          <p className="text-caption text-warn" role="alert">
-            {nsError}
-          </p>
-        ) : null}
-      </div>
+      <NameserverRows
+        error={submitted ? nsError : null}
+        onRowsChange={setRows}
+        rows={rows}
+      />
 
       <Divider weight="thin" />
       <p className="w-full text-overline text-muted">コンタクト（ダミーPII）</p>
-      <Input
-        autoComplete="off"
-        helper={`使えるのは ${ALLOWED_CONTACT_NAMES.join(" / ")} のみです`}
-        label="登録者 氏名"
-        onChange={(event) => setRegistrantName(event.target.value)}
-        placeholder="Taro Test"
-        surface="panel"
-        value={registrantName}
-        {...(submitted && nameError !== null ? { error: nameError } : {})}
-      />
-      <Input
-        autoComplete="off"
-        helper={`許可されるのは ${ALLOWED_EMAIL_DOMAINS.map((d) => `@${d}`).join(" / ")} のみです`}
-        label="登録者 メールアドレス"
-        onChange={(event) => setRegistrantEmail(event.target.value)}
-        placeholder="taro.test@example.com"
-        surface="panel"
-        type="email"
-        value={registrantEmail}
-        {...(submitted && emailError !== null ? { error: emailError } : {})}
+      <RegistrantFields
+        email={registrantEmail}
+        emailError={submitted ? emailError : null}
+        name={registrantName}
+        nameError={submitted ? nameError : null}
+        onEmailChange={setRegistrantEmail}
+        onNameChange={setRegistrantName}
       />
       <p className="w-full text-caption-sm text-muted">
         技術担当（Technical）は任意です。現時点では登録者のみを扱います（FR-09）。

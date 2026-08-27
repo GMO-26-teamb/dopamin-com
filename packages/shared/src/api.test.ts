@@ -11,6 +11,7 @@ import {
   uniquenessPreviewRequestSchema,
   uniquenessPreviewResponseSchema,
 } from "./api";
+import { DEFAULT_REGISTRANT_PROFILE } from "./registry";
 
 /**
  * `api.ts` が持つ入出力スキーマ。統一エラー（§10.3）の検証は `errors.test.ts` にある
@@ -179,6 +180,46 @@ describe("domainCreateRequestSchema（FR-06）", () => {
       domainCreateRequestSchema.safeParse({
         name: "takutaku.com",
         nameservers: ["localhost"],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("contacts.registrant を受理する（S-25 で登録者を指定したとき）", () => {
+    const contacts = { registrant: DEFAULT_REGISTRANT_PROFILE };
+    const parsed = domainCreateRequestSchema.parse({
+      name: "takutaku.com",
+      contacts,
+    });
+    expect(parsed.contacts).toEqual(contacts);
+  });
+
+  it("contacts を省略しても受理する（従来の呼び出しはそのまま）", () => {
+    const parsed = domainCreateRequestSchema.parse({ name: "takutaku.com" });
+    expect(parsed.contacts).toBeUndefined();
+  });
+
+  it.each([
+    ["氏名", { ...DEFAULT_REGISTRANT_PROFILE, name: "山田 太郎" }],
+    ["メール", { ...DEFAULT_REGISTRANT_PROFILE, email: "real@gmail.com" }],
+    ["住所", { ...DEFAULT_REGISTRANT_PROFILE, street: "1-2-3 Chiyoda" }],
+    ["国", { ...DEFAULT_REGISTRANT_PROFILE, countryCode: "FR" }],
+  ])(
+    "許可されていない%sは拒否する（ダミー PII のみ）",
+    (_label, registrant) => {
+      expect(
+        domainCreateRequestSchema.safeParse({
+          name: "takutaku.com",
+          contacts: { registrant },
+        }).success,
+      ).toBe(false);
+    },
+  );
+
+  it("contacts が空オブジェクトなら拒否する（registrant は必須）", () => {
+    expect(
+      domainCreateRequestSchema.safeParse({
+        name: "takutaku.com",
+        contacts: {},
       }).success,
     ).toBe(false);
   });
