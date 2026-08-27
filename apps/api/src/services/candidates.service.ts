@@ -114,8 +114,10 @@ export interface GenerateDomainCandidatesOptions {
  *
  * 上限時間は「1 リクエスト合計」で {@link AI_CALL_TIMEOUT_MS}（AC-04-2「10 秒以内」）。
  * 再生成は残り予算の範囲でだけ行い、予算を使い切っていれば 1 回目の結果で確定する。
- * 2 回試しても 6 件に届かない場合は、揃った分だけを返す（0 件なら AI 側の失敗として
- * `runStructured` が AI_UNAVAILABLE を投げている）。
+ * 2 回目も呼べた場合、その `runStructured` の失敗は捕捉していないので、そのまま
+ * AI_UNAVAILABLE / RATE_LIMITED として外に出る（1 回目に採用した候補も返らない）。
+ * 2 回とも応答はあったが 6 件に届かなかったときだけ、揃った分を返す。AI 出力の再検証
+ * （RFC 1035・対応 TLD・FQDN）で全件落ちれば **0 件の 200** になり得る。
  */
 export async function generateDomainCandidates(
   user: AuthUser,

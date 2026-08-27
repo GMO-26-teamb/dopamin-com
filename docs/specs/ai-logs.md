@@ -25,7 +25,7 @@
   `packages/shared/src/logs.ts`（`aiLogItemSchema`）。
 - 実効設定の解決は `apps/api/src/services/settings.ts` の `resolveAiSettings` / `getAiSettingsForUser`
   が FR-17 用に既に持っている。
-- `ai_logs` テーブルは #35（`packages/db/drizzle/0006_overconfident_grey_gargoyle.sql`）で追加済み。
+- `ai_logs` テーブルは #35（`packages/db/drizzle/0007_blue_living_lightning.sql`）で追加済み。
 - 環境変数は #61 で `AI_PROVIDER` / `AI_MODEL` / `GOOGLE_GENERATIVE_AI_API_KEY` /
   `ANTHROPIC_API_KEY` が `apiEnvSchema` に入っている。
 
@@ -115,7 +115,7 @@ sequenceDiagram
 
 ## 5. データ変更
 
-なし。`ai_logs` は #35（`packages/db/drizzle/0006_overconfident_grey_gargoyle.sql`）で追加済み。
+なし。`ai_logs` は #35（`packages/db/drizzle/0007_blue_living_lightning.sql`）で追加済み。
 
 - `error_message` は 300 字で切り詰めて保存する（`AI_ERROR_MESSAGE_MAX_LENGTH`）。
   プロバイダのエラーは応答ボディを丸ごと含むことがあり、AC-14-2 と同じ理由で DB を肥大させるため。
@@ -158,3 +158,4 @@ sequenceDiagram
 | 版 | 日付 | 内容 |
 |---|---|---|
 | v0.1 | 2026-08-26 | 初版（#65）。プロバイダ抽象化・合計 10 秒・1 回フォールバック・再検証・`ai_logs` 記録を確定 |
+| v0.1.1 | 2026-08-27 | 実装との乖離を修正。`ai_logs` のマイグレーションを採番し直し後の `0007_blue_living_lightning.sql`（#35 / 2775731）に合わせた |

@@ -68,8 +68,11 @@ sequenceDiagram
 - **userId / requestId の伝搬**: AsyncLocalStorage（Node 22）。`requireSession` が
   `setContextUserId()` で補完する。未認証（`/health` の hello）や Poll 由来は userId NULL。
 - **mock もログする**: ローカル既定（`REGISTRY_MODE=mock`）で受入確認できるようにするため。
-  公開メソッド 1 回 = 1 行。HTTP 往復が無いため補助コマンド行は発行せず svTrid は null
-  （mock の忠実度の限界として明記）。
+  公開メソッド 1 回 = 1 行。補助コマンドのうち `hello` / `contact_create` / `contact_update` は
+  公開メソッド（`hello()` / `createContact()` / `updateContact()`）として呼ばれるので
+  mock でも独立した行になる。一方、実レジストリで `create()` / `update()` の内部から発行される
+  `host_info` / `host_create` に相当する行は mock には無い（mock はホストオブジェクトを持たない）。
+  HTTP 往復が無いため svTrid は常に null（mock の忠実度の限界として明記）。
 - **書き込みは await**（fire-and-forget は Vercel の関数フリーズで消失リスク）。
   順序は console → INSERT: INSERT 失敗・フリーズでも Vercel ログには必ず残る。
   INSERT 失敗は `type:"operation_log_write_failed"` の console.error のみで、
@@ -130,7 +133,7 @@ NOT NULL 違反で落ち、フォールバック console にしか残らない�
 | # | 事項 | 本書の仮置き | 選択肢 |
 |---|---|---|---|
 | 1 | ログの保持期間・容量制御 | 無期限（削除しない） | TTL / パーティション / アーカイブは運用が固まってから要件化 |
-| 2 | mock の補助コマンド行 | 発行しない（svTrid 同様、mock の忠実度の限界） | mock にも host/contact 相当の行を合成する |
+| 2 | mock の host 系補助コマンド行 | `host_info` / `host_create` の行は持たない（`hello` / `contact_create` / `contact_update` は公開メソッドなので mock でも記録される）。svTrid 同様、mock の忠実度の限界 | mock にもホストオブジェクトを導入し `host_info` / `host_create` 相当の行を合成する |
 | 3 | kitaq の `transferQuery` の command | kitaq には transfer query の専用エンドポイントが無く `info` で代替しているため、実レジストリでは `transfer_query` 行は記録されず `info` として残る（1 HTTP 呼び出し = 1 行の原則どおり）。`transfer_query` を出すのは mock のみ | 将来 kitaq に transfer query エンドポイントが追加されたら command を `transfer_query` に差し替える |
 | 4 | INSERT の待ち方（Vercel） | await（§2。3 秒上限）。レジストリ呼び出し 1 回ごとに Supabase への往復が応答経路に乗る（NS 付き create は 5 回） | `@vercel/functions` の `waitUntil` で INSERT を応答後に流す（関数フリーズによる消失リスクとのトレードオフ。遅延が問題になったら検討） |
 
@@ -142,3 +145,4 @@ NOT NULL 違反で落ち、フォールバック console にしか残らない�
 |---|---|---|
 | v0.1 | 2026-08-26 | 初版（FR-15 実装と同時に作成） |
 | v0.2 | 2026-08-26 | レビュー反映: マスクを部分一致に、INSERT の 3 秒上限と console.error の出力方針（§2）、kitaq transferQuery = info と waitUntil の余地（§8） |
+| v0.3 | 2026-08-27 | 実装との乖離を修正: mock も `hello` / `contact_create` / `contact_update` を記録する（持たないのは `host_info` / `host_create` のみ）ことを §2 / §8 に反映 |

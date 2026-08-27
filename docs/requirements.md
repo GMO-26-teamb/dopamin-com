@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.1.15（2026-08-27） |
+| 版 | v0.1.19（2026-08-27） |
 | プロダクト | ドパ民.com / dopamin.com — Z世代向けドメイン管理プラットフォーム（疑似レジストラ） |
 | チーム | チームドパ民（Team B）: 佐々木 琢登・星 はるか・上原 拓也 |
 | 位置づけ | GMO Internet Internship in kitaQ Webアプリケーションコース（2026/08/24–28）成果物 |
@@ -18,6 +18,7 @@
 - `【要確認】` タグは未確定事項。実装前に確認し、確定したら本書を更新する。推測で実装しない。
 - 優先度の定義: **P0** = 8/28 発表までに必須 / **P1** = 差別化・加点対象 / **P2** = 余力があれば。
 - エージェントへの指示: 1タスク = 1 spec = 1 PR。`pnpm check`（lint / format / typecheck / test）がグリーンでない変更は main に入れない。
+- 更新履歴は**表の末尾に 1 行追加**し、版番号は表にある最大値 + 0.0.1 で採番する（冒頭の「版」も同じ番号に更新する）。既存の版番号は他ドキュメントから参照されるため書き換えない。並行 PR で番号が衝突したら、後にマージする側が未使用の番号を採り直す。
 
 ---
 
@@ -63,7 +64,7 @@
 | 1. 機能網羅性 | 必須7機能を P0 として最優先実装（§2.1） |
 | 2. AI駆動開発の実践度 | Spec-Driven + Loop Engineering（§18）、CLAUDE.md、AI ログ機能（FR-14）で開発プロセス自体を可視化 |
 | 3. 設計・実装品質 | Bridge 層でレジストリ差分を吸収（§11）、EPP ステータス・Grace Period を型で表現、契約テスト |
-| 4. UI/UX | ターゲットを絞った導線、shadcn/ui + motion による一貫した UI（§15） |
+| 4. UI/UX | ターゲットを絞った導線、Radix UI + motion による一貫した UI（§15） |
 | 5. 発表・デモ | デモシナリオ（§3.3）とデモデータリセット（FR-16）を用意 |
 
 ---
@@ -97,7 +98,7 @@
 ### 2.2 非スコープ
 
 - **実決済・課金・請求**（PSP 連携、カード情報の保存・送信、返金、請求書発行、実価格の取得）。FR-19 の決済画面はブラウザ内で完結するモックで、金額は固定ダミー価格（`packages/shared/src/pricing.ts`）。レジストリの実料金とは無関係で、実際の請求は発生しない
-- 汎用 DNS ゾーン管理（MX / TXT 等の任意レコード編集、外部 DNS プロバイダへの反映）。サブドメイン設計（FR-13）は **アプリ内の疑似 DNS ゾーンへの反映まで** を行い、実インターネットの名前解決には関与しない
+- 汎用 DNS ゾーン管理（MX / TXT 等の任意レコード編集、外部 DNS プロバイダへの反映）。サブドメイン設計（FR-13）は **アプリ内の疑似 DNS ゾーンへの反映まで** を行い、実インターネットの名前解決には関与しない（判断は ADR-0004）
 - Whois 情報公開代行、ドメインパーキング、オークション、バックオーダー
 - メール / プッシュ通知、多言語対応（日本語のみ）、管理者画面、リセラー機能
 - 本物の EPP（XML over TLS）接続
@@ -260,6 +261,7 @@
 - **AC**:
   - AC-08-1: 成功後、詳細・一覧の有効期限が更新される。
   - AC-08-2: 合計有効期間が上限（10年）を超える要求は送信前に弾く。
+  - AC-08-3: `clientRenewProhibited` / `serverRenewProhibited` 中は実行できない（API は 409 `OPERATION_NOT_ALLOWED` を返す。§11.3）。
 
 ### FR-09 情報修正（NS・コンタクト）【P0】
 
@@ -293,7 +295,7 @@
 
 - **概要**: 別の `X-Registrar-Id` を持つレジストラ（他チームのレジストラアプリ等。以下「相手レジストラ」）との間でドメインを移管する（EPP `transfer`）。本アプリは gaining（移管先）にも losing（移管元 = 現スポンサー）にもなる。本アプリの別ユーザー間の所有者変更は同一レジストラ内の操作で EPP 移管にならないため、本 FR の対象外（§2.2）。
 - **前提**（§21.1、`docs/registry/spec-notes.md` §1「移管フロー」）:
-  - レジストラ ID はチームごとに別【要確認: §21.2 #11】。
+  - レジストラ ID は資格情報ごとに別（8/27 に kitaqnic 実機で確認。`teamb` ↔ `teamb-2` で移管が成立。§21.2 #11）。
   - 移管は承認待ち型。gaining の `transfer request` で `pendingTransfer` になり losing に Poll 通知が届く。losing は approve / reject、gaining は承認前に cancel できる。losing が放置すると申請から 20 分でサーバが自動承認する。
   - レジストリは ICANN の 60 日ルールを強制しない（登録直後でも移管できる）。
 - **振る舞い（移管 IN = 本アプリが gaining）**:
@@ -425,7 +427,7 @@
 ```mermaid
 flowchart LR
   subgraph Browser
-    UI[Next.js App Router<br/>shadcn/ui + motion]
+    UI[Next.js App Router<br/>Radix UI + motion]
   end
 
   subgraph Vercel_Web["Vercel: dopamin-web"]
@@ -480,7 +482,7 @@ flowchart LR
 ### 6.4 レジストリ Bridge 層
 
 - お名前.com の NAVI / API / BRIDGE / REGISTRY 構成に倣い、レジストリ差分を Bridge 層に閉じ込める。
-- `RegistryAdapter` は EPP 相当の操作（`check` `info` `create` `renew` `update` `delete` `restore`、移管 5 操作 `transferRequest` `transferQuery` `transferApprove` `transferReject` `transferCancel`、`getAuthInfo`、`poll` / `ackMessage`）を、正規化された入出力型で提供する（§11.1）。
+- `RegistryAdapter` は EPP 相当の操作（`check` `info` `create` `renew` `update` `delete` `restore`、移管 5 操作 `transferRequest` `transferQuery` `transferApprove` `transferReject` `transferCancel`、`authCode`、`poll` / `ackMessage`）に加え、疎通確認の `hello` とコンタクト操作 `createContact` / `updateContact` を、正規化された入出力型で提供する（§11.1）。
 - TLD → レジストリのルーティングは `packages/registry/src/routing.ts` の設定で決める（§11.2）。
 - `mock` アダプタをローカル開発・テスト・デモ用に用意し、環境変数で切り替える。
 
@@ -502,7 +504,7 @@ flowchart LR
 | モノレポ | Turborepo + pnpm workspaces | Node.js 22 LTS。`turbo run build lint typecheck test` |
 | FE フレームワーク | Next.js（App Router, TypeScript） | 最新安定版。Server Components 既定、フォームは Client Component |
 | スタイリング | Tailwind CSS | v4。デザイントークンは CSS 変数で定義 |
-| UI | shadcn/ui | `apps/web/components/ui` に取り込み。Radix ベース |
+| UI | Radix UI（`radix-ui`）+ cva + tailwind-merge | `apps/web/components/ui` に自前実装（shadcn 流儀。CLI・`components.json` は使わない） |
 | アニメーション | motion（旧 Framer Motion） | ページ遷移・スコアゲージ・候補カード出現。`prefers-reduced-motion` 尊重 |
 | Lint / Format | Biome | ルートの `biome.json` を全パッケージで共有。ESLint / Prettier は使わない |
 | BE フレームワーク | Hono | Vercel Functions 上で Node.js ランタイム。`@hono/zod-validator`、Hono RPC |
@@ -526,18 +528,18 @@ dopamin/
 ├─ apps/
 │  ├─ web/                      # Next.js
 │  │  ├─ app/                   # App Router（§15.1 の画面）
-│  │  ├─ components/ui/         # shadcn/ui
+│  │  ├─ components/ui/         # 自前 UI プリミティブ（radix-ui ベース）
 │  │  ├─ components/            # 機能コンポーネント
-│  │  ├─ lib/api.ts             # Hono RPC クライアント（hc<AppType>）
+│  │  ├─ lib/api/               # API サービス抽象（services.ts / http（hc<AppType>）/ mock / payments）
 │  │  ├─ lib/webauthn.ts        # @simplewebauthn/browser ラッパー
 │  │  └─ next.config.ts         # rewrites: /api/* → API_ORIGIN
 │  └─ api/                      # Hono（Vercel Functions, Node.js）
 │     ├─ src/index.ts           # app 定義、AppType export（Vercel はこの default export を使う）
 │     ├─ src/dev.ts             # ローカル開発用 Node サーバー（@hono/node-server, :8787）
-│     ├─ src/routes/            # auth / domains / ai / logs / demo / health
-│     ├─ src/services/          # ユースケース（domain.service.ts, ai.service.ts, ...）
-│     ├─ src/middleware/        # session, origin-check, request-id, error-handler
-│     ├─ src/lib/               # webauthn, ai-provider, github, logger
+│     ├─ src/routes/            # health / auth / domains / subdomain-plan / settings / transfers / registry / logs / ai / demo
+│     ├─ src/services/          # ユースケース（domain.service.ts, transfer.service.ts, auth.ts（WebAuthn）, ...）
+│     ├─ src/middleware/        # session, origin-check, request-id, request-context, error-handler
+│     ├─ src/lib/               # env, db, ai-provider, github, registries, retry, errors, validator, cookies, params, reconcile, aaguid, registry-message, operation-log-context
 │     ├─ tsup.config.ts         # デプロイ用に dist/index.js へバンドル（@dopamin/* を取り込む）
 │     └─ vercel.json            # outputDirectory: dist
 ├─ packages/                    # 内部パッケージは TS ソースを直接 export（ビルド不要）
@@ -566,7 +568,7 @@ dopamin/
 
 ## 9. データモデル
 
-Drizzle スキーマは `packages/db/src/schema/*.ts`。すべてのテーブルに `created_at timestamptz default now()` を持つ。ID は `uuid`（`gen_random_uuid()`）。
+Drizzle スキーマは `packages/db/src/schema/*.ts`。アプリのテーブルは `created_at timestamptz default now()` を持ち、ID は `uuid`（`gen_random_uuid()`）を既定とする。例外は §9.1 の各表に明記する（`sessions.id` / `passkey_credentials.id` は text PK、`mock_registry_state` は `registry` の text PK で `created_at` を持たない）。
 
 ### 9.1 テーブル定義
 
@@ -623,8 +625,8 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。すべてのテーブル
 | registry | text | `kitaqsign` / `kitaqnic`。レジストリ側コンタクト ID を持つ場合 |
 | registry_contact_id | text | レジストリが発行する ID（thick モデル） |
 | role | text NOT NULL | `registrant` / `tech` |
-| name | text NOT NULL | ダミー（例: `Dopamin Demo User`） |
-| email | text NOT NULL | ダミー（`<user_id>@example.invalid`） |
+| name | text NOT NULL | 許可されたダミー氏名のみ（例: `Taro Test`。値域は `packages/shared` の `ALLOWED_CONTACT_NAMES`。§21.2 #8） |
+| email | text NOT NULL | 予約ドメイン宛のみ（例: `taro.test@example.com`。`@example.com` / `.net` / `.org`） |
 | org | text | |
 | payload | jsonb | レジストリに送った生データ（住所等のダミー） |
 
@@ -710,7 +712,7 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。すべてのテーブル
 | request_id | text | `X-Cl-TRID` に送る値（clTRID）と一致させる。値は `<x-request-id>-<連番>`（§10.2 の `requestId` を prefix にし、同一 API リクエスト内の複数呼び出しを相関する。連番はリクエスト内で単調増加） |
 | sv_trid | text | レジストリ採番の svTRID（障害調査・他チームとの突合キー） |
 | registry | text NOT NULL | |
-| command | text NOT NULL | 主コマンド 15 種: `check` / `info` / `create` / `renew` / `update` / `delete` / `restore` / `transfer_request` / `transfer_query` / `transfer_approve` / `transfer_reject` / `transfer_cancel` / `auth_info` / `poll` / `ack`。補助コマンド 4 種: `hello`（疎通確認。親コマンドを持たない）/ `host_info` / `host_create`（NS の自動作成）/ `contact_create`。いずれも `packages/shared` の `OPERATION_COMMANDS` が正。レジストリ側の HTTP パス（`rotate-auth-info` 等）とは別語彙で、対応付けは `packages/registry` の中だけで行う |
+| command | text NOT NULL | 主コマンド 15 種: `check` / `info` / `create` / `renew` / `update` / `delete` / `restore` / `transfer_request` / `transfer_query` / `transfer_approve` / `transfer_reject` / `transfer_cancel` / `auth_info` / `poll` / `ack`。補助コマンド 5 種: `hello`（疎通確認。親コマンドを持たない）/ `host_info` / `host_create`（NS の自動作成）/ `contact_create` / `contact_update`（コンタクトはユーザー × レジストリで 1 件を使い回す設計のため、プロファイル変更は `contact_create` ではなく `contact_update` を単独で発行する）。アプリ内コマンド 1 種: `subdomain_plan.apply`（FR-13 の「DNS に反映」。レジストリ通信を伴わないアプリ内操作で、同じ反映処理内で NS 切替が起きた場合そのレジストリ呼び出しは別行の `update` として記録する）。いずれも `packages/shared` の `OPERATION_COMMANDS`（主 15 + 補助 5 + アプリ内 1 = 21 種）が正。レジストリ側の HTTP パス（`rotate-auth-info` 等）とは別語彙で、対応付けは `packages/registry` の中だけで行う |
 | domain_name | text | |
 | status | text NOT NULL | `success` / `error` / `timeout` / `spec_mismatch` |
 | error_code | text | §10.3 のコード |
@@ -734,6 +736,16 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。すべてのテーブル
 | latency_ms | integer | |
 | status | text NOT NULL | `success` / `error` |
 | error_message | text | |
+
+**mock_registry_state**（`REGISTRY_MODE=mock` のときだけ使うデモ・検証専用。mock レジストリの状態をインスタンス跨ぎで保つ。§11.1 / §16.1）
+
+| 列 | 型 | 備考 |
+|---|---|---|
+| registry | text PK | レジストリ ID（`kitaqsign` / `kitaqnic` / `mock`）。1 レジストリ = 1 行 |
+| snapshot | jsonb NOT NULL | `MockStateSnapshot`（`packages/registry/src/mock-store.ts`）をそのまま格納。domains / queues / contacts / nextMessageId |
+| updated_at | timestamptz NOT NULL DEFAULT now() | |
+
+本テーブルだけは §9 前書きの例外で、PK が `uuid` ではなく `registry text`、`created_at` を持たない（`updated_at` のみ）。アプリのデータではなくレジストリ側の状態を持つ器で、`domains` を流用しないのは所有権判定・FR-16 のデモリセットが壊れるため（`docs/specs/registry-api.md`）。
 
 ### 9.2 主要な導出ロジック（`packages/shared`）
 
@@ -795,9 +807,10 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。すべてのテーブル
 ### 10.2 共通ミドルウェア
 
 1. `requestId`: `x-request-id` を採番しログに付与
-2. `originCheck`: 更新系（POST/PATCH/PUT/DELETE）で `Origin` が `WEBAUTHN_ORIGIN` と一致しなければ 403
-3. `session`: Cookie `dopamin_session` を検証し `user` を設定。期限が 3 日を切っていたら延長
-4. `errorHandler`: 例外を §10.3 の形式に変換。想定外エラーは 500 + request_id
+2. `requestContext`: 操作ログ（FR-15）用の AsyncLocalStorage コンテキストを開始し、以降の処理（レジストリ呼び出し含む）を同一コンテキストで包む。`request_id` と clTRID 用の連番（§9.1）を伝搬する。`user_id` は後段の `requireSession` が補完する（未認証ルートは null のまま）
+3. `originCheck`: 更新系（POST/PATCH/PUT/DELETE）で `Origin` ヘッダがあり `WEBAUTHN_ORIGIN` と一致しなければ 403。`Origin` ヘッダが無いリクエスト（curl・サーバー間呼び出し・テスト）は通す。ブラウザは更新系リクエストで必ず `Origin` を送るため、CSRF 経路はこれで塞がる（Cookie の `SameSite=Lax` と二重で防御）
+4. `session`: Cookie `dopamin_session` を検証し `user` を設定。期限が 3 日を切っていたら延長
+5. `errorHandler`: 例外を §10.3 の形式に変換。想定外エラーは 500 + request_id
 
 ### 10.3 統一エラー形式
 
@@ -845,13 +858,36 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。すべてのテーブル
       "name": "takutaku.com",
       "registry": "kitaqsign",
       "availability": "available",
-      "uniqueness": { "score": 82, "label": "high", "topSimilar": [{ "name": "takaku", "similarity": 0.61 }] }
+      "uniqueness": {
+        "score": 82,
+        "label": "high",
+        "topSimilar": [{ "name": "takaku", "similarity": 0.61 }],
+        "confidence": "normal",
+        "algorithmVersion": "v3.4-r2-ts.1",
+        "corpusVersion": "tranco-74V4X-2026-08-26-top10k+curated-v1"
+      }
     },
     { "name": "takutaku.xyz", "registry": "kitaqnic", "availability": "unavailable", "uniqueness": null },
-    { "name": "takutaku.net", "registry": "kitaqsign", "availability": "error", "error": { "code": "REGISTRY_TIMEOUT" } }
+    {
+      "name": "takutaku.net",
+      "registry": "kitaqsign",
+      "availability": "error",
+      "uniqueness": {
+        "score": 82,
+        "label": "high",
+        "topSimilar": [{ "name": "takaku", "similarity": 0.61 }],
+        "confidence": "normal",
+        "algorithmVersion": "v3.4-r2-ts.1",
+        "corpusVersion": "tranco-74V4X-2026-08-26-top10k+curated-v1"
+      },
+      "error": { "code": "REGISTRY_TIMEOUT", "message": "レジストリへの確認に失敗しました。" }
+    }
   ]
 }
 ```
+
+- `confidence` は短名（記号除去後 3 文字以下）で `low`、それ以外は `normal`。`algorithmVersion` / `corpusVersion` は算出版の追跡用で常に返す（正は `docs/specs/uniqueness/ALGORITHM_SPEC.md`）。
+- `uniqueness` は `available` の行と**レジストリ障害による `error` の行**に付き（AC-05-2）、`unavailable` と未対応 TLD の `error`（`VALIDATION_ERROR`）では `null`。キー自体は常に存在する。
 
 ---
 
@@ -866,6 +902,7 @@ export interface RegistryAdapter {
   readonly id: RegistryId;
   readonly registrarId: string;                 // 自レジストラ ID（X-Registrar-Id）。スポンサー判定に使う
   readonly specVersion: string;                 // Swagger のバージョン or 取得日
+  hello(): Promise<HelloResult>;                // 疎通確認（GET /sessions/hello）。{ registry, tlds } を返す
   check(names: string[]): Promise<CheckResult[]>;
   info(name: string): Promise<DomainInfo>;      // DomainInfo.sponsoringRegistrarId（clID）。当面 null（下記）
   create(input: CreateInput): Promise<DomainInfo>;
@@ -879,6 +916,8 @@ export interface RegistryAdapter {
   transferReject(name: string): Promise<TransferResult>;   // losing
   transferCancel(name: string): Promise<TransferResult>;   // gaining（承認前）
   authCode(name: string): Promise<string>;      // 移管 OUT 用。rotate-auth-info で再生成して取得
+  createContact(profile: RegistrantProfile): Promise<string>;            // contact:create。採番した ID を返す
+  updateContact(id: string, profile: RegistrantProfile): Promise<void>;  // contact:update。ID 据え置きで内容だけ差し替え
   poll(): Promise<PollMessage | null>;          // 最古の未 ack 通知（無ければ null）
   ackMessage(id: string): Promise<void>;        // kitaqsign / kitaqnic でエンドポイントが異なる（spec-notes §2）
 }
@@ -892,11 +931,15 @@ export interface RegistryAdapter {
   - `raw` はレジストリの生エンベロープ。`transfers.raw`（§9.1）への保存・障害調査・契約テストの fixture 化に使う。レジストリの生の出力は画面に流さない方針（FR-18 / NFR-03）に合わせ、API は `raw` を除いた DTO を返す。
   - エンベロープの形は両 OpenAPI の `DomainTransferResponse` / `PollMessageDto`（`{ id: int64, msgType, payload, qdate }`。両レジストリ同一）で確定済み。`msgType` / `payload` の中身は kitaqnic で実測済み（§21.2 #13 解決、#176）: `msgType` は `"domain:transfer"` 固定で動詞は `payload.op`、相手は `counterpartyRegistrar` 1 個。`PollMessage.type` の 5 値は正規化側の語彙（レジストリの生 `msgType` とは別物。未知は `'unknown'` に倒す）。kitaqsign はメンテナンス中で未実測のため、旧想定形（`msgType` に動詞 / `status` フォールバック）もアダプタで読める状態を維持する。
   - `PollMessage.id` はレジストリが int64 で返すが `string` に正規化する（`transfers.registry_message_id`（§9.1）が text の一意キーで、JS の number では桁が落ちうるため）。ack 時に数値へ戻す責務はアダプタ側に置く。
+- `hello` は疎通確認。`HelloResult` は `{ registry, tlds }`（`packages/shared/src/registry.ts`）で、`/health` が `specVersion` と併せて使う。§11.2 の TLD ルーティング表の根拠もこの応答（`specVersion` は `hello` の応答からではなくアダプタの読み取り専用プロパティから取る）。
+- コンタクト系（`createContact` / `updateContact`）: レジストリはドメインの登録者・各ロールを**既存コンタクト ID の参照でしか受け付けない**ため、`create` / `update` の前に用意する。ID の採番はアダプタの責務（レジストラ内で一意・3〜16 文字などの制約がレジストリ固有）。呼び出し側は `apps/api` の `contact.service.ts` がユーザー × レジストリ × ロールで 1 件（§9.1 `contacts`）を引き当て、未作成なら `createContact`、プロファイルが変わっていれば `updateContact` を発行してから ID を `CreateInput.registrantContactId` / `UpdateInput` に渡す。
 - 入出力型（`CheckResult` / `DomainInfo` / ...）は `packages/shared` の正規化型。レジストリ固有のフィールド名・日付形式・エラーコードはアダプタ内で変換する。
 - 各アダプタは `fetch` ベースの薄い HTTP クライアント + zod によるレスポンス検証（`.passthrough()` で未知フィールドは許容、必須フィールド欠落は `REGISTRY_SPEC_MISMATCH`）。
 - タイムアウト: 参照系 5 秒、更新系 15 秒（`AbortSignal.timeout`）。
-- すべての呼び出し（`mock` 含む）は `operation_logs` に記録する。発行点は `packages/registry` の HTTP クライアント層で、**1 HTTP 呼び出し = 1 レコード**（clTRID / svTRID を含む `RegistryCallRecord` を `onCall` フックへ通知する。`create` 内部の `host_info` / `host_create` / `contact_create` も独立したレコードになる）。マスク・保存・構造化ログ出力は `apps/api` 側の observer（`RegistryClient` ラッパー相当）が担当し、アダプタは保存先を知らない。`mock` は公開メソッド 1 回 = 1 レコードで、補助コマンドのレコードと svTRID を持たない。
-- `mock` アダプタ: インメモリ + DB（`domains.raw_info`）で状態遷移を再現。`MOCK_REGISTRY_FAIL_MODE=timeout|5xx|reject|spec_mismatch` でエラーシミュレーションができる。
+- すべての呼び出し（`mock` 含む）は `operation_logs` に記録する。発行点は `packages/registry` の HTTP クライアント層で、**1 HTTP 呼び出し = 1 レコード**（clTRID / svTRID を含む `RegistryCallRecord` を `onCall` フックへ通知する。`create` 内部の `host_info` / `host_create`、および呼び出し側がコンタクト ID を渡していない場合の `contact_create` も独立したレコードになる）。マスク・保存・構造化ログ出力は `apps/api` 側の observer（`RegistryClient` ラッパー相当）が担当し、アダプタは保存先を知らない。`mock` は公開メソッド 1 回 = 1 レコードで、補助コマンドのレコードと svTRID を持たない。
+- `mock` アダプタ: プロセス内 Map + 注入可能な永続ストア（`MockStateStore`。IF は `packages/registry/src/mock-store.ts`、`load` / `save` でスナップショット全体を往復）で状態遷移を再現する。`MOCK_REGISTRY_FAIL_MODE=timeout|5xx|reject|spec_mismatch|timeout_after_write` でエラーシミュレーションができる。`timeout_after_write` だけは他と違い**コマンドを反映してから** `REGISTRY_TIMEOUT` を投げ、参照系（`check` / `info` / `transferQuery` / `poll` / `hello`）は成功させる（§11.6 (d) / AC-18-2 の `reconcileOnTimeout` 経路を手元で踏むため。他の 4 モードはコマンドの手前で失敗するので状態が変わらない）。
+  - `apps/api` は `REGISTRY_MODE=mock` のときだけ `mock_registry_state`（§9.1。レジストリ 1 つ = 1 行の jsonb スナップショット）を読み書きする実装を渡す。Vercel Functions ではプロセス内 Map がインスタンス跨ぎ・コールドスタートで消え、create したドメインが次のリクエストの `info` で 2303 になるため。`domains` を流用しないのは、アプリの保有情報（`ownership` 込み）とレジストリの状態を混ぜると FR-16 のデモリセットや所有権判定が壊れるから（`domains.raw_info` は最後の `info` 応答のキャッシュで、mock の状態ストアとは無関係）。
+  - 読み書きの単位は公開メソッド 1 回（hydrate → 実行 → 書き戻し）。**状態が変わらなかった操作（check / info / hello / 空の poll）は書き戻さない**（変更の有無はスナップショット比較で見る）。同時実行はインスタンス内で直列化し、インスタンス跨ぎは後勝ち（トランザクションは張らない）。**DB が使えないときは黙ってプロセス内 Map のまま動き続ける**（失敗は構造化ログに残す）。`seedForeignDomain` / `simulate*` は同期関数なので自動保存されず、ストア利用時は `await adapter.persist()` が要る。
   - 移管の再現: 相手レジストラ（`MOCK_FOREIGN_REGISTRAR_ID`）が保有するドメインを `seedForeignDomain(name, authInfo)` で seed でき、レジストラ ID ごとの Poll キューを持つ。テスト・デモ用に `simulateInboundTransferRequest(name)` / `simulateCounterpartApprove(name)` / `simulateCounterpartReject(name)` を公開し、integration テスト（§19）と FR-16 の「移管中」サンプル投入から呼ぶ。
     - `transferRequest` は**相手レジストラ保有のドメインにしか出せない**（自レジストラ保有への申請は移管にならないため拒否。暫定 2304 /【要確認: §21.2 #15】）。`transferApprove` / `transferReject` は対応側、`transferCancel` は申請側だけが実行でき、役割違いは実レジストリの 403 に合わせて 2201。更新系（`renew` / `update` / `delete` / `restore` / `authCode`）は現スポンサーのみ実行できる。
     - 自動承認（`MOCK_TRANSFER_AUTO_APPROVE_MS`、既定 20 分）は**タイマーではなく `info` / `transferQuery` / `poll` 時の遅延評価**で確定させる。Vercel Functions はレスポンス後に関数がフリーズし `setTimeout` が生き残らないため。
@@ -927,7 +970,8 @@ export interface RegistryAdapter {
 | `clientHold` / `serverHold` | 停止中 | 警告表示 |
 | `clientTransferProhibited` / `serverTransferProhibited` | 移管ロック | 移管 OUT 不可 |
 | `clientDeleteProhibited` / `serverDeleteProhibited` | 削除ロック | 廃止不可 |
-| `clientUpdateProhibited` / `serverUpdateProhibited` | 更新ロック | 情報修正不可（Client 側はロック解除可、Server 側は不可） |
+| `clientUpdateProhibited` / `serverUpdateProhibited` | 変更ロック | 情報修正不可（Client 側はロック解除可、Server 側は不可） |
+| `clientRenewProhibited` / `serverRenewProhibited` | 更新ロック | 更新（有効期限延長・FR-08）不可（Client 側は情報修正から解除可、Server 側は不可） |
 | `pendingTransfer` | 移管中 | 更新 / 情報修正 / 廃止 / 復旧 / 新規移管申請は不可。losing（自レジストラがスポンサー）は承認 / 拒否、gaining は取消のみ可 |
 | `redemptionPeriod` | 復旧猶予（RGP） | 復旧のみ可 |
 | `pendingDelete` | 削除待ち | 全操作不可 |
@@ -1056,7 +1100,7 @@ FR-05 は埋め込みを使わない（§14）。他に埋め込みを必要と�
 | `curated-jp` | 国内主要サービス・ブランド名（ローマ字表記） | 手動管理 | 固定 0.90 |
 | `curated-tech` | 開発者向けサービス・OSS 名（GitHub, Vercel, Supabase, Notion, Figma ...） | 手動管理 | 固定 0.85 |
 
-- 生成: `node packages/shared/scripts/convert-tranco.mjs <csv> --list-id=<id>`（オフライン。出典・取得日・入力 checksum は生成物の `TRANCO_META` に記録）。
+- 生成: `TRANCO_RETRIEVED_DATE=<取得日> node packages/shared/scripts/convert-tranco.mjs <csv> --list-id=<id> > packages/shared/src/uniqueness/corpusTranco.ts`（オフライン。`TRANCO_RETRIEVED_DATE` は必須で、未設定だとスクリプトが失敗する。出力は標準出力なのでリダイレクトが要る。出典・取得日・入力 checksum は生成物の `TRANCO_META` に記録）。
 - **除外**: `.arpa` / punycode / 形式不正 / 重複 SLD に加え、**アダルト・海賊版サイト**（`packages/shared/scripts/corpus-denylist.mjs`）。`topSimilar` の名前は画面にそのまま描画されるため、スコア計算からも表示からも外す。
 - 重複する名前は popularity の高い層を採用する（`defaultCorpus.ts`）。
 
@@ -1086,7 +1130,7 @@ FR-05 は埋め込みを使わない（§14）。他に埋め込みを必要と�
 | `/` | ランディング | タグライン、「パスキーではじめる」CTA | — |
 | `/signup` | サインアップ | 表示名入力 + パスキー作成ボタン | FR-01 |
 | `/login` | ログイン | ボタン 1 つ（テキスト入力なし） | FR-01 |
-| `/dashboard` | 保有ドメイン一覧 | テーブル、状態バッジ、最新化、0 件 CTA | FR-02 |
+| `/dashboard` | 保有ドメイン一覧 | ドメインカードのグリッド（1 / 2 / 3 列）、状態バッジ、最新化、0 件 CTA | FR-02 |
 | `/domains/new` | ドメイン検索・登録 | AI 候補セクション（ニックネーム・用途）、直接入力セクション、結果カード（空き + スコア）、登録ダイアログ → お支払い（モック） | FR-03/04/05/06/19 |
 | `/domains/[name]` | ドメイン詳細 | 状態・期限・NS・コンタクト・猶予情報、操作パネル（更新/修正/廃止/復旧/移管）、更新はお支払い（モック）を経由、受信した移管申請の承認 / 拒否と自動承認までの残り時間 | FR-07〜12/19 |
 | `/domains/[name]/subdomains` | サブドメイン設計 | リポ URL 入力、提案ツリー（編集可・ホストごとの反映状態バッジ）、「DNS に反映」（差分確認ダイアログ → 結果バナー・NS 切替表示）、手動設定用の手順テキスト | FR-13 |
@@ -1106,14 +1150,15 @@ FR-05 は埋め込みを使わない（§14）。他に埋め込みを必要と�
 
 ### 15.3 コンポーネント・アニメーション
 
-- shadcn/ui: `Button` `Card` `Dialog` `Table` `Badge` `Tabs` `Form` `Input` `Select` `Tooltip` `Sheet`（AI ログ）`Skeleton` `Sonner`（トースト）。
+- UI コンポーネント: shadcn/ui の CLI は使わず、`radix-ui`（統合パッケージ）+ `class-variance-authority` + `tailwind-merge` + motion の上に `apps/web/components/ui` へ自前で実装する（shadcn 流儀。`components.json` は置かない）。内訳は `Button` / `IconButton` / `Card`（`CardKicker` `CardTitle` `KeyValueRow` `Divider`）/ `Dialog`（`FormDialog` / `DangerDialog` を含む）/ `Sheet`（AI ログパネル）/ `Badge` / `Tabs` / `Input` / `Select` / `SegmentedControl` / `Tooltip` / `HelpTip` / `Skeleton` / `Banner` / `ErrorCard` / `EmptyState` / `ScoreGauge` / `SimilarityRow` / `Rarity` / `ProgressBar` / `CodeBlock` / `Logo`・`BrandBar`（`brand.tsx`）。
+- トースト（Sonner）は使わない。画面内の結果・警告は `Banner` をメイン先頭に置き、破壊的操作の確認は `DangerDialog` に寄せる（`docs/specs/ui-screens.md` と一致させる）。テーブル（`Table`）とフォーム抽象（`Form` / react-hook-form）は採用しておらず、一覧はカードベース、フォームは素の `<form>` + `Input` / `Select` で組む。
 - motion: 候補カードのスタガー出現（80ms 間隔）、スコアゲージのカウントアップ、AI ログのスライドイン、ページ遷移のフェード。`useReducedMotion` で無効化。
 - ローディング: レジストリ・AI 呼び出し中は Skeleton + 進行中ラベル（「Kitaqsign に確認中…」）。
 
 ### 15.4 レスポンシブ・a11y
 
-- 1024px 以上: サイドバー常時表示。未満: ハンバーガー。
-- すべてのインタラクティブ要素に `aria-label` / フォーカスリング。テーブルはモバイルでカード表示に切替。
+- 768px（Tailwind の `md`。`--breakpoint-*` は上書きせず既定値のまま）以上: サイドバー常時表示。未満: サイドバーを隠し、Logo + 横スクロールするナビ行 + AI ログ / ログアウト / 「取得」を並べた sticky ヘッダ（`MobileNav`）に切り替える（開閉するハンバーガードロワーは持たない）。
+- すべてのインタラクティブ要素に `aria-label` / フォーカスリング。一覧は表組みではなくカード / 行コンポーネントで構成する。
 
 ---
 
@@ -1132,9 +1177,14 @@ FR-05 は埋め込みを使わない（§14）。他に埋め込みを必要と�
 ### 16.2 GitHub Actions
 
 **`ci.yml`**（PR / push）
+
+`check` ジョブ:
 1. `pnpm install --frozen-lockfile`
 2. `pnpm lint`（ルートの Biome を全パッケージに一括適用）
 3. `pnpm turbo run typecheck test build`（Turborepo のキャッシュで未変更パッケージはスキップ）
+4. `pnpm --filter @dopamin/shared test:perf`（FR-05 / AC-05-3 の性能テスト。turbo と同居させると他パッケージのテスト・`next build` と並走して測れないため分離する）
+
+`e2e` ジョブ（`check` とは独立。必須チェックにはしない）: `postgres:17` の service コンテナを立て、`pnpm --filter @dopamin/db migrate` でテスト DB にマイグレーションを当ててから Playwright（FR-01 の e2e、`docs/testing.md`）を走らせる。Playwright の step だけ `continue-on-error: true` にして、失敗は `::warning::` と `playwright-report` アーティファクトで残す。
 
 **`deploy.yml`**（`main` push → 本番のみ。PR プレビューは行わない。`apps/**`・`packages/**`・lockfile 変更時のみ）
 - 1 ワークフロー・2 ジョブで **api → web の順**に実行する（`web` は `needs: api`）。`apps/web/next.config.ts` の rewrites はビルド時に `API_ORIGIN` を読む（Vercel プロジェクトに設定した固定値）。PR の動作確認はローカル（`pnpm dev`）で行う。**DB マイグレーションはこのワークフローでは行わない**（後述）。
@@ -1144,6 +1194,7 @@ FR-05 は埋め込みを使わない（§14）。他に埋め込みを必要と�
   3. `vercel build --prod`
   4. `vercel deploy --prebuilt --prod --meta originalSha=<github.sha>`
 - **commit author の書き換え**: Vercel Hobby チームは commit author がチーム所有者（上原）でないとデプロイが `BLOCKED` になり、CLI は `BLOCKED` を終端として扱わないため Deploy ステップが固まる（他メンバーが author の squash マージで発生）。`api` / `web` ジョブはチェックアウト直後に `git commit --amend --no-edit --reset-author`（`user.name` / `user.email` を所有者に指定）で **CI 上のコピーだけ** author を所有者に書き換えてから `vercel build` / `vercel deploy` する。リポジトリの履歴は変えない。Vercel 上の commit SHA は書き換え後のものになるため、元の SHA は `--meta originalSha` で残す。両ジョブに `timeout-minutes: 10` を付け、固着時は 6 時間待たずに失敗させる。恒久解は Pro プランでメンバーを追加すること。
+- **Vercel の環境変数と Sensitive 属性**: Sensitive を付けてよいのは**サーバー専用の秘密だけ**。`NEXT_PUBLIC_*` はビルド時にクライアント JS へ静的置換される値なので、Sensitive を付けると `vercel pull` / `vercel build` に復号されずリテラル `[SENSITIVE]` が渡り、ビルドが落ちるか黙って壊れた本番が出来上がる（2026-08-27 に `NEXT_PUBLIC_API_MODE` で実際に発生し、本番が mock モードのまま約 20 時間固着した）。`dopamin-web` プロジェクトは「既定で Sensitive」ポリシーが有効なので、追加は必ず `vercel env add <NAME> production --no-sensitive` を使う。`deploy.yml` の `web` ジョブは `vercel pull` の直後に `.vercel/.env.production.local` を読んで `NEXT_PUBLIC_API_MODE` / `API_ORIGIN` を検証し、不正なら原因を名指しして失敗させる（§17）。
 - GitHub Secrets: `VERCEL_TOKEN` / `VERCEL_ORG_ID` / `VERCEL_PROJECT_ID_WEB` / `VERCEL_PROJECT_ID_API`。アプリの環境変数（§17）は Vercel プロジェクト側で管理する。
 - **マイグレーションは CI で自動適用しない。担当者がローカルから手で当てる**（v0.1.13。それまでは `migrate` ジョブが自動適用していた）。
   - 経緯: `migrate` ジョブは `DIRECT_DATABASE_URL` の値が直結ホストのままだと必ず失敗し、`api` / `web` が `needs` で `skipped` になって**デプロイ全体が止まる**。発表（8/28）までの復旧速度を優先し、デプロイと DB 適用を切り離した。
@@ -1158,7 +1209,7 @@ FR-05 は埋め込みを使わない（§14）。他に埋め込みを必要と�
 
 ### 16.3 Supabase
 
-- プロジェクト 1 つ（Free）。`vector` 拡張を有効化。
+- プロジェクト 1 つ（Free）。拡張の追加有効化は不要（`vector` は ADR-0003 で不採用。§7 / §14。すでに有効化済みでも使用しないためそのままでよい）。
 - 接続文字列: 実行時は Supavisor（transaction mode, ポート 6543）、マイグレーションは直結（`db.<project-ref>.supabase.co`, ポート 5432）または Supavisor（session mode, ポート 5432）。どちらもプリペアドステートメントと DDL が使える。
   - マイグレーションはローカルから手で当てる運用（§16.2）なので、`DIRECT_DATABASE_URL` は**直結の URL でよい**。IPv6 で到達できない環境（GitHub Actions ランナーが該当。直結ホストは IPv6 のみで公開されている）から当てる場合だけ Supavisor session mode の URL（`postgresql://postgres.<project-ref>:<password>@aws-<n>-<region>.pooler.supabase.com:5432/postgres`）を使う。
 - Supabase Auth / RLS / Storage / Edge Functions は使わない。
@@ -1182,18 +1233,20 @@ FR-05 は埋め込みを使わない（§14）。他に埋め込みを必要と�
 | `NEXT_PUBLIC_APP_ORIGIN` | 表示・OGP 用 |
 | `NEXT_PUBLIC_API_MODE` | `http` = 実 API / `mock`（未設定時の既定）= ブラウザ内モック。**ビルド時に静的置換されるので、変更したら再デプロイが必要**。`mock` では `proxy.ts` の認証チェックも素通しになるため、**本番は必ず `http` を明示設定する**（§16.4） |
 
+**Vercel の Sensitive 属性を付けてよいのはサーバー専用の秘密だけ**。`NEXT_PUBLIC_*` はビルド時にクライアント JS へ静的置換される値で、Sensitive を付けると `vercel pull` / `vercel build` に復号されずリテラル `[SENSITIVE]` が渡り、ビルドが落ちるか黙って壊れた本番が出来上がる（2026-08-27 に `NEXT_PUBLIC_API_MODE` で実際に発生し、本番が mock モードのまま約 20 時間固着した）。`dopamin-web` プロジェクトは「既定で Sensitive」ポリシーが有効なので、追加は必ず `vercel env add <NAME> production --no-sensitive` を使う。`deploy.yml` の `web` ジョブは `vercel pull` の直後にこれを検証して落とす（§16.2）。`API_ORIGIN` はサーバー専用だが `next.config.ts` の rewrites がビルド時に読むため、同じ理由で Sensitive を付けてはいけない。
+
 ### `apps/api`
 
 | 変数 | 用途 |
 |---|---|
 | `DATABASE_URL` | Supavisor（6543）接続文字列 |
-| `DIRECT_DATABASE_URL` | マイグレーション用（直結 / session mode の 5432。§16.3）。ローカルからの手動適用で使う（§16.2） |
+| `DIRECT_DATABASE_URL` | マイグレーション用（直結 / session mode の 5432。§16.3）。本番はローカルからの手動適用で使う（§16.2）。`ci.yml` の `e2e` ジョブでは使い捨て postgres service へのリテラル値を渡す |
 | `WEBAUTHN_RP_ID` / `WEBAUTHN_RP_NAME` / `WEBAUTHN_ORIGIN` | WebAuthn RP 設定 |
 | `KITAQSIGN_BASE_URL` / `KITAQNIC_BASE_URL` | EPP API のオリジン（`https://epp.kitaqsign.com` / `https://epp.kitaqnic.com`）。`docs.*` は Swagger UI の URL であって API のホストではない |
 | `KITAQSIGN_GATE_USER` / `KITAQSIGN_GATE_PASSWORD` | 共通 Basic ゲート（認証 1 段目）。kitaqnic も同名で `KITAQNIC_*` |
 | `KITAQSIGN_REGISTRAR_ID` / `KITAQSIGN_API_KEY` | `X-Registrar-Id` / `X-Api-Key` ヘッダ（認証 2 段目）。kitaqnic も同様 |
 | `REGISTRY_MODE` | `real` / `mock` |
-| `MOCK_REGISTRY_FAIL_MODE` | `none` / `timeout` / `5xx` / `reject` / `spec_mismatch` |
+| `MOCK_REGISTRY_FAIL_MODE` | `none` / `timeout` / `5xx` / `reject` / `spec_mismatch` / `timeout_after_write`。`timeout_after_write` は更新系だけを「レジストリには届いたが応答が返らない」状態にし（参照系は通す）、§11.6 (d) / AC-18-2 の `info` 照合を手元再現するためのモード |
 | `MOCK_FOREIGN_REGISTRAR_ID` / `MOCK_TRANSFER_AUTO_APPROVE_MS` | `mock` レジストリの相手レジストラ ID と自動承認までのミリ秒（既定 20 分。テストでは短縮） |
 | `AI_PROVIDER` / `AI_MODEL` | 既定の生成モデル |
 | `GOOGLE_GENERATIVE_AI_API_KEY` / `ANTHROPIC_API_KEY` | プロバイダ API キー |
@@ -1207,7 +1260,7 @@ FR-05 は埋め込みを使わない（§14）。他に埋め込みを必要と�
 
 `VERCEL_TOKEN` `VERCEL_ORG_ID` `VERCEL_PROJECT_ID_WEB` `VERCEL_PROJECT_ID_API`
 
-`DIRECT_DATABASE_URL` は v0.1.13 で `deploy.yml` から `migrate` ジョブを外したため **CI では使わない**（マイグレーションはローカルから手で当てる。§16.2）。登録済みの Secret は消さなくてよいが、参照するワークフローは無い。自動適用に戻すときは Supavisor session mode（5432）の URL を `production` environment の Secrets に置く（`VERCEL_*` はリポジトリ Secrets。全ジョブが `environment: production` なのでどちらでも解決される）。
+`DIRECT_DATABASE_URL` は v0.1.13 で `deploy.yml` から `migrate` ジョブを外したため、**Secret としては参照するワークフローが無い**（本番 DB への適用はローカルから手で当てる。§16.2）。登録済みの Secret は消さなくてよい。ただし `ci.yml` の `e2e` ジョブは、使い捨ての postgres service コンテナ向けに**リテラル値の `DIRECT_DATABASE_URL` を job-level env で渡して `pnpm --filter @dopamin/db migrate` を実行する**（Secret は使わず、本番 DB には触れない）。自動適用に戻すときは Supavisor session mode（5432）の URL を `production` environment の Secrets に置く（`VERCEL_*` はリポジトリ Secrets。全ジョブが `environment: production` なのでどちらでも解決される）。
 
 ローカルは `.env.example` を各 app に置き、`.env.local` は git 管理外。
 
@@ -1258,7 +1311,7 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 |---|---|
 | 基盤（モノレポ・CI/CD・Vercel・Supabase・認証） | 上原 |
 | レジストリ Bridge（Kitaqsign / Kitaqnic / mock・必須 7 機能 API） | 【要確認】 |
-| フロント（画面・shadcn/ui・motion・Figma） | 【要確認】 |
+| フロント（画面・Radix UI + cva の自前 UI・motion・Figma） | 【要確認】 |
 | AI（候補生成・スコア・サブドメイン提案） | 【要確認】 |
 | 発表資料・デモ | 全員 |
 
@@ -1295,7 +1348,7 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 ### 21.1 前提（本書で置いた仮定。誤っていれば本書を修正）
 
 - レジストリは Kitaqsign / Kitaqnic の両方に対応し、TLD でルーティングする。
-- レジストラ ID（`X-Registrar-Id`）はチームごとに別で、他チームのレジストラアプリとの間で移管 IN / OUT を行う（§21.2 #11 が取れるまでの仮定）。本アプリは 1 レジストリにつき 1 組のレジストラ資格情報しか持たない。
+- レジストラ ID（`X-Registrar-Id`）は資格情報ごとに別で、他チームのレジストラアプリとの間で移管 IN / OUT を行う（8/27 に kitaqnic 実機で確認。§21.2 #11）。本アプリは 1 レジストリにつき 1 組のレジストラ資格情報しか持たない（テスト用の第 2 資格情報 `teamb-2` は手動 E2E 専用で、アプリからは使わない）。
 - レジストリは ICANN の 60 日ルールを強制せず、アプリも強制しない（`docs/briefing` の「60 日間は移管不可」は実運用の一般論）。移管は承認待ち型で、放置すると 20 分でサーバ自動承認される（`docs/registry/spec-notes.md`）。
 - 実決済は扱わない。価格は TLD ごとの固定ダミー（`packages/shared/src/pricing.ts`）で、取得・更新の前にモックのお支払い画面を挟む（FR-19、v0.1.11）。レジストリの実料金は参照しない。
 - サブドメイン設計の反映先はアプリ内の疑似 DNS ゾーン（`dns_records`）+ レジストリの NS 切替。外部 DNS プロバイダには反映しない（v0.1.5）。
@@ -1307,17 +1360,17 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 
 | # | 項目 | 確認先 | 期限 |
 |---|---|---|---|
-| 1 | 両レジストリの認証方式・ベース URL・エンドポイント・リクエスト/レスポンス形式 | Swagger UI | 8/25 午前 |
-| 2 | 対応 TLD と TLD → レジストリのルーティング | Swagger / 運営 | 8/25 |
+| 1 | ~~両レジストリの認証方式・ベース URL・エンドポイント・リクエスト/レスポンス形式~~ → 解決（8/25、`docs/registry/spec-notes.md` §1・§2）: 2 段認証（共通 Basic ゲート + `X-Registrar-Id` / `X-Api-Key`。`GET /sessions/hello` のみ API キー不要）、オリジン `https://epp.kitaqsign.com` / `https://epp.kitaqnic.com`、ベースパス `/api/v1/epp`、エンベロープ・result code は両レジストリ同一。なお「Basic ゲートの資格情報が両者共通か」は spec-notes §3 #7 として別途未解決（実装はレジストリごとに 4 変数を分けて保持） | Swagger | 済 |
+| 2 | ~~対応 TLD と TLD → レジストリのルーティング~~ → 解決（8/25、§11.2 / `packages/shared/src/tlds.ts`）: `GET /sessions/hello` で 22 種（kitaqsign 4 / kitaqnic 18）を確定、重複なしで TLD からレジストリが一意（`REGISTRY_TLDS` / `SUPPORTED_TLDS`）。`.jp` は両レジストリとも非対応 | Swagger / 運営 | 済 |
 | 3 | ~~`renew` の必須パラメータ~~ → 解決: `curExpDate` 必須（8/25） | Swagger | 済 |
 | 4 | ~~`restore` が 1 段階か 2 段階か~~ → 解決: 両レジストリとも 1 段階（8/25） | Swagger | 済 |
 | 5 | ~~`transfer` の承認フロー、AuthCode の取得方法~~ → 解決: 承認待ち + 20 分自動承認 / AuthCode は `rotate-auth-info` のみ（8/25） | Swagger | 済 |
 | 6 | ~~Client ステータス（ロック）の更新可否~~ → 解決: 5 種の client ステータスを更新可（8/25） | Swagger | 済 |
 | 7 | テスト用ドメインの削除・再利用制約（デモリセットの実現方法） | 運営 | 8/26 |
-| 8 | コンタクトのダミー値として許可される形式 | 運営 | 8/25 |
+| 8 | ~~コンタクトのダミー値として許可される形式~~ → 解決（8/25、両 OpenAPI の pattern で確定。運営確認は不要になった）: 氏名は 8 種の架空ダミー名のみ（John Doe / Jane Doe / Taro Test / Hanako Test / Test User / Demo User / Sample Person / Example Contact。pattern には WHOIS プロキシ用ラベル 3 種も含まれるがアプリでは使わない）、メールは `@example.com` / `.net` / `.org`、住所は street / city = `N/A` または `Redacted for Privacy`・sp / pc は空のみ・cc は `JP` / `US`、voice / fax は空または `+1.5555550xx`、org は空または許可されたプロキシ事業者名 4 種。コンタクト ID は 3〜16 文字・英数字とハイフン・先頭ハイフン不可・レジストラ内で一意。正は `packages/shared/src/registry.ts`（`ALLOWED_CONTACT_NAMES` / `ALLOWED_CONTACT_ADDRESS_VALUES` / `registrantProfileSchema`）と `docs/registry/spec-notes.md` §1「値の制約」 | Swagger | 済 |
 | 9 | ~~独自性スコアの閾値較正結果と、編集距離ガード併用の要否~~ → 解決: 埋め込みを採らず lexical 単独（8/26、ADR-0003 / AUDIT_TRANCO.md） | チーム | 済 |
 | 10 | 役割分担 | チーム | 8/25 |
-| 11 | レジストラ ID はチームごとに別か。テスト用の第 2 レジストラ資格情報を発行してもらえるか（無い場合は他チームとの日程調整が必須） | 運営 | 8/26 午前 |
+| 11 | ~~レジストラ ID はチームごとに別か。テスト用の第 2 レジストラ資格情報を発行してもらえるか（無い場合は他チームとの日程調整が必須）~~ → 解決（kitaqnic 実測 8/27、#175 / #176。kitaqsign はメンテ中で未実測）: テスト用の第 2 資格情報 `teamb-2` が発行され、`teamb` ↔ `teamb-2` の移管 OUT（申請 → 拒否 → 再申請 → 承認）と IN が実機で成立。レジストラ ID は資格情報ごとに別で、全チーム共通ではない。他チームとの日程調整は移管デモの必須条件ではなくなった（相互移管テスト自体は #17 に残す） | 実測 | 済 |
 | 12 | ~~非スポンサーからの `info` / `transferQuery` の応答~~ → 解決（kitaqnic 実測 8/27、#176 検証。kitaqsign はメンテ中で未実測）: 拒否されず成功し全ステータスが見える。`clID` は引き続き含まれない → 移管 OUT 完了の検知は Poll の承認通知が主のまま（§6.5） | 実測 | 済 |
 | 13 | ~~Poll 通知の `msgType` に入る値と `payload` の中身~~ → 解決（kitaqnic 実測 8/27、#176。kitaqsign はメンテ中で未実測）: `msgType` は `"domain:transfer"` 固定、`payload` は `{ op: request/approve/reject（cancel は未実測）, domain, counterpartyRegistrar }`（受信者から見た相手 1 個。日時・status 無し）。宛先は request → losing、approve / reject → gaining。詳細は `docs/registry/spec-notes.md` §3 #12 | 実測 | 済 |
 | 14 | 移管時のコンタクトの扱い（相手レジストラ発行のコンタクト ID を参照したまま `update` できるか、自コンタクトへの差し替えが必須か、非スポンサーの `contact info` は可か） | Swagger / 実測 | 8/26 |
@@ -1332,7 +1385,7 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | Swagger と本書の想定が大きく異なる | 必須機能の遅延 | 8/25 午前に両 Swagger を精読し、Bridge 層の IF を先に固定。UI はモックで先行 |
 | 期間中の仕様変更通知 | アダプタ修正 | §11.5 の手順。契約テストで影響範囲を即時把握 |
 | 他チームとの移管が組めない（相手が捕まらない / 相手側に承認機能が無い） | 移管デモが 20 分待ち、または不成立 | `mock` の相手レジストラでデモのフォールバックを用意（§11.1）。実移管は 8/27 に時間枠を確保（§21.2 #17） |
-| レジストラ ID が全チーム共通だった | EPP 移管そのものが成立しない | §21.2 #11 を 8/26 午前に確定。共通の場合は FR-12 を `mock` 限定に落とし、要件を改訂 |
+| ~~レジストラ ID が全チーム共通だった~~（解消） | EPP 移管そのものが成立しない | 解消（8/27、#175 / #176）: `teamb` / `teamb-2` の 2 つのレジストラ ID で kitaqnic 実機の移管が成立。FR-12 を `mock` 限定に落とす縮退は不要（§21.2 #11） |
 | パスキー自前実装のハマり（RP ID / origin 不一致） | ログイン不能 | 8/25 に本番 URL で通す。`mock` 認証は作らない（本番と同じ経路で検証） |
 | Vercel 2 プロジェクト間の Cookie / rewrites | 認証が通らない | rewrites を最初にデプロイして確認。ダメなら API を Next.js Route Handler にマウントする案へ切替（ADR 化） |
 | AI 無料枠のレート制限 | 候補生成失敗 | キャッシュ、フォールバックプロバイダ、失敗時は手入力導線 |
@@ -1384,15 +1437,17 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | v0.1.3 | 2026-08-25 | §15 / §16.2 / §16.4: PR ごとの Vercel プレビューデプロイを廃止し、`deploy.yml` を `main` push → 本番のみに変更。preview 環境の行を削除 |
 | v0.1.4 | 2026-08-25 | 他チーム（別レジストラ ID）との移管 IN / OUT に対応し、両レジストリの OpenAPI 定義精査で【要確認】3〜6を解決。FR-12 を全面改訂（Poll・承認 / 拒否を P0、取消を P1、60 日ルールの自前強制を撤回、AC-12-3〜6 追加）し、renew の `curExpDate` 必須、restore 1 段階、AuthCode は `rotate-auth-info`、Client ステータス 5 種更新可を関連仕様へ反映。詳細は `docs/specs/registry-api.md` |
 | v0.1.5 | 2026-08-26 | FR-04 の入力を「ニックネームまたはアプリ名」に変更（API は `nickname` のまま）。FR-13 をアプリ内の疑似 DNS ゾーンへの「反映」まで拡張（差分確認 → `dns_records` へ upsert、ドパ民 DNS への NS 切替、反映状態バッジ、AC-13-4〜7）。§2.2 / §3 / §9.1（`dns_records`、`subdomain_plans.applied_at`）/ §10.1（`apply`・`dns`）/ §15 / §21 を追随 |
-| v0.1.7 | 2026-08-26 | §9.1 operation_logs.command: レジストリアダプタが実際に発行する補助コマンド 4 種（`hello` / `host_info` / `host_create` / `contact_create`）を enum に追加。`hello` は親コマンドを持たず、NS・コンタクトの自動作成は主コマンドの内部で個別に失敗し得るため、親名に寄せず独立した値で記録する（AC-15-1）。正は `packages/shared/src/operation-log.ts` の `OPERATION_COMMANDS` で、`packages/registry` の `command` もこの語彙に統一（`host:info` → `host_info`、`rotate-auth-info` → `auth_info` 等） |
 | v0.1.6 | 2026-08-26 | §8 / §11.2: 対応 TLD の定数を `packages/shared/src/tlds.ts` に一本化し、`packages/registry` のルーティングと `apps/web` の TLD 選択肢は shared を参照する形に統一（`@dopamin/registry` は `node:crypto` 依存でブラウザから import できない） |
+| v0.1.7 | 2026-08-26 | §9.1 operation_logs.command: レジストリアダプタが実際に発行する補助コマンド 4 種（`hello` / `host_info` / `host_create` / `contact_create`）を enum に追加。`hello` は親コマンドを持たず、NS・コンタクトの自動作成は主コマンドの内部で個別に失敗し得るため、親名に寄せず独立した値で記録する（AC-15-1）。正は `packages/shared/src/operation-log.ts` の `OPERATION_COMMANDS` で、`packages/registry` の `command` もこの語彙に統一（`host:info` → `host_info`、`rotate-auth-info` → `auth_info` 等） |
 | v0.1.8 | 2026-08-26 | FR-01 周辺の仕上げ: `GET /auth/me` を `{ user, features.demoReset, ai }` に拡張（`docs/specs/ui-screens.md` §7 要確認 #2 / #3 を確定。FR-16 / FR-17 に追随）、`PATCH /auth/passkeys/:id`（名前変更）と AAGUID からの名前推定を FR-01 に追加、§10.3 に FR-01 の 4 エラーコード（`CHALLENGE_NOT_FOUND` / `VERIFICATION_FAILED` / `CREDENTIAL_NOT_FOUND` / `LAST_PASSKEY`）を追記。実装計画は `docs/specs/passkey-auth.md` §12 |
 | v0.1.9 | 2026-08-26 | FR-15（PR #139）の設計判断を追記: §9.1 `operation_logs.user_id` の FK を `ON DELETE SET NULL`（退会後も通信ログを恒久保存）、`request_id` = `<x-request-id>-<連番>` の形式、§11.1 のログ発行点を `packages/registry` の HTTP クライアント層（1 HTTP 呼び出し = 1 レコード、`onCall` フック）に変更しマスク・保存は `apps/api` の observer が担当、`mock` は公開メソッド 1 回 = 1 レコードで補助コマンド行・svTRID を持たない例外を明記 |
-| v0.1.11 | 2026-08-26 | **FR-19 決済（モック）を追加**。§2.2 / §21.1 の「決済・課金・料金表示は非スコープ」を「**実**決済・課金は非スコープ、モックのお支払い画面と固定ダミー価格はスコープ」に改訂。FR-06 / FR-08 の実行順にお支払いステップを挿入（決済成立時のみ `create` / `renew`）、§3.1 / §3.3 / §15.1 / §15.2 を追随。価格の SSOT は `packages/shared/src/pricing.ts`（TLD 別の固定年額 + 消費税 10%、`RESTORE_FEE` は FR-11 のダミー費用と共通）。決済 API・DB テーブルは追加しない（AC-19-5）。画面は `docs/specs/payment-mock.md` / `docs/specs/ui-screens.md` の S-29 / D-11 |
 | v0.1.10 | 2026-08-26 | §16.2: `deploy.yml` に `migrate` ジョブ（`pnpm --filter @dopamin/db migrate`）を追加し、**migrate → api → web** の 3 ジョブ構成に変更。マイグレーション適用の【要確認】を解消し、drizzle の適用判定（`drizzle.__drizzle_migrations` の最新 `created_at` より新しい journal エントリのみ）と手動適用を避ける運用を明記。§16.3 / §17: `DIRECT_DATABASE_URL` を Supavisor session mode（5432）に変更（直結ホストは IPv6 のみで GitHub Actions から到達できないため）。INFRA-01 |
-| v0.1.11 | 2026-08-26 | §16.2: Vercel Hobby の「commit author = チーム所有者」制約で他メンバー author のデプロイが `BLOCKED` になり固着する問題への対策として、`deploy.yml` の `api` / `web` ジョブでチェックアウト上の author を所有者に書き換えてから deploy する運用（`--meta originalSha` で元 SHA を保持、`timeout-minutes: 10`）を明記 |
-| v0.1.13 | 2026-08-26 | §16.2: `deploy.yml` から `migrate` ジョブを削除し、**api → web** の 2 ジョブ構成に戻した（v0.1.10 で入れた自動適用を撤回）。`DIRECT_DATABASE_URL` に直結ホストが登録されたままで `migrate` が必ず失敗し、`needs` で `api` / `web` が `skipped` になって本番デプロイが全面停止したため、発表までの復旧速度を優先して DB 適用とデプロイを切り離した。マイグレーションは **main にマージしてからローカルで `pnpm db:migrate`** を当てる運用に戻し、二重適用の罠・スキーマ変更を含む PR の注意点・自動適用に戻す手順を §16.2 に明記。§16.3 / §17: `DIRECT_DATABASE_URL` は CI で使わなくなり、ローカル用途では直結 URL でよいことを明記。GitHub Secrets 一覧から削除。#150 |
-| v0.1.14 | 2026-08-26 | §11.1: `poll` / `ackMessage` の実装（#44）と mock の移管シミュレーション（#45）を実装に合わせて確定。Poll のエンドポイント差はアダプタで吸収し（応答の形は両レジストリ同一）、`msgType` が未知の通知は捨てず `'unknown'` に倒す。mock は相手レジストラ保有ドメインの seed・レジストラ別 Poll キュー・役割チェック（approve / reject は対応側、cancel は申請側、更新系は現スポンサー）を持ち、**自動承認は `setTimeout` ではなく `info` / `transferQuery` / `poll` 時の遅延評価**で確定させる（Vercel Functions でタイマーが生き残らないため）。`transferRequest` は自レジストラ保有のドメインには出せない（暫定 2304、§21.2 #15） |
+| v0.1.11 | 2026-08-26 | **FR-19 決済（モック）を追加**。§2.2 / §21.1 の「決済・課金・料金表示は非スコープ」を「**実**決済・課金は非スコープ、モックのお支払い画面と固定ダミー価格はスコープ」に改訂。FR-06 / FR-08 の実行順にお支払いステップを挿入（決済成立時のみ `create` / `renew`）、§3.1 / §3.3 / §15.1 / §15.2 を追随。価格の SSOT は `packages/shared/src/pricing.ts`（TLD 別の固定年額 + 消費税 10%、`RESTORE_FEE` は FR-11 のダミー費用と共通）。決済 API・DB テーブルは追加しない（AC-19-5）。画面は `docs/specs/payment-mock.md` / `docs/specs/ui-screens.md` の S-29 / D-11 |
 | v0.1.12 | 2026-08-26 | §11.1: 正規化型を実装に合わせて確定。`TransferResult.status` に `'none'`（`transferQuery` の「移管中でない」）を追加し、`registrarId` 語彙・`reDate` / `acDate` のレジストリ差・`raw` の扱いを明記。`DomainInfo.sponsoringRegistrarId` は両 OpenAPI に clID が無いため当面 null（§6.5 / §9.1 に追随）。`PollMessage` の未確定点を `msgType` / `payload` に限定（§21.2 #13）。判断は ADR-0002 |
-| v0.1.15 | 2026-08-27 | kitaqnic 実機の移管 E2E（teamb ↔ teamb-2、#175 / #176）で §21.2 #12 / #13 を解決。Poll 移管通知は `msgType: "domain:transfer"` 固定 + `payload: { op, domain, counterpartyRegistrar }`（§11.1 / spec-notes §3 #12 に実測を記録）で、アダプタの正規化を実測形に修正（#176）。非スポンサーからの `info` は成功するが `clID` は無し → OUT 検知は Poll 主のまま（§6.5 変更なし）。運営修正アナウンス（8/27）の client* ステータスも実測確認: `clientTransferProhibited` が `info` に反映され `transfer/request` を 2304 で拒否（spec-notes §3 #10 解決） |
+| v0.1.13 | 2026-08-26 | §16.2: `deploy.yml` から `migrate` ジョブを削除し、**api → web** の 2 ジョブ構成に戻した（v0.1.10 で入れた自動適用を撤回）。`DIRECT_DATABASE_URL` に直結ホストが登録されたままで `migrate` が必ず失敗し、`needs` で `api` / `web` が `skipped` になって本番デプロイが全面停止したため、発表までの復旧速度を優先して DB 適用とデプロイを切り離した。マイグレーションは **main にマージしてからローカルで `pnpm db:migrate`** を当てる運用に戻し、二重適用の罠・スキーマ変更を含む PR の注意点・自動適用に戻す手順を §16.2 に明記。§16.3 / §17: `DIRECT_DATABASE_URL` は CI で使わなくなり、ローカル用途では直結 URL でよいことを明記。GitHub Secrets 一覧から削除。#150 |
 | v0.1.14 | 2026-08-26 | **FR-05 の算出方式を「埋め込み + pgvector」から lexical（文字列ベース）に変更**（判断は ADR-0003、監査は `docs/specs/uniqueness/AUDIT_TRANCO.md`）。§14 を全面改訂（参照コーパスはビルド同梱の静的モジュール = Tranco listId `74V4X` + curated、算出は 4+1 正規化ビュー × Damerau-Levenshtein / Jaro-Winkler × 5 カーブ min 合成、ラベル境界 40/70 は実装が固定で持つ）。§9.1 の `reference_names` / `uniqueness_checks`、§10.1 の `POST /ai/uniqueness`、§13.3 の埋め込み、§6.1 図・§7 の pgvector、§17 の `EMBEDDING_*` / `UNIQUENESS_THETA_*` を不採用に。FR-05 の 24 時間キャッシュを削除（1 件 p95 約 0.22 秒のため不要）し、参照コーパスからアダルト・海賊版サイトを除外する規定と `topSimilar` の並び順（類似度降順・0 を含めない）を追加。AC-05-3 を「外部 API 呼び出しなし」に修正。§14.3 の【要確認】と §21.2 #9 を解決。§17 の `apps/web` に `NEXT_PUBLIC_API_MODE`（本番は `http` 必須）を追記。#155 |
+| v0.1.15 | 2026-08-27 | kitaqnic 実機の移管 E2E（teamb ↔ teamb-2、#175 / #176）で §21.2 #12 / #13 を解決。Poll 移管通知は `msgType: "domain:transfer"` 固定 + `payload: { op, domain, counterpartyRegistrar }`（§11.1 / spec-notes §3 #12 に実測を記録）で、アダプタの正規化を実測形に修正（#176）。非スポンサーからの `info` は成功するが `clID` は無し → OUT 検知は Poll 主のまま（§6.5 変更なし）。運営修正アナウンス（8/27）の client* ステータスも実測確認: `clientTransferProhibited` が `info` に反映され `transfer/request` を 2304 で拒否（spec-notes §3 #10 解決） |
+| v0.1.16 | 2026-08-26 | §16.2: Vercel Hobby の「commit author = チーム所有者」制約で他メンバー author のデプロイが `BLOCKED` になり固着する問題への対策として、`deploy.yml` の `api` / `web` ジョブでチェックアウト上の author を所有者に書き換えてから deploy する運用（`--meta originalSha` で元 SHA を保持、`timeout-minutes: 10`）を明記（採番が衝突していたため v0.1.11 から再採番。日付は原文のまま） |
+| v0.1.17 | 2026-08-26 | §11.1: `poll` / `ackMessage` の実装（#44）と mock の移管シミュレーション（#45）を実装に合わせて確定。Poll のエンドポイント差はアダプタで吸収し（応答の形は両レジストリ同一）、`msgType` が未知の通知は捨てず `'unknown'` に倒す。mock は相手レジストラ保有ドメインの seed・レジストラ別 Poll キュー・役割チェック（approve / reject は対応側、cancel は申請側、更新系は現スポンサー）を持ち、**自動承認は `setTimeout` ではなく `info` / `transferQuery` / `poll` 時の遅延評価**で確定させる（Vercel Functions でタイマーが生き残らないため）。`transferRequest` は自レジストラ保有のドメインには出せない（暫定 2304、§21.2 #15）（採番が衝突していたため v0.1.14 から再採番。日付は原文のまま） |
+| v0.1.18 | 2026-08-27 | 実装が先行していた記述を現状に同期。§6.4 / §11.1: `RegistryAdapter` に `hello` / `createContact` / `updateContact` を追記し `getAuthInfo` を `authCode` に訂正、mock の状態の永続先を `domains.raw_info` から専用テーブル `mock_registry_state` に訂正、`MOCK_REGISTRY_FAIL_MODE` に `timeout_after_write` を追加。§8: `apps/web/lib/api/` と `apps/api` の routes / services / middleware / lib を実ファイルに合わせる。§9 前書き / §9.1: `mock_registry_state` の表を追加、`operation_logs.command` を SSOT どおり 21 種（主 15 + 補助 5 + アプリ内 1）に、`contacts` の例値を許可値に修正。§10.2: `requestContext` を追加し `Origin` ヘッダ欠落は通す仕様を明記。§10.4: 応答例に `confidence` / `algorithmVersion` / `corpusVersion` と `error` 行の `uniqueness` を反映。§11.3: renew ロックの行を追加し UpdateProhibited の表示を「変更ロック」に修正（FR-08 に AC-08-3 を追加）。§14.1: コーパス生成コマンドに `TRANCO_RETRIEVED_DATE` と出力リダイレクトを明記。§15: shadcn/ui CLI ではなく Radix UI + cva の自前実装、`/dashboard` はカードグリッド、ブレークポイントは `md`（768px）+ `MobileNav`。§16.2 / §17: `ci.yml` の perf / e2e ジョブ、**`NEXT_PUBLIC_*` に Vercel の Sensitive 属性を付けない**規定（2026-08-27 の本番障害の再発防止）、`DIRECT_DATABASE_URL` の Secret と CI env の区別。§16.3: `vector` 拡張の有効化は不要（ADR-0003）。§21.1 / §21.2 #1 / #2 / #8 / #11 / §21.3: 解決済みの事項を反映。あわせて更新履歴の版番号の重複・順序の乱れを解消（外部参照の無い 2 行を v0.1.16 / v0.1.17 に再採番し、表を版番号の昇順に並べ替え） |
+| v0.1.19 | 2026-08-27 | §2.2: サブドメイン設計の反映先を「アプリ内の疑似 DNS ゾーン」にした判断を `docs/adr/0004-pseudo-dns-zone.md` として残し、本文から参照を張った（要件の内容は変えていない。外部 DNS プロバイダへ反映しない理由・NS 切替だけは実レジストリに効く理由・却下案を記録）。#16 |
