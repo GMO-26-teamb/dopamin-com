@@ -927,3 +927,84 @@ describe("failMode=timeout_after_write（§11.6 (d) / AC-18-2。#49）", () => {
     });
   });
 });
+
+describe("MockRegistryAdapter: seedOwnedDomain（FR-16 のデモ投入）", () => {
+  it("自レジストラ保有として投入され、そのまま操作できる", async () => {
+    const mock = new MockRegistryAdapter();
+    mock.seedOwnedDomain("demo-owned.com", {
+      nameservers: ["ns1.example.com", "ns2.example.com"],
+    });
+
+    const info = await mock.info("demo-owned.com");
+    expect(info.statuses).toEqual(["ok"]);
+    expect(info.nameservers).toEqual(["ns1.example.com", "ns2.example.com"]);
+    // 自レジストラ保有なので更新系が通る（相手レジストラ保有だと拒否される）
+    const renewed = await mock.renew("demo-owned.com", {
+      periodYears: 1,
+      currentExpiresAt: info.expiresAt ?? "",
+    });
+    expect(new Date(renewed.expiresAt ?? 0).getTime()).toBeGreaterThan(
+      new Date(info.expiresAt ?? 0).getTime(),
+    );
+  });
+
+  it("registeredAt を過去にすると有効期限が近い状態を作れる", async () => {
+    const mock = new MockRegistryAdapter();
+    const registeredAt = new Date(
+      Date.now() - 345 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const info = mock.seedOwnedDomain("demo-expiring.com", { registeredAt });
+
+    const daysLeft =
+      (new Date(info.expiresAt ?? 0).getTime() - Date.now()) /
+      (24 * 60 * 60 * 1000);
+    expect(daysLeft).toBeGreaterThan(18);
+    expect(daysLeft).toBeLessThan(22);
+  });
+
+  it("RGP 中（redemptionPeriod + pendingDelete）を作れて復旧できる", async () => {
+    const mock = new MockRegistryAdapter();
+    mock.seedOwnedDomain("demo-rgp.com", {
+      nameservers: ["ns1.example.com"],
+      rgpStatuses: ["redemptionPeriod"],
+      pendingDelete: true,
+    });
+
+    const info = await mock.info("demo-rgp.com");
+    expect(info.rgpStatuses).toEqual(["redemptionPeriod"]);
+    expect(info.statuses).toEqual(["pendingDelete"]);
+
+    const restored = await mock.restore("demo-rgp.com");
+    expect(restored.rgpStatuses).not.toContain("redemptionPeriod");
+  });
+
+  it("NS を省略すると inactive になる", () => {
+    const mock = new MockRegistryAdapter();
+    expect(mock.seedOwnedDomain("demo-inactive.com").statuses).toEqual([
+      "inactive",
+    ]);
+  });
+
+  it("同じ名前を 2 回投入すると CONFLICT", () => {
+    const mock = new MockRegistryAdapter();
+    mock.seedOwnedDomain("demo-dup.com");
+    expect(() => mock.seedOwnedDomain("demo-dup.com")).toThrowError(
+      RegistryError,
+    );
+  });
+
+  it("シード自体は操作ログを発行しない（レジストリ操作ではない）", async () => {
+    const calls: RegistryCallRecord[] = [];
+    const mock = new MockRegistryAdapter({
+      onCall: (record) => {
+        calls.push(record);
+        return Promise.resolve();
+      },
+    });
+    mock.seedOwnedDomain("demo-log.com");
+    expect(calls).toHaveLength(0);
+
+    await mock.info("demo-log.com");
+    expect(calls.map((c) => c.command)).toEqual(["info"]);
+  });
+});

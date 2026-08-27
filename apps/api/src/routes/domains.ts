@@ -1,34 +1,27 @@
 import { randomBytes } from "node:crypto";
-import { type RegistryAdapter, RegistryError } from "@dopamin/registry";
+import { RegistryError } from "@dopamin/registry";
 import {
-  type DomainAvailability,
   type DomainDetailResponse,
   type DomainInfo,
-  type DomainUniqueness,
   domainCheckRequestSchema,
   domainCreateRequestSchema,
-  domainNameSchema,
   domainRenewRequestSchema,
   domainUpdateRequestSchema,
-  type ErrorCode,
-  getDefaultPreparedCorpus,
   isOperationAllowed,
   isRestorable,
   REGISTRY_CONTACT_KEY,
-  type RegistryId,
-  scoreDistinctiveness,
-  splitDomainName,
-  toDomainUniqueness,
   type UpdateInput,
 } from "@dopamin/shared";
 import { Hono } from "hono";
 import { ApiException } from "../lib/errors";
+import { parseDomainNameParam } from "../lib/params";
 import { reconcileOnTimeout } from "../lib/reconcile";
-import { adapterForDomain, getRegistrySet } from "../lib/registries";
+import { adapterForDomain } from "../lib/registries";
 import { registryErrorMessage } from "../lib/registry-message";
 import { withReadRetry } from "../lib/retry";
 import { jsonValidator } from "../lib/validator";
 import { requireSession } from "../middleware/session";
+import { checkDomains } from "../services/check.service";
 import { ensureRegistryContact } from "../services/contact.service";
 import {
   listDomainSummaries,
@@ -43,50 +36,9 @@ import { syncDomainsAndConsumePoll } from "../services/poll.service";
 import type { TransferRecord } from "../services/transfer-store";
 import type { AuthedEnv } from "../types";
 
-/** check 結果の 1 件分（§10.4）。uniqueness は available のときのみ付く（§10.4 の例に準拠）。 */
-interface DomainCheckItem {
-  name: string;
-  registry: RegistryId | null;
-  availability: DomainAvailability;
-  reason?: string;
-  uniqueness: DomainUniqueness | null;
-  error?: { code: ErrorCode; message: string };
-}
-
-/**
- * FR-05: SLD の独自性スコアを計算する（リクエスト内で SLD ごとにメモ化）。
- * スコア計算は check 本体の付随情報なので、失敗しても check 結果は返す。
- */
-function createUniquenessResolver(): (name: string) => DomainUniqueness | null {
-  const bySld = new Map<string, DomainUniqueness | null>();
-  return (name) => {
-    try {
-      const { sld } = splitDomainName(name);
-      let u = bySld.get(sld);
-      if (u === undefined) {
-        u = toDomainUniqueness(
-          scoreDistinctiveness(sld, getDefaultPreparedCorpus()),
-        );
-        bySld.set(sld, u);
-      }
-      return u;
-    } catch {
-      return null;
-    }
-  };
-}
-
 /** 登録時の authInfo を自動生成する（RFC 9154: 128bit 以上のエントロピー推奨）。 */
 function generateAuthInfo(): string {
   return randomBytes(24).toString("base64url");
-}
-
-function parseDomainNameParam(raw: string): string {
-  const parsed = domainNameSchema.safeParse(raw);
-  if (!parsed.success) {
-    throw new ApiException("VALIDATION_ERROR", "ドメイン名の形式が不正です。");
-  }
-  return parsed.data;
 }
 
 /** AC-08-2: 合計の有効期間が上限（10 年）を超える更新要求は送信前に弾く。 */
@@ -203,93 +155,7 @@ export const domains = new Hono<AuthedEnv>()
       "names" in body
         ? body.names
         : body.tlds.map((tld) => `${body.sld}.${tld}`);
-    const uniqueNames = [...new Set(names)];
-    const uniquenessFor = createUniquenessResolver();
-
-    const registrySet = getRegistrySet();
-    const groups = new Map<
-      string,
-      { adapter: RegistryAdapter; names: string[] }
-    >();
-    const resultByName = new Map<string, DomainCheckItem>();
-
-    for (const name of uniqueNames) {
-      const adapter = registrySet.forDomain(name);
-      if (!adapter) {
-        resultByName.set(name, {
-          name,
-          registry: null,
-          availability: "error",
-          uniqueness: null,
-          error: { code: "VALIDATION_ERROR", message: "未対応の TLD です。" },
-        });
-        continue;
-      }
-      const group = groups.get(adapter.id) ?? { adapter, names: [] };
-      group.names.push(name);
-      groups.set(adapter.id, group);
-    }
-
-    await Promise.all(
-      [...groups.values()].map(async ({ adapter, names: groupNames }) => {
-        try {
-          // §11.6 (e): 参照系は繋がらないときだけ最大 2 回まで自動再試行する
-          const results = await withReadRetry(() => adapter.check(groupNames));
-          const byName = new Map(results.map((r) => [r.name, r]));
-          for (const name of groupNames) {
-            const result = byName.get(name);
-            if (result) {
-              resultByName.set(name, {
-                name,
-                registry: adapter.id,
-                availability: result.available ? "available" : "unavailable",
-                ...(result.reason ? { reason: result.reason } : {}),
-                // FR-05: 独自性スコアは「空き」のときだけ意味を持つ（§10.4 の例に準拠）
-                uniqueness: result.available ? uniquenessFor(name) : null,
-              });
-            } else {
-              resultByName.set(name, {
-                name,
-                registry: adapter.id,
-                availability: "error",
-                // AC-05-2: スコア算出はレジストリ通信と独立しているので、
-                // check が失敗した行でもスコアは返す（ui-screens §Unknown バリアント）
-                uniqueness: uniquenessFor(name),
-                error: {
-                  code: "REGISTRY_SPEC_MISMATCH",
-                  message: "check の結果に対象ドメインが含まれていません。",
-                },
-              });
-            }
-          }
-        } catch (err) {
-          // 一方のレジストリが落ちていても他方の結果は返す（部分失敗の許容）
-          const item: DomainCheckItem["error"] =
-            err instanceof RegistryError
-              ? {
-                  code: err.code,
-                  message: "レジストリへの確認に失敗しました。",
-                }
-              : { code: "INTERNAL", message: "空き確認に失敗しました。" };
-          for (const name of groupNames) {
-            resultByName.set(name, {
-              name,
-              registry: adapter.id,
-              availability: "error",
-              // AC-05-2: レジストリ障害時もスコアは表示する
-              uniqueness: uniquenessFor(name),
-              error: item,
-            });
-          }
-        }
-      }),
-    );
-
-    const results = uniqueNames.flatMap((name) => {
-      const item = resultByName.get(name);
-      return item ? [item] : [];
-    });
-    return c.json({ results });
+    return c.json({ results: await checkDomains(names) });
   })
 
   /** FR-06: ドメイン登録。直前に check を再実行してから create する。 */

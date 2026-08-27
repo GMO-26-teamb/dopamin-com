@@ -50,10 +50,21 @@ export const AUXILIARY_OPERATION_COMMANDS = [
   "contact_update",
 ] as const;
 
-/** `operation_logs.command` に入り得る値のすべて（主 15 種 + 補助 5 種）。 */
+/**
+ * レジストリ通信を伴わないアプリ内操作。
+ *
+ * FR-13 の「DNS に反映」（疑似 DNS ゾーンへの反映）は、要件が
+ * 「操作ログ（FR-15）に `subdomain_plan.apply` として記録し、AI 呼び出しは伴わない」と
+ * 定めているのでここに置く。同じ反映処理のなかで NS 切替が起きた場合、その
+ * レジストリ呼び出しは従来どおり `update` として別行で記録される。
+ */
+export const APP_OPERATION_COMMANDS = ["subdomain_plan.apply"] as const;
+
+/** `operation_logs.command` に入り得る値のすべて（主 15 種 + 補助 5 種 + アプリ内 1 種）。 */
 export const OPERATION_COMMANDS = [
   ...PRIMARY_OPERATION_COMMANDS,
   ...AUXILIARY_OPERATION_COMMANDS,
+  ...APP_OPERATION_COMMANDS,
 ] as const;
 
 export const operationCommandSchema = z.enum(OPERATION_COMMANDS);

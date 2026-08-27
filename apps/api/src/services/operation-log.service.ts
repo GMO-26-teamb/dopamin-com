@@ -1,5 +1,10 @@
 import { type Db, schema } from "@dopamin/db";
 import type { RegistryCallRecord } from "@dopamin/registry";
+import type {
+  OperationCommand,
+  OperationLogStatus,
+  RegistryId,
+} from "@dopamin/shared";
 import { maskSensitiveValues } from "@dopamin/shared";
 
 /** operation_logs への INSERT 値（§9.1）。 */
@@ -59,6 +64,94 @@ export function buildOperationLogConsoleLine(
     svTrid: record.svTrid,
     latencyMs: record.latencyMs,
   };
+}
+
+/**
+ * レジストリ通信を伴わないアプリ内操作 1 回（`APP_OPERATION_COMMANDS`）。
+ * FR-13 の「DNS に反映」がこれにあたる。`clTRID` / `svTRID` / `registryCode` は持たない。
+ */
+export interface AppOperationRecord {
+  userId: string;
+  requestId: string | null;
+  /** 操作の対象ドメインが属するレジストリ（列が NOT NULL のため必ず入れる）。 */
+  registry: RegistryId;
+  command: OperationCommand;
+  domainName: string;
+  status: OperationLogStatus;
+  errorCode: string | null;
+  /** 操作の入力・結果（機密値は無いが、経路を揃えるためマスクは通す）。 */
+  request: unknown;
+  response: unknown;
+  latencyMs: number;
+}
+
+/** アプリ内操作 → operation_logs の行（§9.1）。 */
+export function buildAppOperationLogRow(
+  record: AppOperationRecord,
+): OperationLogRow {
+  return {
+    userId: record.userId,
+    // レジストリに送った clTRID は無いので、API リクエストの x-request-id をそのまま入れる
+    requestId: record.requestId,
+    svTrid: null,
+    registry: record.registry,
+    command: record.command,
+    domainName: record.domainName,
+    status: record.status,
+    errorCode: record.errorCode,
+    registryCode: null,
+    request: maskSensitiveValues(record.request),
+    response: maskSensitiveValues(record.response),
+    latencyMs: record.latencyMs,
+  };
+}
+
+/**
+ * アプリ内操作を記録する（console → INSERT の順は `handleRegistryCall` と同じ）。
+ * 記録の失敗は操作の成否に影響させない（既に成立した反映を巻き戻さない）。
+ */
+export async function recordAppOperation(
+  db: Db,
+  record: AppOperationRecord,
+): Promise<void> {
+  console.log(
+    JSON.stringify({
+      level: record.status === "success" ? "info" : "warn",
+      type: "operation_log",
+      requestId: record.requestId,
+      userId: record.userId,
+      registry: record.registry,
+      command: record.command,
+      domainName: record.domainName,
+      status: record.status,
+      errorCode: record.errorCode,
+      latencyMs: record.latencyMs,
+    }),
+  );
+  try {
+    await recordOperationLog(db, buildAppOperationLogRow(record));
+  } catch (cause) {
+    const root =
+      cause instanceof Error && cause.cause instanceof Error
+        ? cause.cause
+        : cause;
+    console.error(
+      JSON.stringify({
+        level: "error",
+        type: "operation_log_write_failed",
+        requestId: record.requestId,
+        registry: record.registry,
+        command: record.command,
+        reason:
+          root instanceof OperationLogWriteTimeoutError ? "timeout" : "error",
+        errorName: root instanceof Error ? root.name : null,
+        message: (root instanceof Error ? root.message : String(root)).slice(
+          0,
+          300,
+        ),
+      }),
+    );
+  }
 }
 
 /**

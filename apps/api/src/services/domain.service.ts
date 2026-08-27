@@ -93,6 +93,29 @@ export async function requireOwnedDomain(
 }
 
 /**
+ * 所有権チェックに加えて `domains.id` を取り出す。
+ * FR-13 のように `domain_id` を FK に使う機能（`subdomain_plans` / `dns_records`）用。
+ *
+ * `DomainRecord.id` が null になるのは「まだ書き込んでいないレコード」だけで、
+ * `requireOwnedDomain` は DB から読んだ行しか返さないため実際には起きない。
+ * それでも黙って進むと FK に空を書きに行くので、ここで明示的に落とす。
+ */
+export async function requireOwnedDomainId(
+  userId: string,
+  name: string,
+  options?: RequireOwnedDomainOptions,
+): Promise<{ record: DomainRecord; id: string }> {
+  const record = await requireOwnedDomain(userId, name, options);
+  if (record.id === null) {
+    throw new ApiException(
+      "INTERNAL",
+      "ドメインの識別子を取得できませんでした。",
+    );
+  }
+  return { record, id: record.id };
+}
+
+/**
  * 移管系（FR-12）の所有権チェック（NFR-04）。
  *
  * 移管 IN の対象ドメインは承認を検知するまで `domains` 行を持たない（§6.5）ので、

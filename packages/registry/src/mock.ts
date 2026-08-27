@@ -589,6 +589,66 @@ export class MockRegistryAdapter implements RegistryAdapter {
   }
 
   /**
+   * テスト・デモ用: **自レジストラが保有する**ドメインを任意の状態で投入する（§11.1 / FR-16）。
+   *
+   * `create` は「今つくったドメイン」しか作れない（`exDate` は必ず登録時 + 期間、
+   * `rgpStatuses` は `addPeriod` 固定）ため、FR-16 のデモデータが要求する
+   * 「期限間近」「RGP 中」といった**途中の状態**を再現できない。
+   * 実レジストリでも同じことは頼めないので、mock 側のシミュレーション API として持つ。
+   *
+   * レジストリ操作ではなくシミュレーションの下ごしらえなので操作ログは発行しない。
+   * ストアを使う場合は呼び出し後に {@link persist} を await すること。
+   */
+  seedOwnedDomain(
+    name: string,
+    options?: {
+      /** 登録日時（既定は現在時刻）。`exDate` はここから `periodYears` 後になる。 */
+      registeredAt?: string;
+      /** 登録期間（年。既定 1）。「期限間近」は `registeredAt` を過去にして作る。 */
+      periodYears?: number;
+      /** 空にすると `inactive` が付く（`deriveStatuses`）。 */
+      nameservers?: readonly string[];
+      clientStatuses?: readonly ClientStatus[];
+      /** 例: `["redemptionPeriod"]`。`pendingDelete` と組み合わせて RGP 中を作る。 */
+      rgpStatuses?: readonly string[];
+      pendingDelete?: boolean;
+      authInfo?: string;
+    },
+  ): DomainInfo {
+    const key = name.toLowerCase();
+    if (this.domains.has(key)) {
+      throw new RegistryError({
+        code: "CONFLICT",
+        registry: this.id,
+        message: `seedOwnedDomain: ${key} は既に存在します`,
+        registryCode: 2302,
+      });
+    }
+    const crDate = options?.registeredAt ?? this.now().toISOString();
+    const registrant = `mock-${randomUUID().slice(0, 8)}`;
+    const state: MockDomainState = {
+      name: key,
+      sponsoringRegistrarId: this.registrarId,
+      registrant,
+      contacts: { TECH: registrant },
+      nameservers: options?.nameservers ? [...options.nameservers] : [],
+      clientStatuses: options?.clientStatuses
+        ? [...options.clientStatuses]
+        : [],
+      crDate,
+      upDate: null,
+      exDate: addYears(crDate, options?.periodYears ?? 1),
+      trDate: null,
+      rgpStatuses: options?.rgpStatuses ? [...options.rgpStatuses] : [],
+      authInfo: options?.authInfo ?? `mock-${randomUUID().slice(0, 8)}`,
+      pendingDelete: options?.pendingDelete ?? false,
+      pendingTransfer: null,
+    };
+    this.domains.set(key, state);
+    return this.toInfo(state);
+  }
+
+  /**
    * テスト・デモ用: **相手レジストラが保有する**ドメインを投入する（§11.1 / FR-16）。
    *
    * 移管 IN（`transferRequest` → 相手の承認）の対象になる。`create` で作った

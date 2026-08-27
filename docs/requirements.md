@@ -1197,7 +1197,9 @@ FR-05 は埋め込みを使わない（§14）。他に埋め込みを必要と�
 | `MOCK_FOREIGN_REGISTRAR_ID` / `MOCK_TRANSFER_AUTO_APPROVE_MS` | `mock` レジストリの相手レジストラ ID と自動承認までのミリ秒（既定 20 分。テストでは短縮） |
 | `AI_PROVIDER` / `AI_MODEL` | 既定の生成モデル |
 | `GOOGLE_GENERATIVE_AI_API_KEY` / `ANTHROPIC_API_KEY` | プロバイダ API キー |
-| `GITHUB_TOKEN` | 公開リポ取得のレート制限緩和（読み取りのみのスコープ） |
+| `GITHUB_MODE` | `real` / `mock`（既定）。FR-13 のリポジトリ解析を実接続にするか、ネットワークに出ないフェイク応答にするか |
+| `GITHUB_MOCK_FAIL_MODE` | `none` / `not_found` / `rate_limited` / `unreachable`。`GITHUB_MODE=mock` のときの失敗シミュレーション（AC-13-2 の手元再現） |
+| `GITHUB_TOKEN` | 公開リポ取得のレート制限緩和（読み取りのみのスコープ）。`GITHUB_MODE=real` でも任意で、未設定なら未認証で叩く |
 | `DEMO_RESET_ENABLED` | `true` で FR-16 有効 |
 | `LOG_LEVEL` | `info` / `debug` |
 

@@ -76,17 +76,23 @@ const apiEnvSchema = z.object({
   AI_PROVIDER: z.enum(["google", "anthropic"]).default("google"),
   /** 具体的なモデル ID は運用側で決定・設定する（未設定時は AI 呼び出し側が requireEnv 等で扱う）。 */
   AI_MODEL: optionalString,
-  /** 埋め込みモデルのプロバイダ（§13.3）。値域は AI_PROVIDER と同じ。 */
-  EMBEDDING_PROVIDER: z.enum(["google", "anthropic"]).default("google"),
-  EMBEDDING_MODEL: optionalString,
   GOOGLE_GENERATIVE_AI_API_KEY: optionalString,
   ANTHROPIC_API_KEY: optionalString,
 
-  /** 独自性スコアの較正値（§14.2）。検証セットで較正済みの初期値。 */
-  UNIQUENESS_THETA_LOW: z.coerce.number().min(0).max(1).default(0.05),
-  UNIQUENESS_THETA_HIGH: z.coerce.number().min(0).max(1).default(0.45),
+  // 埋め込み（EMBEDDING_PROVIDER / EMBEDDING_MODEL）と独自性スコアの較正値
+  // （UNIQUENESS_THETA_LOW / HIGH）は ADR-0003 で不採用になり、§17 の表からも外れた。
+  // ラベルの境界 40 / 70 は packages/shared の uniquenessLabel が固定で持つ（§14.2）。
 
-  /** 公開リポ取得のレート制限緩和（読み取りのみのスコープ）。 */
+  /**
+   * GitHub 解析（FR-13）の実接続 / フェイクの切替。既定は REGISTRY_MODE と同じく `mock` で、
+   * トークンや外部通信が無い環境でも導線を通せるようにする。
+   */
+  GITHUB_MODE: z.enum(["real", "mock"]).default("mock"),
+  /** `GITHUB_MODE=mock` のときの失敗シミュレーション（AC-13-2 の手元再現）。 */
+  GITHUB_MOCK_FAIL_MODE: z
+    .enum(["none", "not_found", "rate_limited", "unreachable"])
+    .default("none"),
+  /** 公開リポ取得のレート制限緩和（読み取りのみのスコープ）。`GITHUB_MODE=real` でも任意。 */
   GITHUB_TOKEN: optionalString,
 
   /** true で FR-16（デモデータリセット）を有効化する。 */
