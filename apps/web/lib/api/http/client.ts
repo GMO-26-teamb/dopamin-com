@@ -25,6 +25,7 @@ import {
   transferResponseSchema,
   transferSummarySchema,
   transfersListResponseSchema,
+  uniquenessPreviewResponseSchema,
 } from "@dopamin/shared";
 import { hc } from "hono/client";
 import { z } from "zod";
@@ -113,6 +114,12 @@ export const checkResponseSchema = z.object({
     }),
   ),
 });
+
+/**
+ * `POST /uniqueness/preview` の応答（FR-05 / S-00 のお試しスコア）。
+ * スキーマは packages/shared が SSOT。
+ */
+export const uniquenessPreviewSchema = uniquenessPreviewResponseSchema;
 
 /**
  * `POST /ai/domain-candidates` の応答（FR-04 / §10.1）。

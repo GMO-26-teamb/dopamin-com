@@ -14,6 +14,7 @@ import {
   type PasskeySummary,
   passkeyNameSchema,
   splitDomainName,
+  type UniquenessPreviewRequest,
   uniquenessLabel,
 } from "@dopamin/shared";
 import { ApiClientError, type ErrorOrigin } from "../errors";
@@ -30,6 +31,7 @@ import type {
   SubdomainPlan,
   SyncResult,
   Transfer,
+  UniquenessPreview,
   UniquenessScore,
 } from "../types";
 import { at, days, minutes, mockRegistryForName } from "./fixtures";
@@ -693,6 +695,25 @@ export function createMockServices(
         return {
           authCode: `MOCK-${splitDomainName(name).sld.toUpperCase()}-${store.sequence}`,
         };
+      },
+    },
+
+    /**
+     * 独自性スコアのプレビュー（FR-05 / S-00 のお試しスコア）。
+     * 認証もレジストリも通らない口なので、失敗するとしたら計算側だけ。
+     */
+    uniqueness: {
+      /** POST /uniqueness/preview */
+      async preview(
+        input: UniquenessPreviewRequest,
+      ): Promise<UniquenessPreview> {
+        await wait();
+        if (isError) {
+          fail("INTERNAL", "スコアを計算できませんでした。");
+        }
+        const sld =
+          "sld" in input ? input.sld : splitDomainName(input.name).sld;
+        return { sld, uniqueness: uniquenessFor(sld) };
       },
     },
 

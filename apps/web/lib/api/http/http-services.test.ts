@@ -911,6 +911,64 @@ describe("domains.check（FR-03 / FR-05）", () => {
   });
 });
 
+describe("uniqueness.preview（POST /uniqueness/preview。FR-05）", () => {
+  const body = {
+    sld: "googel",
+    uniqueness: {
+      score: 12,
+      label: "low",
+      topSimilar: [{ name: "google", similarity: 0.95 }],
+      confidence: "normal",
+      algorithmVersion: "v3.4-r2-ts.1",
+      corpusVersion: "tranco-74V4X-2026-08-26-top10k+curated-v1",
+    },
+  };
+
+  it("同一オリジンの /api/v1/uniqueness/preview に JSON を POST する", async () => {
+    stubFetch(200, body);
+    await services().uniqueness.preview({ sld: "googel" });
+
+    const call = calls.at(-1);
+    expect(call?.method).toBe("POST");
+    expect(call?.url).toContain("/api/v1/uniqueness/preview");
+    expect(call?.contentType).toBe("application/json");
+    expect(JSON.parse(call?.body ?? "null")).toEqual({ sld: "googel" });
+  });
+
+  it("topSimilar を nearest へ写像し、判定に使った SLD を添える", async () => {
+    stubFetch(200, body);
+    expect(await services().uniqueness.preview({ name: "googel.com" })).toEqual(
+      {
+        sld: "googel",
+        uniqueness: {
+          score: 12,
+          label: "low",
+          nearest: [{ name: "google", similarity: 0.95 }],
+        },
+      },
+    );
+  });
+
+  it("回数の上限は RATE_LIMITED として、あと何秒かを details に載せたまま渡す", async () => {
+    stubFetch(429, {
+      error: {
+        code: "RATE_LIMITED",
+        message: "アクセスが集中しています。",
+        retryable: true,
+        details: { retryAfter: 6 },
+      },
+    });
+
+    const error = await services()
+      .uniqueness.preview({ sld: "googel" })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiClientError);
+    expect((error as ApiClientError).code).toBe("RATE_LIMITED");
+    expect((error as ApiClientError).retryable).toBe(true);
+    expect((error as ApiClientError).details).toEqual({ retryAfter: 6 });
+  });
+});
+
 // ---- AI 候補生成（FR-04 / #178） ----
 
 /** `POST /ai/domain-candidates` の候補 1 件分（shared の domainCandidateResultSchema と同じ形）。 */
