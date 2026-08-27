@@ -181,19 +181,23 @@ export function Sidebar({
 
       <div className="flex w-full flex-col items-start gap-2 border-soft border-t border-solid pt-2">
         <ThemeToggle size="sm" />
-        <div className="flex w-full items-center justify-between gap-2">
-          <span className="min-w-0 truncate text-caption text-muted">
-            {userName}
-          </span>
-          <Button
-            leadingIcon={<LogOut />}
-            onClick={onLogout}
-            size="sm"
-            variant="subtle"
-          >
-            ログアウト
-          </Button>
-        </div>
+        {/*
+          224px の列にユーザー名とボタンを横並びにすると名前が削れる
+          （「デモユーザー」が「デモユー…」になっていた）。名前を上に置き、
+          ボタンは全幅で下に敷く
+        */}
+        <span className="w-full truncate text-caption text-muted">
+          {userName}
+        </span>
+        <Button
+          className="w-full"
+          leadingIcon={<LogOut />}
+          onClick={onLogout}
+          size="sm"
+          variant="subtle"
+        >
+          ログアウト
+        </Button>
       </div>
     </div>
   );
