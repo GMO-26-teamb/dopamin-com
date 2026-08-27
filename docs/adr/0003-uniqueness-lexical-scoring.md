@@ -61,5 +61,11 @@ lexical 方式への転換余地を明示していた。本 ADR がその記録�
 - 参照コーパスにはアダルト・海賊版サイトを含めない（`topSimilar` の名前が画面に
   そのまま描画されるため）。除外規則は `packages/shared/scripts/corpus-denylist.mjs`
   が持ち、生成時に適用する。
+- スコアの返し口は 2 つになった（2026-08-27 / requirements v0.1.27）。`POST /domains/check` の
+  `uniqueness` フィールドに加えて、**認証なしで叩ける `POST /uniqueness/preview`**
+  （ランディング S-00 のお試しスコア）が同じ `scoreDistinctiveness` + 既定コーパスで
+  スコアだけを返す。空き確認はしないのでレジストリには一切問い合わせず、認証の代わりに
+  接続元 IP 単位のレート制限（毎分 10 回）で守る。lexical 方式でコーパスがビルド同梱
+  ——外部 I/O も鍵も要らない——だからこそ、この口を安全に未認証で開けられる。
 - 将来 embedding を併用する場合も、§14.3 の `score = min(score_embedding, score_lexical)`
   の形で本実装の上に足せる（本実装の置き換えは不要）。

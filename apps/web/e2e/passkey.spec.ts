@@ -88,15 +88,15 @@ test.describe("FR-01 パスキー認証", () => {
     const deleteButtons = page.getByRole("button", {
       name: /のパスキーを削除/,
     });
-    // 最後の 1 件だけ aria-label に「（最後の1つは不可）」が付く（passkey-section.tsx）
+    // 最後の 1 件だけ aria-label に「（最後の 1 つは不可）」が付く（passkey-section.tsx）
     const lastPasskeyButton = page.getByRole("button", {
-      name: /最後の1つは不可/,
+      name: /最後の 1 つは不可/,
     });
 
     await test.step("S-01: 表示名を入れてパスキーを作成すると /dashboard に着く", async () => {
       await page.goto("/signup");
       await page.getByLabel("表示名").fill(displayName);
-      await page.getByRole("button", { name: "パスキーを作成する" }).click();
+      await page.getByRole("button", { name: "パスキーを作成" }).click();
       await expect(page).toHaveURL(/\/dashboard$/);
       // dashboard の一覧 API は未実装で Error Card が出るが、AppShell（ナビ）が描かれていれば到達とみなす
       await expect(

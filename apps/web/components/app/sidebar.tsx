@@ -1,6 +1,14 @@
 "use client";
 
-import { Plus } from "lucide-react";
+import {
+  ArrowLeftRight,
+  LayoutDashboard,
+  LogOut,
+  type LucideIcon,
+  Plus,
+  ScrollText,
+  Settings,
+} from "lucide-react";
 import Link from "next/link";
 import { Logo } from "@/components/ui/brand";
 import { Button } from "@/components/ui/button";
@@ -25,6 +33,8 @@ interface NavDef {
   key: SidebarNavKey;
   href: string;
   label: string;
+  /** ナビ項目の記号。既存の語彙を再利用する（S-80 のダッシュボード / 操作パネルの移管など） */
+  Icon: LucideIcon;
   /** Active 判定に使う pathname の前方一致（複数可）。最長一致が勝つ */
   match: readonly string[];
 }
@@ -40,15 +50,23 @@ export const SIDEBAR_NAV: readonly NavDef[] = [
     key: "dashboard",
     href: "/dashboard",
     label: "ダッシュボード",
+    Icon: LayoutDashboard,
     match: ["/dashboard", "/domains"],
   },
   {
     key: "transfers",
     href: "/transfers",
     label: "移管",
+    Icon: ArrowLeftRight,
     match: ["/transfers"],
   },
-  { key: "settings", href: "/settings", label: "設定", match: ["/settings"] },
+  {
+    key: "settings",
+    href: "/settings",
+    label: "設定",
+    Icon: Settings,
+    match: ["/settings"],
+  },
 ];
 
 /**
@@ -63,9 +81,16 @@ const HIDDEN_NAV: readonly NavDef[] = [
     key: "domains",
     href: "/domains/new",
     label: "ドメインを取得",
+    Icon: Plus,
     match: ["/domains/new"],
   },
-  { key: "logs", href: "/logs", label: "ログ", match: ["/logs"] },
+  {
+    key: "logs",
+    href: "/logs",
+    label: "ログ",
+    Icon: ScrollText,
+    match: ["/logs"],
+  },
 ];
 
 /**
@@ -141,7 +166,12 @@ export function Sidebar({
         className="mt-1.5 flex w-full flex-col gap-1"
       >
         {SIDEBAR_NAV.map((item) => (
-          <NavItem active={item.key === active} href={item.href} key={item.key}>
+          <NavItem
+            active={item.key === active}
+            href={item.href}
+            icon={<item.Icon />}
+            key={item.key}
+          >
             {item.label}
           </NavItem>
         ))}
@@ -155,7 +185,12 @@ export function Sidebar({
           <span className="min-w-0 truncate text-caption text-muted">
             {userName}
           </span>
-          <Button onClick={onLogout} size="sm" variant="subtle">
+          <Button
+            leadingIcon={<LogOut />}
+            onClick={onLogout}
+            size="sm"
+            variant="subtle"
+          >
             ログアウト
           </Button>
         </div>

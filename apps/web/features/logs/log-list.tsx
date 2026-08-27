@@ -1,6 +1,6 @@
 "use client";
 
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, ScrollText } from "lucide-react";
 import type { ReactNode } from "react";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
@@ -104,7 +104,15 @@ export function LogList<T>({ query, listLabel, renderRow }: LogListProps<T>) {
 
   if (paged.total === 0) {
     // 出せる行が無いときだけ Banner（または Empty State）で画面を占める
-    return banner ?? <EmptyState body={EMPTY_BODY} title={EMPTY_TITLE} />;
+    return (
+      banner ?? (
+        <EmptyState
+          body={EMPTY_BODY}
+          icon={<ScrollText />}
+          title={EMPTY_TITLE}
+        />
+      )
+    );
   }
 
   return (

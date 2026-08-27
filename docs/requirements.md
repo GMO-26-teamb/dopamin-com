@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.1.27（2026-08-27） |
+| 版 | v0.1.28（2026-08-28） |
 | プロダクト | ドパ民.com / dopamin.com — Z世代向けドメイン管理プラットフォーム（疑似レジストラ） |
 | チーム | チームドパ民（Team B）: 佐々木 琢登・星 はるか・上原 拓也 |
 | 位置づけ | GMO Internet Internship in kitaQ Webアプリケーションコース（2026/08/24–28）成果物 |
@@ -232,7 +232,9 @@
 
 - **概要**: 空きドメインを登録する（EPP `create`）。
 - **振る舞い**:
-  - 登録ダイアログの入力: 期間（1〜10年、既定 1年）/ ネームサーバー（既定: レジストリ既定値または空、後から FR-09 で設定可）/ コンタクト（ユーザーの登録者プロファイルを自動適用、ダミー PII）。
+  - 登録ダイアログの入力: 期間（1〜10年、既定 1年）。**ネームサーバーとコンタクト（登録者）は任意入力**で、既定では畳んだ 1 行にまとめ、開いたときだけ入力できる。畳んだ行には適用される内容の要約を出す。
+    - ネームサーバー: 未指定なら送らない（レジストリ既定値または空。後から FR-09 で設定可）。指定するなら 2〜13 件。
+    - コンタクト（登録者）: 未指定ならユーザーの登録者プロファイルをそのまま使う（未作成なら既定のダミー値で作る）。**未指定を「既定値で上書き」と解釈しない**（コンタクトはユーザー × レジストリで 1 件を共有するので、上書きすると既存ドメインの登録者まで変わる）。指定した場合は FR-09 と同じ経路でプロファイルを差し替える。ダミー PII のみ（値域は §15.2 と同じ）。
   - 期間を選んだあとに **お支払いステップ（FR-19、モック決済）** を挟む。決済が成立したときだけ `create` に進む。
   - 実行順: 直前に `check` を再実行 → 空きなら決済（モック）→ `create` → 成功後 `info` で確定情報を取得し DB に保存。
   - 成功画面で「サブドメイン設計に進む」（FR-13）と「詳細を見る」を提示。
@@ -241,6 +243,9 @@
   - AC-06-1: 登録成功後、一覧（FR-02）に即時反映され、状態が `Active`（`ok`）になる。
   - AC-06-2: `create` がタイムアウトした場合、二重登録を避けるため再送せず、`info` で存在確認して結果を確定する。
   - AC-06-3: 登録操作は操作ログ（FR-15）に request / response を記録する。
+  - AC-06-4: 登録時にネームサーバーを指定した場合、登録直後の詳細（FR-07）にその値が出る。
+  - AC-06-5: 登録時に登録者を指定した場合、登録直後の詳細のコンタクトにその値が出る。許可外のダミー PII は決済に進む前に画面で弾く。
+  - AC-06-6: 登録時にコンタクトを指定しなかった場合、既存の登録者プロファイルは変わらない。
 
 ### FR-07 ドメイン詳細・情報参照【P0】
 
@@ -780,7 +785,7 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。アプリのテーブル
 | POST | `/domains/sync` | 要 | 全保有ドメインを `info` で再同期し、Poll を消化する | FR-02/12 |
 | POST | `/domains/check` | 要 | `{ sld, tlds[] }` または `{ names[] }` → 各結果（空き・レジストリ・スコア） | FR-03/05 |
 | POST | `/uniqueness/preview` | **不要** | `{ sld }` または `{ name }` → `{ sld, uniqueness }`。独自性スコアだけを返す（レジストリに問い合わせないので空き状況は含まない）。ランディング（S-00）のお試し用。IP 単位のレート制限つき | FR-05 |
-| POST | `/domains` | 要 | `{ name, period, nameservers? }` → check → create → info | FR-06 |
+| POST | `/domains` | 要 | `{ name, period, nameservers?, contacts? }` → check → create → info。`contacts` は `{ registrant }` のみ（値域は `PATCH /domains/:name` と同じ）。省略時は既存の登録者プロファイルを維持する | FR-06 |
 | GET | `/domains/:name` | 要 | `info` で最新化して返す（失敗時はキャッシュ + `stale: true`）。応答には登録者コンタクトの中身 `registrantProfile` を添える（`info` は ID しか返さないため。そのドメインがアプリのコンタクトを参照していなければ `null`）。更新系（`POST /domains`・`renew`・`PATCH`・`restore`）の応答も同じ形 | FR-07 / FR-09 |
 | POST | `/domains/:name/renew` | 要 | `{ period }` | FR-08 |
 | PATCH | `/domains/:name` | 要 | `{ nameservers?, contacts?, clientStatuses? }` | FR-09 |
@@ -984,7 +989,7 @@ export interface RegistryAdapter {
 | `clientHold` / `serverHold` | 停止中 | 警告表示 |
 | `clientTransferProhibited` / `serverTransferProhibited` | 移管ロック | 移管 OUT 不可 |
 | `clientDeleteProhibited` / `serverDeleteProhibited` | 削除ロック | 廃止不可 |
-| `clientUpdateProhibited` / `serverUpdateProhibited` | 変更ロック | 情報修正不可（Client 側はロック解除可、Server 側は不可） |
+| `clientUpdateProhibited` / `serverUpdateProhibited` | 情報修正ロック | 情報修正不可（Client 側はロック解除可、Server 側は不可） |
 | `clientRenewProhibited` / `serverRenewProhibited` | 更新ロック | 更新（有効期限延長・FR-08）不可（Client 側は情報修正から解除可、Server 側は不可） |
 | `pendingTransfer` | 移管中 | 更新 / 情報修正 / 廃止 / 復旧 / 新規移管申請は不可。losing（自レジストラがスポンサー）は承認 / 拒否、gaining は取消のみ可 |
 | `redemptionPeriod` | 復旧猶予（RGP） | 復旧のみ可 |
@@ -1029,7 +1034,7 @@ Server ステータスは Client ステータスより優先される。
 ### 12.1 方針
 
 - Supabase Auth は使わない。WebAuthn の Relying Party は `apps/api`（SimpleWebAuthn）。資格情報は `passkey_credentials`、セッションは `sessions` テーブルで管理する。
-- RP ID = Web の本番ドメイン（例: `dopamin.vercel.app` または独自ドメイン）。`WEBAUTHN_RP_ID` / `WEBAUTHN_ORIGIN` は環境変数。
+- RP ID = Web の本番ドメイン（現状 `dopamin.ut42tech.com`。§16.1 / §17 と揃える）。`WEBAUTHN_RP_ID` / `WEBAUTHN_ORIGIN` は環境変数。
 - `authenticatorSelection`: `residentKey: 'required'`, `userVerification: 'preferred'`。ログイン時は `allowCredentials` を空にして Discoverable Credential を使う。
 
 ### 12.2 登録シーケンス
@@ -1484,3 +1489,4 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | v0.1.25 | 2026-08-27 | §9.2 / §11.3 / FR-11: **RGP（`redemptionPeriod`）と `pendingDelete` の優先順位を確定**。RFC 3915 の RGP 中は EPP の `pendingDelete` が必ず共存するため、`pendingDelete` を先に見る導出だと RGP のドメインが「削除待ち」になり復旧できなくなっていた（#171）。§9.2 に `deriveDisplayStatus` の優先順位（`transferred_out` > `redemptionPeriod` > `pendingDelete` > …）を明記し、§11.3 に「RGP 中は `pendingDelete` が共存する」「`redemptionPeriod` の載る場所はレジストリで違う（kitaqsign は `status` 側、mock は `rgpStatus` 側）ので両方を見る」を追記。AC-11-2 を「`redemptionPeriod` を伴わない `pendingDelete` では復旧ボタンを出さない」に明確化した（文言どおりだと FR-11 の「`redemptionPeriod` のドメインにのみ復旧ボタンを表示」と矛盾していた）。`docs/specs/ui-screens.md` S-33 / S-36 も追随（採番が衝突していたため v0.1.23 から採り直した）|
 | v0.1.26 | 2026-08-27 | FR-09 の残り 2 件を実装に合わせて確定（#172 / #205）。§10.1: 詳細レスポンス（`GET /domains/:name` と更新系）に **`registrantProfile`** を追加。レジストリの `info` は登録者をコンタクト ID でしか返さないため、S-30 のコンタクトカードと D-02 の初期値が出せなかった。ドメインがアプリのコンタクトを参照していないとき（移管 IN 直後など）は中身を知らないので `null` を返す（要確認 #14 は未解決のまま）。FR-09: 「ロック」トグルの【要確認】を削除。2026-08-27 の運営修正で `add.statuses` / `rem.statuses` が反映されるようになった（kitaqnic 実測、spec-notes §3 #10 で解決済み）ため保留を解き、UI から `clientTransferProhibited` を付け外しできるようにした（採番が衝突していたため v0.1.25 から採り直した）|
 | v0.1.27 | 2026-08-27 | UI/UX の全面見直し（#215〜#219 / #211 / #212）。**§10.1**: 未認証で叩ける `POST /uniqueness/preview`（IP 単位で毎分 10 回、空き確認なし）を追加し、ランディングのお試しスコアを実際に動くようにした（`docs/specs/ui-screens.md` §7 の【要確認】#1 を選択肢 (a) で解決）。詳細レスポンス（`GET /domains/:name` と更新系）に **`subdomainPlan: { hosts, applied } \| null`** を追加（設計を保存しても S-30 が「未作成」のままだった #217 の原因が、web 側の固定値ではなく契約に件数が無いことだったため）。**§11.4**: RGP の残日数は `domains.rgp_until` がある行だけ表示し、目安からの推定値を事実として出さないことを明記（#211）。**§15.1 / §15.4**: サイドバーのナビをダッシュボード / 移管 / 設定の 3 項目にし、「ドメイン取得」は主要 CTA に一本化、開発者向けの「ログ」は `/settings` の「開発者向け」からのみ到達に変更。全画面から開ける AI ログのスライドインパネル（P-01）を廃止（AI ログは `/logs` のタブで見る）。モバイルの CTA ラベルをデスクトップと揃えた |
+| v0.1.28 | 2026-08-28 | デザインと文言の詰め（#224〜#227 / #95）。**FR-06**: 登録時のネームサーバーとコンタクトを**任意入力**にし、既定では畳んだ 1 行にまとめる。未指定を「既定値で上書き」と解釈しない（コンタクトはユーザー × レジストリで 1 件を共有するので、上書きすると既存ドメインの登録者まで変わっていた）。AC-06-4〜6 を追加。**§10.1**: `POST /domains` の body に `contacts?` を追加。**§6.5**: レジストリから消えた名前を別ユーザーが登録するとき旧所有者の行を破棄する方針を明記（#222）。**§11.3**: `UpdateProhibited` の表示名を「変更ロック」→「情報修正ロック」（label と説明の動詞を揃える）。RP ID の例を独自ドメインに訂正。**文言の統一**: 「更新」は EPP renew 専用、データの取り直しは「最新化」、EPP update は「情報修正」に一本化（画面文言。要件文の「延長」は仕様語として残す） |

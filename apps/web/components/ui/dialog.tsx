@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, ShieldCheck, X } from "lucide-react";
+import { ShieldCheck, X } from "lucide-react";
 import { motion } from "motion/react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import {
@@ -22,6 +22,11 @@ import { Input } from "./input";
  *
  * radix Dialog。420px 幅・2px 枠・上端にブランド帯（Danger だけ帯なしの warn 枠）。
  * 出現アニメーションは `useReducedMotion` が true のとき 0 秒（要件 §15.3）。
+ *
+ * 文言の規則: **ダイアログの確定ボタンは「〜する」/「〜す」**（押した瞬間に副作用が確定する）。
+ * 画面内のボタン（次の一手を開くだけ・可逆）は体言止めにする。
+ * アイコンの規則: **ダイアログのフッターはアイコンを付けない**（確定ボタンは文言で意味が決まる。
+ * フッターに 1 つだけ矢印が付くと、そのボタンだけ別の重みに見える）。
  */
 
 export const Dialog = DialogPrimitive.Root;
@@ -267,7 +272,7 @@ export interface DangerDialogProps {
   note?: string;
   /** この文字列と入力が一致するまで主要ボタンを押せない */
   confirmText: string;
-  /** 入力欄のラベル（例「確認のためドメイン名を入力」） */
+  /** 入力欄のラベル（例: 「確認のためドメイン名を入力」） */
   confirmLabel: string;
   /** 視覚ラベルと別の読み上げ名を付けたいときだけ指定する */
   inputLabel?: string;
@@ -395,7 +400,6 @@ export function SuccessDialog({
             onClick={() => {
               void onPrimary();
             }}
-            trailingIcon={<ArrowRight />}
             variant="primary"
           >
             {primaryLabel}

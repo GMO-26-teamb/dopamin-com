@@ -135,6 +135,16 @@ export const domainCreateRequestSchema = z.object({
   /** 登録期間（年）。既定 1 年。 */
   period: z.number().int().min(1).max(10).default(1),
   nameservers: z.array(hostNameSchema).max(13).optional(),
+  /**
+   * 登録者コンタクト（FR-06）。省略すると `DEFAULT_REGISTRANT_PROFILE`
+   * （既定のダミー登録者）で登録する（従来どおり）。
+   *
+   * `PATCH /domains/:name` と同じく **プロファイルそのもの**を受け取り、
+   * ID の用意（作成 or 更新）は API 側で行う（`contact.service.ts`。
+   * ユーザー × レジストリ × ロールで 1 件を使い回す）。
+   * Admin / Billing は扱わない（ICANN Registration Data Policy）。
+   */
+  contacts: z.object({ registrant: registrantProfileSchema }).optional(),
 });
 export type DomainCreateRequest = z.infer<typeof domainCreateRequestSchema>;
 

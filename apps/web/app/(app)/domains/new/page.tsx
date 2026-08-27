@@ -1,7 +1,7 @@
 "use client";
 
 import type { DomainCheckRequest } from "@dopamin/shared";
-import { RotateCcw } from "lucide-react";
+import { Search, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
 import { PageHeader } from "@/components/app/page-header";
@@ -300,7 +300,7 @@ export default function DomainsNewPage() {
       {candidates.length === 0 || generate.isPending ? null : (
         <div className="flex w-full items-center gap-3">
           <Button
-            leadingIcon={<RotateCcw />}
+            leadingIcon={<Sparkles />}
             onClick={handleRegenerate}
             variant="outline"
           >
@@ -413,6 +413,7 @@ function CandidateArea({
     return (
       <EmptyState
         body="ニックネームから空いている名前を 6 件そろえます。"
+        icon={<Sparkles />}
         title="AI に候補を考えてもらう"
       />
     );
@@ -422,6 +423,7 @@ function CandidateArea({
     return (
       <EmptyState
         body="希望 TLD を広げるか、キーワードを変えてもう一度お試しください。"
+        icon={<Search />}
         title="候補が見つかりませんでした"
       />
     );

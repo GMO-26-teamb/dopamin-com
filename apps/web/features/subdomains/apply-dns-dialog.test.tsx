@@ -76,7 +76,7 @@ describe("ApplyDnsDialog（S-44）", () => {
     expect(screen.getByText("追加 1")).toBeInTheDocument();
     expect(screen.getByText("変更 1")).toBeInTheDocument();
     expect(screen.getByText("削除 0")).toBeInTheDocument();
-    expect(screen.getByText("変更なし 2（www・api）")).toBeInTheDocument();
+    expect(screen.getByText("変更なし 2（www / api）")).toBeInTheDocument();
   });
 
   it("対象ホストを差分行に出し、変更は旧値も添える", () => {

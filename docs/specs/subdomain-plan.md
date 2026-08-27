@@ -94,6 +94,15 @@ sequenceDiagram
   編集で `www` を外したり 1 件だけ残したりできるので、`www` 必須と 3 件以上を課さない。
 - `instructions`（手順テキスト）は `buildDnsSetupInstructions` が生成する。画面のコピーボタンと
   API 応答で文言がずれないよう、生成を `packages/shared` に 1 本化する。
+- **件数だけはドメイン詳細（FR-07）にも載せる**（#217 / requirements v0.1.27）。
+  `GET /domains/:name` の応答に `subdomainPlan: { hosts, applied } | null` が付く
+  （未保存は `null`）。S-30 の設計カードは「保存済み · n ホスト · 反映済み a/n」しか出さないので、
+  詳細を開くたびに設計 API を追加で呼ばずに済ませるため。算出は
+  `getSubdomainPlanSummary`（`apps/api/src/services/subdomain-plan.service.ts`）で、
+  設計を 1 件引き、あったときだけゾーンを読む（クエリは最大 2 回で、ホスト数に比例しない）。
+  `applied` の判定は `GET /domains/:name/subdomain-plan` の `applyState` と同じ
+  `subdomainApplyState` を使う——2 つの画面で件数が食い違わないようにするため
+  （保存後に編集したホストは `changed` なので数に入らない。AC-13-6）。
 
 ### 2.4 反映（#70）
 
@@ -165,6 +174,9 @@ Error Card で返るだけ、という割れ方をしていた（#187 で表面�
 
 - 応答の件数名は §10.1 どおり `updated`（差分計算側の `changed` に対応）。
 - スキーマは `packages/shared/src/subdomains.ts`。
+- 上の 5 本に加えて、`GET /domains/:name`（FR-07・[`registry-api.md`](registry-api.md) §2）の応答が
+  `subdomainPlan: { hosts, applied } | null` を返す（§2.3 の最後）。型は
+  `subdomainPlanSummarySchema`（`packages/shared/src/domains.ts`）。
 
 ## 5. データ変更
 
@@ -213,3 +225,4 @@ Error Card で返るだけ、という割れ方をしていた（#187 で表面�
 | v0.2 | 2026-08-27 | §3 を「Web の配線」に広げ、`NEXT_PUBLIC_API_MODE=http` での ViewModel 写像（ホスト名 = ID / `applyState` → `applyStatus` / `nameserversSwitched` を `appliedAt` から導く / 差分の用途・重要度の補完 / apply 後の取り直し / 未保存の 404 → null）と提案の失敗の相手分けを追記。§7 に web の契約テスト行。#187 |
 | v0.3 | 2026-08-27 | §3.1 に保存前の入力検証を追加（契約を満たさない設計はサーバーに投げず欄で直させる）。判定に使う上限を `packages/shared` の定数として切り出し、画面が数値を二重に持たないようにした。#187 |
 | v0.4 | 2026-08-27 | リポジトリ解析の時間制限を 2 倍に緩和。`GITHUB_FETCH_TIMEOUT_MS` 4 → 8 秒、`AI_CALL_TIMEOUT_MS` 10 → 20 秒とし、§2.2 / §2 の図・AC-13-1 の内訳を「GitHub 8 秒 + AI 20 秒 = 30 秒以内」に更新（requirements v0.1.22）。上限が厳しく解析を通せない公開リポジトリが実在したため。#199（thinking を絞って 10 秒予算を守る案）とは別方針で、上限そのものを引き上げている |
+| v0.5 | 2026-08-28 | ドメイン詳細（`GET /domains/:name`）に `subdomainPlan: { hosts, applied } \| null` が載ったことを §2.3 / §4 に追記（#217 / requirements v0.1.27）。設計を保存しても S-30 が「未作成」のままだった原因が web の固定値ではなく契約に件数が無かったことだったため。反映済みの判定は `GET /subdomain-plan` と同じ `subdomainApplyState` を使い、2 画面で件数が食い違わないようにしている |

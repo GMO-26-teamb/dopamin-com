@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { ThemeToggle } from "@/components/app/theme-toggle";
 import { Logo } from "@/components/ui/brand";
 import { Divider } from "@/components/ui/card";
 
@@ -8,6 +9,8 @@ import { Divider } from "@/components/ui/card";
  * Logo → 見出し → Banner → 中身 → 注記 → 罫線 → フッターリンク の順で積む。
  *
  * 非対応環境（S-01c / S-02c）は見出しもフォームも出さないので `title` は任意。
+ * Logo の行にテーマ切替を並べる。ここに置かないと未認証のまま極ドパモードに
+ * 触れられない（#225）。トップバーを足すと chrome が二重になるので置かない。
  */
 export interface AuthCardProps {
   title?: string;
@@ -29,7 +32,10 @@ export function AuthCard({
   return (
     <main className="flex flex-1 items-center justify-center bg-bg px-6 py-12">
       <div className="flex w-full max-w-auth-card flex-col gap-5">
-        <Logo />
+        <div className="flex w-full items-center justify-between gap-3">
+          <Logo />
+          <ThemeToggle size="sm" />
+        </div>
         {title === undefined ? null : (
           <h1 className="text-heading-page text-ink">{title}</h1>
         )}

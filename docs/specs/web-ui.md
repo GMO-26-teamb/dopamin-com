@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v1（2026-08-26） |
+| 版 | v1.1（2026-08-28） |
 | 対象 issue | #22（`DOCS-07`） |
 | 目的 | Figma の参照情報・画面 ID ↔ ノード ID・デザイントークン対応表を 1 か所にまとめ、以降の web 画面実装 issue（#74〜）が毎回 Figma を探索せず実装できるようにする |
 | Figma | **UI Design (Team B)** — https://www.figma.com/design/3gv0voomQ7jVtBzVUbnoZj/UI-Design--Team-B- （file key `3gv0voomQ7jVtBzVUbnoZj`） |
@@ -17,7 +17,7 @@
 | Brand … Code Block（Components 15 ページ） | Badge / Button / Input / Segmented Control / Tabs / Progress & Gauge / Card / Navigation / Table / Logs / Dialog / Banner / Feedback / Tree / Code Block |
 | Patterns / Domain Cards | Domain Card（Status 8 種）、Candidate Card（Rarity 5 種）、Search Result Row、Transfer Item |
 | Examples / Screens | 代表画面 12 枚 × Standard / 極ドパ（スクリーンショットは §2.2） |
-| **Prototype / Screens** | 全 60 画面・状態（`S-xx` / `D-xx` / `P-xx`）。ノード ID は §2.1 |
+| **Prototype / Screens** | 全 60 画面・状態（`S-xx` = 画面 / `D-xx` = ダイアログ / `P-xx` = パネル）。ノード ID は §2.1 |
 | Prototype / Screens (極ドパ) | 上記の極ドパモード版（同じフレーム名で再配線済み。ノード ID は Standard と異なるため本書では未収録 — 対象フレームを開いて都度確認する） |
 | Prototype / Flow | 画面遷移マップ（`docs/ui-design/30-flow-map.png`） |
 
@@ -49,7 +49,6 @@
 | D-08 | 移管（dialog） | `/transfers` | `85:6029` |
 | S-60 / S-61 / S-62 | ログ | `/logs`（S-61 = `/logs?tab=ai`） | `85:6086` / `85:6309` / `85:6474` |
 | S-63 | ログ | `/logs` | —（フレームなし。§4 の読み込み規則で表現） |
-| P-01 | ログ（AI ログパネル） | 共通（右ドロワー） | `85:6576` |
 | S-70 | 設定 | `/settings` | `85:6709` |
 | S-70b | 設定 | `/settings` | —（フレームなし。S-71 と同型） |
 | D-09 / D-10 | 設定（dialog） | `/settings` | `85:6745` / `85:6801` |
@@ -58,6 +57,11 @@
 | S-81 | システム | error boundary（500） | `80:315` |
 
 各画面の状態・使用コンポーネント・遷移・文言は `docs/specs/ui-screens.md` §2〜4 を参照する（本書では重複させない）。
+
+Figma には全画面から開ける AI ログパネル **P-01**（`85:6576`）のフレームが残っているが、
+**この画面は実装しない**（requirements v0.1.27 / ui-screens v0.10 で廃止）。AI ログは `/logs` の
+タブ（S-61 = `/logs?tab=ai`）で見る。`/logs` 自体もナビからは辿れず、S-70（設定）の
+「開発者向け」からのみ到達する。
 
 ### 2.2 コンポーネント → Figma ノード
 
@@ -96,7 +100,7 @@ Figma の code syntax（`var(--color-bg)` 等）は Dev Mode で確認できる�
 | `color/bg/track` | `--color-track` | `bg-track` | `#eceae6` | `#2c2a33` |
 | `color/bg/inverse`, `color/text/default`, `color/border/strong` | `--color-ink` | `bg-ink` / `text-ink` / `border-ink` | `#201e1d` | `#eceaf2` |
 | `color/bg/hover` | `--color-hover` | `bg-hover`（`hover:bg-hover`） | `#201e1d12` | `#eceaf214` |
-| `color/bg/muted`, `color/text/muted`, `color/border/muted` | `--color-muted` | `bg-muted` / `text-muted` / `border-muted` | `#77726c` | `#9b97ab` |
+| `color/bg/muted`, `color/text/muted`, `color/border/muted` | `--color-muted` | `bg-muted` / `text-muted` / `border-muted` | `#736e68` | `#9b97ab` |
 | `color/bg/warn`, `color/text/warn`, `color/border/warn` | `--color-warn` | `bg-warn` / `text-warn` / `border-warn` | `#d6300f` | `#ff4d6d` |
 | `color/bg/ok`, `color/text/ok`, `color/border/ok` | `--color-ok` | `bg-ok` / `text-ok` / `border-ok` | `#201e1d` | `#22d3ee` |
 | `color/bg/code` | `--color-code-bg` | `bg-code-bg`（Code Block 背景） | `#0d0c10` | `#0d0c10` |
@@ -135,7 +139,7 @@ Figma の code syntax（`var(--color-bg)` 等）は Dev Mode で確認できる�
 - `--size-icon-sm/md/lg` は 15/17/21px（`tokens.css` では `0.9375rem` / `1.0625rem` / `1.3125rem`）で、Tailwind 既定スケール（`size-3.5` / `size-4` / `size-5` = 14/16/20px）とは一致しない。実装はアイコン枠に既定クラスをそのまま当てており（`components/ui/button.tsx` / `components/ui/icon-button.tsx` の `ICON_SIZE`）、このトークンは `:root` に出力されるだけで現状どこからも参照していない。
 - 既定クラスと一致せず、Tailwind の任意値で CSS 変数を直接参照するのは `--stroke-medium`（1.5px）と `--stroke-accent`（3px）の 2 つ（例 `border-[length:var(--stroke-medium)]`、`border-l-[length:var(--stroke-accent)]`）。`--stroke-thin`（1px）は素の `border`、`--stroke-strong`（2px）は `border-2`、`--size-bar-thin`（4px）/ `--size-bar`（6px）は `h-1` / `h-1.5` を使う。
 - `--radius-none`（`0px`）は角丸を使わない、という宣言のためのトークンで、実装では `rounded-*` を一切付けない（`globals.css` のコメント参照）。
-- `--opacity-disabled` / `--opacity-muted` は `opacity-[var(--opacity-disabled)]` のように任意値で参照する。
+- `--opacity-disabled` は `opacity-[var(--opacity-disabled)]` のように任意値で参照する（disabled の入力・ボタン）。`--opacity-muted` は `:root` に出力されるだけで現状どこからも参照していない（#95 で控えめカード・履歴行の全体不透明度をやめ、控えめさを枠だけで表すようにしたため）。
 
 ### 3.3 フォント
 
@@ -210,3 +214,12 @@ next/font のインスタンス（`--font-noto-sans-jp` 等）は `app/layout.ts
 - `resize()` は HUG（hug contents）指定をリセットする。サイズ変更後は auto layout の設定を確認・再設定する。
 - ノード作成・変更直後の `get_screenshot` は古い（stale）ことがある。少し待つか撮り直す。
 - `use_figma` の 1 回の呼び出しにつき `setCurrentPageAsync` は 1 回まで。
+
+---
+
+## 更新履歴
+
+| 版 | 日付 | 内容 |
+|---|---|---|
+| v1 | 2026-08-26 | 初版（#22 / `DOCS-07`）。Figma 参照情報・画面 ID ↔ ノード ID・デザイントークン対応表 |
+| v1.1 | 2026-08-28 | UI/UX の全面見直しに追随（requirements v0.1.27 / ui-screens v0.10）。§2.1 から P-01（AI ログパネル）の行を外し、Figma にフレームが残るが実装しないことを注記（AI ログは S-61、`/logs` は S-70 の「開発者向け」からのみ到達）。§3.1 の `--color-muted`（標準）を実装値 `#736e68` に更新（#95。`#77726c` は背景 `#f3f2f2` 上で 4.26:1 しかなく AA を満たしていなかった）。§3.2 の `--opacity-muted` を「現状どこからも参照していない」に訂正 |

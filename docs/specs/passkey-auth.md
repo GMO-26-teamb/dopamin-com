@@ -25,8 +25,8 @@
 | 用語 | 意味 |
 |---|---|
 | パスキー | WebAuthn の Discoverable Credential（resident key）を指す一般名。生体認証 / PIN で使う公開鍵クレデンシャル |
-| RP（Relying Party） | 認証を受ける側 = 本サービス（`apps/api`）。**RP ID** はその「ドメイン」（例: `localhost`, `dopamin.vercel.app`）。スキームやポートは含まない |
-| Origin | ブラウザが検証に使う完全なオリジン（例: `http://localhost:3000`, `https://dopamin.vercel.app`）。RP ID と整合していなければブラウザが拒否する |
+| RP（Relying Party） | 認証を受ける側 = 本サービス（`apps/api`）。**RP ID** はその「ドメイン」（例: `localhost`, `dopamin.ut42tech.com`）。スキームやポートは含まない |
+| Origin | ブラウザが検証に使う完全なオリジン（例: `http://localhost:3000`, `https://dopamin.ut42tech.com`）。RP ID と整合していなければブラウザが拒否する |
 | user handle (`user.id`) | RP がパスキー作成時に渡す不透明なバイト列（≤64 byte）。認証時に authenticator から `userHandle` として返ってくる。**本プロダクトでは `users.id`（UUID）をバイト化したものを使う** |
 | challenge | リプレイ防止のためサーバーが毎回発行するランダム値。1 回使ったら破棄 |
 | attestation | 登録時に authenticator が返す「新しい公開鍵」の応答 |
@@ -222,7 +222,7 @@ verifyAuthenticationResponse({
 |---|---|---|---|
 | ローカル | `localhost` | `http://localhost:3000` | `localhost` は http でも secure context 扱い。**`127.0.0.1` でアクセスすると RP ID 不一致で失敗する**ので必ず `localhost` |
 | Vercel Preview | そのプレビューの host | `https://<host>` | URL が毎回変わるのでパスキーはプレビューごとに登録し直す（許容） |
-| 本番 | `dopamin.vercel.app`（独自ドメイン取得後は変更） | `https://dopamin.vercel.app` | `*.vercel.app` は Public Suffix なのでサブドメイン共有不可。web と api は**同一オリジン**（`next.config.ts` の rewrites で `/api/*` → api）に揃える |
+| 本番 | `dopamin.ut42tech.com` | `https://dopamin.ut42tech.com` | 独自ドメイン（requirements §16.1 / §16.4）。`*.vercel.app` も併存するが RP ID には使わない —— Public Suffix なのでサブドメイン共有ができず、web（`dopamin-web`）と api（`dopamin-api`）で別ドメインになってしまうため。web と api は**同一オリジン**（`next.config.ts` の rewrites で `/api/*` → api）に揃える |
 
 - `WEBAUTHN_RP_NAME` は表示用（例: `ドパ民.com`）。
 - Origin は Cookie（`Secure`, `SameSite=Lax`）と `originCheck` ミドルウェアでも使うため、3 者（Cookie / WebAuthn / originCheck）が必ず同じオリジンを指す。
@@ -345,3 +345,14 @@ A / B / D のマージ後に main から着手する。`packages/shared/src/erro
 2. A → B → D（`routes/auth.ts` の `/me` と `/passkeys/:id` は近接編集だが別ハンドラ。`index.ts` の `.route()` 追加は B のみ）
 3. E（A の requireSession 適用後の挙動で検証したいので最後）
 4. Wave 2
+
+---
+
+## 更新履歴
+
+本書は `docs/specs/_template.md` より前に書かれたため版番号を持っていなかった。
+2026-08-28 以降の変更はここに記録する（それ以前の経緯は `git log docs/specs/passkey-auth.md`）。
+
+| 版 | 日付 | 内容 |
+|---|---|---|
+| v1 | 2026-08-28 | 版番号の付与。§1 / §6 の本番 RP ID・Origin を `dopamin.vercel.app` から実際の `dopamin.ut42tech.com` に更新（requirements §16.1 / §16.4） |

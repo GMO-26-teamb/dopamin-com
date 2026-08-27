@@ -71,7 +71,7 @@ describe("DashboardPage", () => {
     expect(screen.getByText("tkt-lab.net")).toBeInTheDocument();
     // 移管済み（old-blog.xyz）は出さない（AC-02-4）
     expect(screen.queryByText("old-blog.xyz")).not.toBeInTheDocument();
-    expect(screen.getByText(/^4件 · 最終同期 /)).toBeInTheDocument();
+    expect(screen.getByText(/^4 件 · 最終同期 /)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "最新化" })).toBeInTheDocument();
   });
 
@@ -79,7 +79,7 @@ describe("DashboardPage", () => {
     renderDashboard("empty");
 
     expect(
-      await screen.findByText("まだドメインがありません"),
+      await screen.findByText("ドメインはまだありません"),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "ドメインを取得" }),
@@ -87,7 +87,7 @@ describe("DashboardPage", () => {
     expect(
       screen.getByRole("link", { name: "移管で持ち込む" }),
     ).toHaveAttribute("href", "/transfers");
-    expect(screen.getByText("0件")).toBeInTheDocument();
+    expect(screen.getByText("0 件")).toBeInTheDocument();
   });
 
   it("S-13: 同期に失敗したカードだけ Stale にし、生きている側は操作できる（AC-18-1）", async () => {
@@ -111,7 +111,7 @@ describe("DashboardPage", () => {
     expect(
       screen.getByRole("link", { name: "今すぐ更新" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "復旧する" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "復旧" })).toBeInTheDocument();
     // 押せない理由は目に見える形で出す（#216）
     expect(
       screen.getByText("「最新化」を押すと操作できます。"),

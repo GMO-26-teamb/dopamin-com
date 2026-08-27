@@ -81,7 +81,7 @@ export function SignupScreen({ next }: SignupScreenProps) {
           ) : null
         }
         footer={footer}
-        note="生体認証またはPINを使います。パスワードは作りません。"
+        note="生体認証または PIN を使います。パスワードは作りません。"
         title="はじめる"
       >
         <form
@@ -91,7 +91,7 @@ export function SignupScreen({ next }: SignupScreenProps) {
           <Input
             autoComplete="nickname"
             error={fieldError ?? undefined}
-            label={`表示名（1〜${DISPLAY_NAME_MAX}文字）`}
+            label={`表示名（1〜${DISPLAY_NAME_MAX} 文字）`}
             maxLength={DISPLAY_NAME_MAX}
             name="displayName"
             onChange={(event) => {
@@ -109,7 +109,7 @@ export function SignupScreen({ next }: SignupScreenProps) {
             type="submit"
             variant="primary"
           >
-            {pending ? "作成中…" : "パスキーを作成する"}
+            {pending ? "作成中…" : "パスキーを作成"}
           </Button>
         </form>
       </AuthCard>

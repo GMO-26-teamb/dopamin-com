@@ -97,7 +97,7 @@ export function ApplyDnsDialog({
               </Badge>
               {diff.unchanged.length > 0 ? (
                 <span className="min-w-0 text-caption text-muted">
-                  {`変更なし ${diff.unchanged.length}（${diff.unchanged.join("・")}）`}
+                  {`変更なし ${diff.unchanged.length}（${diff.unchanged.join(" / ")}）`}
                 </span>
               ) : null}
             </div>

@@ -46,16 +46,19 @@ export function RepoForm({
   const trimmed = repoUrl.trim();
 
   return (
-    <div className="flex w-full items-center gap-2">
-      <Input
-        aria-label="リポジトリ URL"
-        autoComplete="off"
-        disabled={analyzing}
-        monospace
-        onChange={(event) => onRepoUrlChange(event.target.value)}
-        placeholder={REPO_PLACEHOLDER}
-        value={repoUrl}
-      />
+    // 375px では 3 つ並べると横にはみ出すので折り返す（#95）
+    <div className="flex w-full flex-wrap items-center gap-2">
+      <div className="min-w-56 flex-1">
+        <Input
+          aria-label="リポジトリ URL"
+          autoComplete="off"
+          disabled={analyzing}
+          monospace
+          onChange={(event) => onRepoUrlChange(event.target.value)}
+          placeholder={REPO_PLACEHOLDER}
+          value={repoUrl}
+        />
+      </div>
       <Button
         className="shrink-0"
         disabled={analyzing || trimmed === ""}

@@ -45,7 +45,7 @@ export interface StickerProps {
 }
 
 export function Sticker({
-  children = "Z世代のドメイン屋",
+  children = "Z 世代のドメイン屋",
   className,
 }: StickerProps) {
   return (

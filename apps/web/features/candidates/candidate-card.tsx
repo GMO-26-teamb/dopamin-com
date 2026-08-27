@@ -106,7 +106,7 @@ export function CandidateCard({
               <ChevronDown
                 aria-hidden="true"
                 className={cn(
-                  "size-4 shrink-0 transition-transform motion-reduce:transition-none",
+                  "size-4 shrink-0 text-muted transition-transform motion-reduce:transition-none",
                   open && "rotate-180",
                 )}
               />
@@ -151,7 +151,7 @@ export function CandidateCard({
 
       <p className="w-full text-caption text-muted">
         {candidate.availability === "error"
-          ? "空き状況を確認できませんでした。スコアは表示できます"
+          ? "空き状況を確認できませんでした。スコアは表示できます。"
           : candidate.reason}
       </p>
     </Card>
