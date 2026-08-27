@@ -22,8 +22,12 @@ export type AiFeature = z.infer<typeof aiFeatureSchema>;
  * 選択できる LLM プロバイダ（FR-17）。
  * 実際に選べるのは環境変数で有効化されたものだけで、その一覧は
  * {@link aiSettingsSchema} の `providers` としてサーバーから配られる。
+ *
+ * 並び順はフォールバック先の優先順でもある（§13.1「失敗したら 1 回だけ別プロバイダ」は
+ * 本命以外の先頭 1 件を取る）。`xai` は Gateway 経由専用で、`AI_GATEWAY_API_KEY` が
+ * 無い環境では選択肢に出ない（`docs/specs/ai-gateway.md` §2.6）。
  */
-export const AI_PROVIDERS = ["google", "anthropic"] as const;
+export const AI_PROVIDERS = ["google", "anthropic", "xai"] as const;
 
 export const aiProviderSchema = z.enum(AI_PROVIDERS);
 export type AiProvider = z.infer<typeof aiProviderSchema>;
