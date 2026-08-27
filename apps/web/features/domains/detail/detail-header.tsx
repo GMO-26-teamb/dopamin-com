@@ -38,8 +38,11 @@ export function DetailHeader({
     domain.displayStatus === "transfer_out_pending";
 
   return (
-    <div className="flex w-full items-center gap-2.5">
-      <h1 className="text-domain-lg text-ink">{domain.name}</h1>
+    // 375px ではドメイン名 + バッジ + 最終同期 + ボタンが 1 行に収まらないので折り返す（#95）
+    <div className="flex w-full flex-wrap items-center gap-x-2.5 gap-y-2">
+      <h1 className="min-w-0 break-all text-domain-lg text-ink">
+        {domain.name}
+      </h1>
       <Badge
         icon={isTransferring ? <ArrowLeftRight /> : undefined}
         tone={statusBadgeTone(domain.displayStatus)}
@@ -47,7 +50,7 @@ export function DetailHeader({
       >
         {statusLabel(domain.displayStatus)}
       </Badge>
-      <div aria-hidden="true" className="min-w-0 flex-1" />
+      <div aria-hidden="true" className="hidden min-w-0 flex-1 sm:block" />
       <p className="shrink-0 text-caption text-muted">
         最終同期 {formatRelativeTime(domain.syncedAt, now)}
       </p>
