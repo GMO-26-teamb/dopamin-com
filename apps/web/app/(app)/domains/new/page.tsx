@@ -412,7 +412,7 @@ function CandidateArea({
   if (idle) {
     return (
       <EmptyState
-        body="ニックネームを入れると、空いている名前を 6 件そろえます。"
+        body="ニックネームから空いている名前を 6 件そろえます。"
         title="AI に候補を考えてもらう"
       />
     );

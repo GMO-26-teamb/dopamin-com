@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Rarity } from "@/components/ui/rarity";
 import { ScoreGauge } from "@/components/ui/score-gauge";
 import { SimilarityRow } from "@/components/ui/similarity-row";
+import { REGISTRY_LABEL } from "@/features/domains/registry-label";
 import type { ApiClientError } from "@/lib/api/errors";
 import type { SearchResult, UniquenessScore } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
@@ -316,7 +317,9 @@ function SearchResults({
       </ul>
       {failed.length === 0 ? null : (
         <p className="w-full text-caption text-muted">
-          {[...new Set(failed.map((r) => r.registry))].join("・")}{" "}
+          {[...new Set(failed.map((r) => REGISTRY_LABEL[r.registry]))].join(
+            "・",
+          )}{" "}
           が応答しないため {failed.map((r) => `.${r.tld}`).join("・")}{" "}
           は確認できませんでした。他の結果はそのまま表示しています
         </p>
