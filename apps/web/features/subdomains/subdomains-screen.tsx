@@ -1,6 +1,5 @@
 "use client";
 
-import { Zap } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
 import { PageHeader } from "@/components/app/page-header";
 import { Banner } from "@/components/ui/banner";
@@ -22,7 +21,6 @@ import { ApplySection } from "./apply-section";
 import {
   appliedSummary,
   countApplyStatus,
-  diffTotal,
   nextHostId,
   nextHostName,
 } from "./apply-status";
@@ -50,17 +48,14 @@ import { canAddHost, hostFieldErrors, validatePlan } from "./validate";
 
 const S40_TITLE = "リポジトリを解析して構成を提案します";
 const S40_BODY =
-  "README・ディレクトリ構成・マニフェストから www / api / docs などのホストを提案します（30 秒以内）。非公開リポの場合はプロジェクト概要のテキストでも提案できます。";
-const S41_NOTE =
-  "解析中… GitHub からリポジトリ情報を取得し、AI が構成を提案しています（最大 30 秒）";
+  "リポジトリの構成から www / api などのホストを提案します。非公開なら概要テキストからでも提案できます。";
+const S41_NOTE = "解析中… 最大 30 秒かかります。";
 const S42_TITLE = "リポジトリを取得できません";
 const S42_BODY =
-  "存在しないか非公開です（GitHub 404）。代わりにプロジェクトの概要を入力すると、そこから構成を提案します。";
-const AI_RETRY_BODY =
-  "もう一度お試しください。プロジェクト概要を入力して提案することもできます。";
+  "見つからないか、非公開です。プロジェクトの概要からでも提案できます。";
+const AI_RETRY_BODY = "もう一度お試しください。概要からでも提案できます。";
 const NS_FAIL_TITLE = "ネームサーバーの切替に失敗しました";
-const NS_FAIL_BODY =
-  "NS をドパ民 DNS に切り替えられなかったため、レコードは変更していません。再同期してから、もう一度お試しください。";
+const NS_FAIL_BODY = "レコードは変更していません。もう一度お試しください。";
 
 interface ProposeInput {
   repoUrl?: string;
@@ -133,17 +128,15 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
       ? hostFieldErrors(selected, draft.hosts)
       : {};
 
+  // Primary は 1 画面 1 つ（`components/ui/button.tsx`）。設計があるときは反映セクションの
+  // 「DNS に反映」、無いときは提案の導線（概要入力が開いていれば「概要から提案」）が Primary。
+  const repoFailed = propose.error !== null && propose.error.origin !== "ai";
+  const proposeFromDescription = draft === null && descriptionOpen;
+  const analyzePrimary = draft === null && !proposeFromDescription;
+
   const diffPending = hasPlan && diff.isPending;
   const diffError = hasPlan ? diff.error : null;
   const diffData = diff.data;
-  const applyDisabled =
-    !hasPlan ||
-    dirty ||
-    diffPending ||
-    diffError !== null ||
-    diffData === undefined ||
-    diffTotal(diffData) === 0 ||
-    apply.isPending;
 
   function runPropose(input: ProposeInput): void {
     setBanner(null);
@@ -339,7 +332,11 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
           title={notFound ? S42_TITLE : copy.title}
           tone="warn"
         />
-        <DescriptionForm analyzing={false} onPropose={runPropose} />
+        <DescriptionForm
+          analyzing={false}
+          onPropose={runPropose}
+          proposePrimary
+        />
       </>
     );
   } else if (draft === null) {
@@ -348,7 +345,11 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
       <>
         <EmptyState body={S40_BODY} title={S40_TITLE} />
         {descriptionOpen ? (
-          <DescriptionForm analyzing={false} onPropose={runPropose} />
+          <DescriptionForm
+            analyzing={false}
+            onPropose={runPropose}
+            proposePrimary
+          />
         ) : null}
       </>
     );
@@ -357,13 +358,15 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
     body = (
       <>
         {descriptionOpen ? (
-          // 設計があっても「概要を書いて提案」で再提案できる（再解析の失敗時は自動で開く）
+          // 設計があっても「概要を書いて提案」で再提案できる（再解析の失敗時は自動で開く）。
+          // このときの Primary は下段の「DNS に反映」なので、ここは outline のまま
           <DescriptionForm analyzing={false} onPropose={runPropose} />
         ) : null}
         <PolicyBar
           onChange={(policy) => updateDraft({ ...draft, policy })}
           policy={draft.policy}
         />
+        {/* 上段は「設計する」（ツリー + 選択中ホストの編集）。反映は下段に分ける（#219） */}
         <div className="flex w-full flex-col items-start gap-4 lg:flex-row">
           <div className="w-full min-w-0 flex-1">
             <PlanTree
@@ -388,19 +391,20 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
                 onRemove={() => removeHost(selected.id)}
               />
             )}
-            <ApplySection
-              applying={apply.isPending}
-              counts={countApplyStatus(draft.hosts)}
-              diff={diffData}
-              diffFailed={diffError !== null}
-              diffPending={diffPending}
-              dirty={dirty}
-              nameserversSwitched={draft.nameserversSwitched}
-              onApply={openApplyDialog}
-            />
-            <ManualInstructions hosts={draft.hosts} />
           </div>
         </div>
+        {/* 下段は「反映する」。設計全体の状態と実行なので幅いっぱいに置く */}
+        <ApplySection
+          applying={apply.isPending}
+          counts={countApplyStatus(draft.hosts)}
+          diff={diffData}
+          diffFailed={diffError !== null}
+          diffPending={diffPending}
+          dirty={dirty}
+          nameserversSwitched={draft.nameserversSwitched}
+          onApply={openApplyDialog}
+        />
+        <ManualInstructions hosts={draft.hosts} />
       </>
     );
   }
@@ -425,24 +429,14 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
 
       <PageHeader
         action={
-          <div className="flex shrink-0 items-center gap-2">
-            <Button
-              disabled={!dirty || save.isPending || apply.isPending}
-              loading={save.isPending}
-              onClick={onSave}
-              variant="outline"
-            >
-              {save.isPending ? "保存中…" : "設計を保存"}
-            </Button>
-            <Button
-              disabled={applyDisabled}
-              leadingIcon={<Zap />}
-              onClick={openApplyDialog}
-              variant="primary"
-            >
-              DNS に反映
-            </Button>
-          </div>
+          <Button
+            disabled={!dirty || save.isPending || apply.isPending}
+            loading={save.isPending}
+            onClick={onSave}
+            variant="outline"
+          >
+            {save.isPending ? "保存中…" : "設計を保存"}
+          </Button>
         }
         meta={domain}
         title="サブドメイン設計"
@@ -450,11 +444,13 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
 
       {plan.error === null ? (
         <RepoForm
+          analyzePrimary={analyzePrimary}
           analyzing={propose.isPending}
           descriptionOpen={descriptionOpen}
           onDescriptionOpenChange={setDescriptionOpen}
           onPropose={runPropose}
           onRepoUrlChange={setRepoUrl}
+          recovering={repoFailed}
           repoUrl={repoUrl}
         />
       ) : null}
@@ -486,7 +482,7 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
   );
 }
 
-/** 全体方針（AI の提案・編集可）。S-43 のツリー上のバー。 */
+/** 全体方針（AI が提案し、そのまま編集できる）。S-43 のツリー上のバー。 */
 function PolicyBar({
   policy,
   onChange,
@@ -507,9 +503,6 @@ function PolicyBar({
         onChange={(event) => onChange(event.target.value)}
         value={policy}
       />
-      <span className="shrink-0 text-caption text-muted">
-        AI の提案・編集可
-      </span>
     </div>
   );
 }

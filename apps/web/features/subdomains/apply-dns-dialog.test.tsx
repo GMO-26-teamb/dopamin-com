@@ -1,4 +1,3 @@
-import { DOPAMIN_NAMESERVERS } from "@dopamin/shared";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -92,35 +91,29 @@ describe("ApplyDnsDialog（S-44）", () => {
     ).toBeInTheDocument();
   });
 
-  it("主要ボタンは差分の合計件数を出し、押すと反映する", async () => {
+  it("主要ボタンは動作名だけで、押すと反映する（件数は上のチップが持つ）", async () => {
     const { onApply } = renderDialog();
 
-    const button = screen.getByRole("button", { name: "2 件を反映する" });
+    const button = screen.getByRole("button", { name: "反映する" });
     await userEvent.setup().click(button);
 
     expect(onApply).toHaveBeenCalledTimes(1);
   });
 
-  it("NS が未切替なら Warn バッジで「反映時に切り替えます」と伝える（AC-13-5）", () => {
+  it("NS が未切替なら切り替わることを 1 文で伝える（AC-13-5）", () => {
     renderDialog();
 
     expect(
-      screen.getByText("未切替 — 反映時に切り替えます"),
+      screen.getByText(
+        "反映と同時にネームサーバーをドパ民 DNS に切り替えます。",
+      ),
     ).toBeInTheDocument();
   });
 
-  it("切替先のネームサーバー名を出す（@dopamin/shared の定数）", () => {
-    renderDialog();
-
-    const names = screen.getByText(DOPAMIN_NAMESERVERS.join(" / "));
-    expect(names).toHaveTextContent("ns1.dopamin.ut42tech.com");
-    expect(names).toHaveTextContent("ns2.dopamin.ut42tech.com");
-  });
-
-  it("NS 切替済みなら Ok バッジになる", () => {
+  it("NS 切替済みなら予告を出さない（反映セクションと同じ塊を繰り返さない）", () => {
     renderDialog({ nameserversSwitched: true });
 
-    expect(screen.getByText("ドパ民 DNS に切替済み")).toBeInTheDocument();
+    expect(screen.queryByText(/ネームサーバー/)).toBeNull();
   });
 
   it("差分が 0 件なら反映ボタンを押せない", () => {
@@ -128,9 +121,7 @@ describe("ApplyDnsDialog（S-44）", () => {
       diff: { added: [], updated: [], removed: [], unchanged: ["www"] },
     });
 
-    expect(
-      screen.getByRole("button", { name: "0 件を反映する" }),
-    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "反映する" })).toBeDisabled();
   });
 
   it("キャンセルでダイアログを閉じる（何も変更しない）", async () => {
