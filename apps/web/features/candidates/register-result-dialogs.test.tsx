@@ -113,6 +113,8 @@ describe("RegisterSuccessDialog（S-26）", () => {
     expect(screen.getByText("取得できました")).toBeInTheDocument();
     expect(screen.getByText("takutaku.com")).toBeInTheDocument();
     expect(screen.getByText(/有効期限 2027-08-26/)).toBeInTheDocument();
+    // NS は登録時に送っていないので「既定値」ではなく実際の結果を出す（#173）
+    expect(screen.getByText(/ネームサーバーは未設定/)).toBeInTheDocument();
     expect(
       screen.getByText(
         /お支払い ¥1,628（Visa •••• 4242・受付 pay_ABCD1234・モック）/,
@@ -125,6 +127,27 @@ describe("RegisterSuccessDialog（S-26）", () => {
     expect(onGoToSubdomains).toHaveBeenCalledWith("takutaku.com");
     await userEvent.click(screen.getByRole("button", { name: "詳細を見る" }));
     expect(onGoToDetail).toHaveBeenCalledWith("takutaku.com");
+  });
+
+  it("レジストリが NS を返したときはその値を出す（#173）", () => {
+    render(
+      <RegisterSuccessDialog
+        onGoToDetail={() => {}}
+        onGoToSubdomains={() => {}}
+        onOpenChange={() => {}}
+        success={{
+          domain: {
+            ...DOMAIN,
+            nameservers: ["ns1.example.com", "ns2.example.com"],
+          },
+          receipt: RECEIPT,
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByText(/ネームサーバー ns1.example.com \/ ns2.example.com/),
+    ).toBeInTheDocument();
   });
 });
 
