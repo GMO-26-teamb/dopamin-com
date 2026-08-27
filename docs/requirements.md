@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.1.19（2026-08-27） |
+| 版 | v0.1.20（2026-08-27） |
 | プロダクト | ドパ民.com / dopamin.com — Z世代向けドメイン管理プラットフォーム（疑似レジストラ） |
 | チーム | チームドパ民（Team B）: 佐々木 琢登・星 はるか・上原 拓也 |
 | 位置づけ | GMO Internet Internship in kitaQ Webアプリケーションコース（2026/08/24–28）成果物 |
@@ -366,7 +366,7 @@
 ### FR-17 AI 設定【P2】
 
 - **概要**: 設定画面から使用する LLM プロバイダ / モデルをユーザー単位で切り替える（Vercel AI SDK による抽象化を UI に露出）。
-- **振る舞い**: 選択肢は環境変数で有効化されたプロバイダのみ（`google` / `anthropic`）。API キーはサーバー側のみ保持し、ユーザー入力は受け付けない。現在の実効値（ユーザー設定 `users.ai_provider / ai_model` → 環境変数の既定の順）と選択肢は `GET /auth/me` の `ai` で配り、`PATCH /settings/ai` は有効化されていないプロバイダを `VALIDATION_ERROR` で拒否する。
+- **振る舞い**: 選択肢は環境変数で有効化されたプロバイダのみ（`google` / `anthropic` / `xai`）。有効かどうかは「そのプロバイダ固有のキーがある、または `AI_GATEWAY_API_KEY` がある」で判定する。`xai` は Gateway 経由専用のため、`AI_GATEWAY_API_KEY` が無い環境では選択肢に出ない。API キーはサーバー側のみ保持し、ユーザー入力は受け付けない。現在の実効値（ユーザー設定 `users.ai_provider / ai_model` → 環境変数の既定の順）と選択肢は `GET /auth/me` の `ai` で配り、`PATCH /settings/ai` は有効化されていないプロバイダを `VALIDATION_ERROR` で拒否する。
 - **AC**: 切替後の AI 呼び出しが AI ログ上で選択したモデル名になっている。
 
 ### FR-18 エラー表示・レジストリ障害時の挙動【P0】
@@ -578,7 +578,7 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。アプリのテーブル
 |---|---|---|
 | id | uuid PK | |
 | display_name | text NOT NULL | 1〜32 文字 |
-| ai_provider | text | `google` / `anthropic` / NULL（既定は環境変数） |
+| ai_provider | text | `google` / `anthropic` / `xai` / NULL（既定は環境変数）。プロバイダが増えても列の型は `text` のまま（制約を持たせない） |
 | ai_model | text | NULL で既定 |
 
 **passkey_credentials**
@@ -1057,15 +1057,19 @@ sequenceDiagram
 ```ts
 // apps/api/src/lib/ai-provider.ts
 export function resolveModel(user?: User) {
-  const provider = user?.ai_provider ?? env.AI_PROVIDER;      // 'google' | 'anthropic'
+  const provider = user?.ai_provider ?? env.AI_PROVIDER;      // 'google' | 'anthropic' | 'xai'
   const model = user?.ai_model ?? env.AI_MODEL;
-  return provider === 'anthropic' ? anthropic(model) : google(model);
+  // プロバイダ固有キーがあれば直接、無ければ AI Gateway 経由、どちらも無ければ AI_UNAVAILABLE
+  return providerApiKey(provider)
+    ? directModel(provider, model)
+    : gateway(gatewayModelId(provider, model));
 }
 export function resolveEmbeddingModel() { /* EMBEDDING_PROVIDER / EMBEDDING_MODEL */ }
 ```
 
 - 生成は `generateObject`（zod スキーマ必須）。自由文生成は行わない。
 - 既定: `AI_PROVIDER=google`（Google AI Studio の無料枠）。`ANTHROPIC_API_KEY` がある環境では `anthropic` を選択可。
+- `AI_GATEWAY_API_KEY`（Vercel AI Gateway）があれば、プロバイダ固有キーを配らずに全プロバイダを有効化できる。`xai`（Grok）は **Gateway 経由専用**で直接呼び出しには対応しない。Gateway のモデル ID 体系が内部の語彙と異なる場合の読み替えは `apps/api` 側の境界で吸収する（詳細は `docs/specs/ai-gateway.md`）。
 - タイムアウト 10 秒、失敗時は 1 回だけ別プロバイダにフォールバック（両方有効な場合）。
 - 出力は必ず zod で再検証してから使う（AI 出力は信用しない）。
 
@@ -1249,7 +1253,8 @@ FR-05 は埋め込みを使わない（§14）。他に埋め込みを必要と�
 | `MOCK_REGISTRY_FAIL_MODE` | `none` / `timeout` / `5xx` / `reject` / `spec_mismatch` / `timeout_after_write`。`timeout_after_write` は更新系だけを「レジストリには届いたが応答が返らない」状態にし（参照系は通す）、§11.6 (d) / AC-18-2 の `info` 照合を手元再現するためのモード |
 | `MOCK_FOREIGN_REGISTRAR_ID` / `MOCK_TRANSFER_AUTO_APPROVE_MS` | `mock` レジストリの相手レジストラ ID と自動承認までのミリ秒（既定 20 分。テストでは短縮） |
 | `AI_PROVIDER` / `AI_MODEL` | 既定の生成モデル |
-| `GOOGLE_GENERATIVE_AI_API_KEY` / `ANTHROPIC_API_KEY` | プロバイダ API キー |
+| `GOOGLE_GENERATIVE_AI_API_KEY` / `ANTHROPIC_API_KEY` | プロバイダ API キー（直接呼び出し用） |
+| `AI_GATEWAY_API_KEY` | Vercel AI Gateway のキー。上のプロバイダ固有キーが**無いときだけ**使われ、これ 1 本で全プロバイダに出せる。3 つとも未設定なら AI 機能は `AI_UNAVAILABLE`（503）。`xai` は本キーが無いと選択肢に出ない（§13.1） |
 | `GITHUB_MODE` | `real` / `mock`（既定）。FR-13 のリポジトリ解析を実接続にするか、ネットワークに出ないフェイク応答にするか |
 | `GITHUB_MOCK_FAIL_MODE` | `none` / `not_found` / `rate_limited` / `unreachable`。`GITHUB_MODE=mock` のときの失敗シミュレーション（AC-13-2 の手元再現） |
 | `GITHUB_TOKEN` | 公開リポ取得のレート制限緩和（読み取りのみのスコープ）。`GITHUB_MODE=real` でも任意で、未設定なら未認証で叩く |
@@ -1451,3 +1456,4 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | v0.1.17 | 2026-08-26 | §11.1: `poll` / `ackMessage` の実装（#44）と mock の移管シミュレーション（#45）を実装に合わせて確定。Poll のエンドポイント差はアダプタで吸収し（応答の形は両レジストリ同一）、`msgType` が未知の通知は捨てず `'unknown'` に倒す。mock は相手レジストラ保有ドメインの seed・レジストラ別 Poll キュー・役割チェック（approve / reject は対応側、cancel は申請側、更新系は現スポンサー）を持ち、**自動承認は `setTimeout` ではなく `info` / `transferQuery` / `poll` 時の遅延評価**で確定させる（Vercel Functions でタイマーが生き残らないため）。`transferRequest` は自レジストラ保有のドメインには出せない（暫定 2304、§21.2 #15）（採番が衝突していたため v0.1.14 から再採番。日付は原文のまま） |
 | v0.1.18 | 2026-08-27 | 実装が先行していた記述を現状に同期。§6.4 / §11.1: `RegistryAdapter` に `hello` / `createContact` / `updateContact` を追記し `getAuthInfo` を `authCode` に訂正、mock の状態の永続先を `domains.raw_info` から専用テーブル `mock_registry_state` に訂正、`MOCK_REGISTRY_FAIL_MODE` に `timeout_after_write` を追加。§8: `apps/web/lib/api/` と `apps/api` の routes / services / middleware / lib を実ファイルに合わせる。§9 前書き / §9.1: `mock_registry_state` の表を追加、`operation_logs.command` を SSOT どおり 21 種（主 15 + 補助 5 + アプリ内 1）に、`contacts` の例値を許可値に修正。§10.2: `requestContext` を追加し `Origin` ヘッダ欠落は通す仕様を明記。§10.4: 応答例に `confidence` / `algorithmVersion` / `corpusVersion` と `error` 行の `uniqueness` を反映。§11.3: renew ロックの行を追加し UpdateProhibited の表示を「変更ロック」に修正（FR-08 に AC-08-3 を追加）。§14.1: コーパス生成コマンドに `TRANCO_RETRIEVED_DATE` と出力リダイレクトを明記。§15: shadcn/ui CLI ではなく Radix UI + cva の自前実装、`/dashboard` はカードグリッド、ブレークポイントは `md`（768px）+ `MobileNav`。§16.2 / §17: `ci.yml` の perf / e2e ジョブ、**`NEXT_PUBLIC_*` に Vercel の Sensitive 属性を付けない**規定（2026-08-27 の本番障害の再発防止）、`DIRECT_DATABASE_URL` の Secret と CI env の区別。§16.3: `vector` 拡張の有効化は不要（ADR-0003）。§21.1 / §21.2 #1 / #2 / #8 / #11 / §21.3: 解決済みの事項を反映。あわせて更新履歴の版番号の重複・順序の乱れを解消（外部参照の無い 2 行を v0.1.16 / v0.1.17 に再採番し、表を版番号の昇順に並べ替え） |
 | v0.1.19 | 2026-08-27 | §2.2: サブドメイン設計の反映先を「アプリ内の疑似 DNS ゾーン」にした判断を `docs/adr/0004-pseudo-dns-zone.md` として残し、本文から参照を張った（要件の内容は変えていない。外部 DNS プロバイダへ反映しない理由・NS 切替だけは実レジストリに効く理由・却下案を記録）。#16 |
+| v0.1.20 | 2026-08-27 | AI プロバイダ周りをチーム決定に合わせて追記（実装は #186 / #190）。§17: `AI_GATEWAY_API_KEY`（Vercel AI Gateway）を環境変数表に追加。プロバイダ固有キーが無いときだけ使われ、1 本で全プロバイダに出せる。§13.1: 実効モデルの解決を「固有キーがあれば直接 → 無ければ Gateway 経由 → どちらも無ければ `AI_UNAVAILABLE`」に更新し、`xai`（Grok）は Gateway 経由専用であること、Gateway のモデル ID 体系の読み替えは `apps/api` の境界で吸収することを明記。FR-17: 選択肢に `xai` を追加し、有効判定を「固有キーまたは Gateway キー」に。`xai` は Gateway キーが無い環境では選択肢に出ない。§9.1: `users.ai_provider` の値に `xai` を追加（列は `text` のままで制約を持たせない = migration 不要） |
