@@ -158,8 +158,10 @@ function toTransferBadge(
 /**
  * DB の行を一覧・詳細用の要約に写像する（FR-02）。
  *
- * `rgpUntil` は両レジストリの `info` が猶予期限を返さないため常に null
- * （§11.4 の目安日数からの算出は UI 側の責務）。
+ * `rgpUntil` は行に入っている猶予期限をそのまま出す。両レジストリの `info` は
+ * RGP のステータスしか返さないので、期限を知っている経路（FR-16 のデモ投入）が
+ * 書いた行だけ値が入り、それ以外は null になる。null を「残り 0 日」と読み替えるのは
+ * 画面側でも禁止で、期限が分からないときは残日数を出さない（#211）。
  * `transfer` は進行中の移管があれば入る（FR-12 / AC-07-3）。
  */
 export function toDomainSummary(
@@ -179,7 +181,7 @@ export function toDomainSummary(
     ownership: record.ownership,
     registeredAt: info.registeredAt,
     expiresAt: info.expiresAt,
-    rgpUntil: null,
+    rgpUntil: record.rgpUntil?.toISOString() ?? null,
     syncedAt: record.syncedAt.toISOString(),
     stale,
     transfer: toTransferBadge(transfer),

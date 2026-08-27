@@ -106,16 +106,15 @@ function toDomainSummaryVm(summary: ApiDomainSummary): DomainSummary {
  * 詳細応答（`{ domain, summary }`）を画面用の `DomainDetail` に写像する。
  *
  * 所有権・同期時刻・stale・移管バッジは `summary`（一覧と同じ要約）から取るので、
- * 一覧と詳細で表示がずれない。登録者は `registrantProfile` から取る
- * （`info` はコンタクト ID しか返さないため API が中身を添える。#172）。
- * まだ API が返さない値は暫定のままにする:
- * - `gracePeriods`: `info` は猶予期限を返さない（§11.4 の目安計算は未実装）
- * - `subdomainPlan`: 設計 API（FR-13）未実装
+ * 一覧と詳細で表示がずれない。登録者は `registrantProfile` から取り、
+ * サブドメイン設計の件数は `subdomainPlan` をそのまま使う（#217）。
+ * `gracePeriods` だけは API がまだ返さない（`info` が猶予期限を持たない）ので空にする。
  */
 function toDomainDetail({
   domain,
   summary,
   registrantProfile,
+  subdomainPlan,
 }: DomainEnvelope): DomainDetail {
   return {
     ...toDomainSummaryVm(summary),
@@ -133,7 +132,7 @@ function toDomainDetail({
       domain.registeredAt,
       domain.lastTransferAt,
     ),
-    subdomainPlan: null,
+    subdomainPlan,
   };
 }
 

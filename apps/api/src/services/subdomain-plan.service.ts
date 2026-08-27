@@ -6,6 +6,7 @@ import type {
   SubdomainPlanProposalResponse,
   SubdomainPlanResponse,
   SubdomainPlanSaveRequest,
+  SubdomainPlanSummary,
 } from "@dopamin/shared";
 import {
   buildDnsSetupInstructions,
@@ -172,6 +173,32 @@ export async function saveSubdomainPlan(
     proposal: { policy: request.policy, items: request.items },
   });
   return toPlanResponse(domain, plan, await listDnsRecords(db, domainId));
+}
+
+/**
+ * FR-07 の詳細に載せる件数（`hosts` / `applied`）。まだ保存していなければ null。
+ *
+ * 設計が無いドメインの方が多いので、先に設計を 1 件引き、あったときだけ
+ * 疑似 DNS ゾーンを読む（クエリは最大 2 回で、ホスト数に比例して増えない）。
+ * 反映済みの判定は保存済み設計とゾーンの突き合わせで、`GET /subdomain-plan` の
+ * `applyState` と同じ `subdomainApplyState` を使う（2 つの画面で数が食い違わない）。
+ */
+export async function getSubdomainPlanSummary(
+  db: Db,
+  domainId: string,
+): Promise<SubdomainPlanSummary | null> {
+  const plan = await findSubdomainPlan(db, domainId);
+  if (plan === null) {
+    return null;
+  }
+  const records = await listDnsRecords(db, domainId);
+  const { items } = plan.proposal;
+  return {
+    hosts: items.length,
+    applied: items.filter(
+      (item) => subdomainApplyState(item, records) === "applied",
+    ).length,
+  };
 }
 
 /**

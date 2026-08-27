@@ -1,3 +1,4 @@
+import type { Db } from "@dopamin/db";
 import {
   createRegistrySet,
   MockRegistryAdapter,
@@ -15,8 +16,18 @@ import {
   type TransfersListResponse,
   transfersListResponseSchema,
 } from "@dopamin/shared";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import app from "../../src/index";
+import { setDbForTesting } from "../../src/lib/db";
 import { setRegistrySetForTesting } from "../../src/lib/registries";
 import { setRetrySleepForTesting } from "../../src/lib/retry";
 import {
@@ -33,6 +44,7 @@ import {
   setTransferStoreForTesting,
   type TransferStore,
 } from "../../src/services/transfer-store";
+import { createTestDb } from "../helpers/db";
 import {
   clearTestSession,
   installTestSession,
@@ -48,6 +60,21 @@ import {
 let kitaqsign: MockRegistryAdapter;
 let domainStore: DomainStore;
 let transferStore: TransferStore;
+let db: Db;
+let closeDb: () => Promise<void>;
+
+// domains / transfers 行はインメモリの seam 経由だが、詳細（FR-07）は
+// サブドメイン設計の件数（#217）を DB から引くので接続先が要る。
+// この DB に domains 行は入らないため、件数は常に null になる
+beforeAll(async () => {
+  ({ db, close: closeDb } = await createTestDb());
+  setDbForTesting(db);
+}, 30_000);
+
+afterAll(async () => {
+  setDbForTesting(null);
+  await closeDb();
+});
 
 /** Poll の途中障害・ack 障害をピンポイントで再現するテスト用アダプタ。 */
 class PollFaultAdapter extends MockRegistryAdapter {

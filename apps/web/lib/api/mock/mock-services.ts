@@ -505,8 +505,11 @@ export function createMockServices(
         }
         const store = getMockStore();
         const domain = requireDomain(store, name);
+        // API の詳細は `subdomain_plans` にある = 保存済みの設計だけを数える（#217）。
+        // モックは提案（未保存）も plans に置くので、savedAt で同じ集合に絞る
         const plan = store.plans.get(name);
-        const hydrated = plan ? hydratePlan(store, plan) : null;
+        const hydrated =
+          plan && plan.savedAt !== null ? hydratePlan(store, plan) : null;
         const detail: DomainDetail = {
           ...domain,
           subdomainPlan: hydrated
