@@ -15,6 +15,7 @@ import app from "../../src/index";
 import { setDbForTesting } from "../../src/lib/db";
 import { resetApiEnvCacheForTesting } from "../../src/lib/env";
 import { setRegistrySetForTesting } from "../../src/lib/registries";
+import { setRetrySleepForTesting } from "../../src/lib/retry";
 import { createTestDb, resetTestDb } from "../helpers/db";
 import { createTestSession } from "../helpers/session";
 
@@ -55,6 +56,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  setRetrySleepForTesting(null);
   setRegistrySetForTesting(null);
   resetApiEnvCacheForTesting();
   vi.restoreAllMocks();
@@ -177,6 +179,8 @@ describe("operation_logs への永続化（FR-15）", () => {
     process.env.MOCK_REGISTRY_FAIL_MODE = "timeout";
     resetApiEnvCacheForTesting();
     setRegistrySetForTesting(null);
+    // 参照系の自動再試行（#60）のバックオフでテストを待たせない
+    setRetrySleepForTesting(() => Promise.resolve());
 
     const { cookie } = await createTestSession(db);
     await app.request("/api/v1/domains/check", {
@@ -185,13 +189,19 @@ describe("operation_logs への永続化（FR-15）", () => {
       body: JSON.stringify({ names: ["example.com"] }),
     });
 
+    // check は参照系なので初回 + 再試行 2 回まで投げる（§11.6 (e)）。
+    // FR-15 は「全レジストリ呼び出し」を残すので、再試行も 1 回 1 行として記録される
     const rows = await selectLogs();
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      command: "check",
-      status: "timeout",
-      errorCode: "REGISTRY_TIMEOUT",
-    });
+    expect(rows).toHaveLength(3);
+    for (const row of rows) {
+      expect(row).toMatchObject({
+        command: "check",
+        status: "timeout",
+        errorCode: "REGISTRY_TIMEOUT",
+      });
+    }
+    // 試行ごとに clTRID（request_id）が別なので、ログから再試行を追える
+    expect(new Set(rows.map((r) => r.requestId)).size).toBe(3);
   });
 
   it("AuthCode は *** にマスクして保存される（AC-15-2）", async () => {

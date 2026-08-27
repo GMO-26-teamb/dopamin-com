@@ -1,5 +1,5 @@
 import { RegistryError } from "@dopamin/registry";
-import type { ApiErrorBody, ErrorCode, RegistryId } from "@dopamin/shared";
+import type { ApiError, ErrorCode, RegistryId } from "@dopamin/shared";
 import type { ErrorHandler, NotFoundHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { ApiException } from "../lib/errors";
@@ -17,7 +17,7 @@ function errorBody(options: {
   registry?: RegistryId;
   registryCode?: number;
   details?: unknown;
-}): ApiErrorBody {
+}): ApiError {
   return {
     error: {
       code: options.code,

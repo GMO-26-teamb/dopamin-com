@@ -53,21 +53,57 @@ export interface DomainInfo {
 }
 
 /**
- * 登録者プロファイル。レジストリは許可されたダミー値しか受け付けない
- * （PII 方針・docs/registry/spec-notes.md「値の制約」参照）。
+ * レジストリが受け付ける架空ダミー氏名（両 OpenAPI の `PostalInfo.name` の pattern）。
+ *
+ * 実在の個人名は投入禁止（CLAUDE.md / PII 方針）。pattern には WHOIS プロキシ用ラベル
+ * （Registration Private / Whois Agent / Domain Administrator）も含まれるが、
+ * アプリからは「登録者本人の名前」としてしか使わないので、こちらは受け付けない。
  */
-export interface RegistrantProfile {
-  /** 許可ダミー氏名（John Doe / Taro Test など）のみ。 */
-  name: string;
-  /** `@example.com` / `@example.net` / `@example.org` のみ。 */
-  email: string;
-  /** `N/A` または `Redacted for Privacy` のみ。 */
-  street: string;
-  /** `N/A` または `Redacted for Privacy` のみ。 */
-  city: string;
-  /** `JP` または `US` のみ。 */
-  countryCode: "JP" | "US";
-}
+export const ALLOWED_CONTACT_NAMES = [
+  "John Doe",
+  "Jane Doe",
+  "Taro Test",
+  "Hanako Test",
+  "Test User",
+  "Demo User",
+  "Sample Person",
+  "Example Contact",
+] as const;
+
+/** レジストリが受け付ける住所・都市の値（配送不能なプレースホルダのみ）。 */
+export const ALLOWED_CONTACT_ADDRESS_VALUES = [
+  "N/A",
+  "Redacted for Privacy",
+] as const;
+
+/**
+ * 配送不能な予約ドメイン宛のメールアドレスだけを許可する
+ * （両 OpenAPI の `email` pattern と同じ。RFC 2606 の example ドメイン）。
+ */
+const CONTACT_EMAIL_PATTERN = /^[A-Za-z0-9._%+-]+@example\.(com|net|org)$/;
+
+/**
+ * 登録者プロファイル（docs/registry/spec-notes.md「値の制約」）。
+ *
+ * レジストリは許可されたダミー値しか受け付けないので、**送る前に弾く**。
+ * レジストリの 2xxx エラーで気付くのでは遅い（操作ログに実在しうる値が残るし、
+ * ユーザーには理由が分からない）。値域は両レジストリの OpenAPI が正で、
+ * ここはその写し（変わったら両方を合わせる）。
+ */
+export const registrantProfileSchema = z.object({
+  name: z.enum(ALLOWED_CONTACT_NAMES),
+  email: z
+    .string()
+    .regex(
+      CONTACT_EMAIL_PATTERN,
+      "メールアドレスは example.com / example.net / example.org のみ使えます",
+    ),
+  street: z.enum(ALLOWED_CONTACT_ADDRESS_VALUES),
+  city: z.enum(ALLOWED_CONTACT_ADDRESS_VALUES),
+  countryCode: z.enum(["JP", "US"]),
+});
+
+export type RegistrantProfile = z.infer<typeof registrantProfileSchema>;
 
 /** 既定の登録者プロファイル（レジストリが許可するダミー値のみ）。 */
 export const DEFAULT_REGISTRANT_PROFILE: RegistrantProfile = {
@@ -78,6 +114,22 @@ export const DEFAULT_REGISTRANT_PROFILE: RegistrantProfile = {
   countryCode: "JP",
 };
 
+/**
+ * 扱うコンタクトのロール（§9.1 `contacts.role`）。
+ * ICANN の Registration Data Policy に合わせ、Admin / Billing は持たない。
+ */
+export const CONTACT_ROLES = ["registrant", "tech"] as const;
+export const contactRoleSchema = z.enum(CONTACT_ROLES);
+export type ContactRole = z.infer<typeof contactRoleSchema>;
+
+/** ロール → レジストリの `contacts` マップのキー（`registrant` は専用フィールドなので持たない）。 */
+export const REGISTRY_CONTACT_KEY: Record<
+  Exclude<ContactRole, "registrant">,
+  string
+> = {
+  tech: "TECH",
+};
+
 /** EPP `create` の正規化入力。contact 省略時は DEFAULT_REGISTRANT_PROFILE を使う。 */
 export interface CreateInput {
   name: string;
@@ -86,6 +138,13 @@ export interface CreateInput {
   /** 移管パスフレーズ（1〜64 文字）。 */
   authInfo: string;
   contact?: RegistrantProfile;
+  /**
+   * 用意済みの登録者コンタクト ID（レジストリ採番）。
+   * 指定するとアダプタはコンタクトを新規作成せずこの ID を参照する。
+   * ユーザー × レジストリで 1 件を使い回すために `apps/api` 側が渡す
+   * （§9.1 `contacts`。指定が無ければ従来どおり毎回作る）。
+   */
+  registrantContactId?: string;
 }
 
 /** EPP `renew` の正規化入力。curExpDate は取り違え防止のためレジストリ側で必須。 */
@@ -101,6 +160,15 @@ export interface UpdateInput {
   removeNameservers?: string[];
   addStatuses?: ClientStatus[];
   removeStatuses?: ClientStatus[];
+  /**
+   * 変更後の登録者コンタクト ID（レジストリ採番）。EPP の `chg.registrant`。
+   * プロファイルそのものではなく **ID** を渡す: レジストリは登録者を
+   * 既存コンタクトの参照としてしか受け付けないため、コンタクトの用意
+   * （作成 or 更新）は呼び出し側（`contact.service.ts`）の責務。
+   */
+  registrant?: string;
+  /** 変更後のロール別コンタクト ID（EPP の `add.contacts`）。キーは `TECH` など。 */
+  contacts?: Record<string, string>;
 }
 
 /** EPP `delete` の正規化結果。 */

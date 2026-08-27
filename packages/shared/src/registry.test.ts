@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { PRIMARY_OPERATION_COMMANDS } from "./operation-log";
 import {
+  ALLOWED_CONTACT_ADDRESS_VALUES,
+  ALLOWED_CONTACT_NAMES,
+  CONTACT_ROLES,
+  DEFAULT_REGISTRANT_PROFILE,
   POLL_MESSAGE_TYPES,
   pollMessageTypeSchema,
+  REGISTRY_CONTACT_KEY,
+  registrantProfileSchema,
   TRANSFER_STATUSES,
   transferStatusSchema,
 } from "./registry";
@@ -71,5 +77,96 @@ describe("POLL_MESSAGE_TYPES / pollMessageTypeSchema（docs/requirements.md §11
       (PRIMARY_OPERATION_COMMANDS as readonly string[]).includes(type),
     );
     expect(shared).toEqual(["transfer_request"]);
+  });
+});
+
+describe("registrantProfileSchema（#72 / PII 方針）", () => {
+  const VALID = {
+    name: "Taro Test",
+    email: "taro.test@example.com",
+    street: "N/A",
+    city: "N/A",
+    countryCode: "JP",
+  } as const;
+
+  it("許可されたダミー値の組み合わせを受理する", () => {
+    expect(registrantProfileSchema.parse(VALID)).toEqual(VALID);
+    expect(registrantProfileSchema.parse(DEFAULT_REGISTRANT_PROFILE)).toEqual(
+      DEFAULT_REGISTRANT_PROFILE,
+    );
+  });
+
+  it("許可 8 氏名以外は弾く（実在の個人名を投入させない）", () => {
+    for (const name of ALLOWED_CONTACT_NAMES) {
+      expect(
+        registrantProfileSchema.safeParse({ ...VALID, name }).success,
+      ).toBe(true);
+    }
+    for (const name of [
+      "山田 太郎",
+      "Taro  Test",
+      "Registration Private",
+      "",
+    ]) {
+      expect(
+        registrantProfileSchema.safeParse({ ...VALID, name }).success,
+      ).toBe(false);
+    }
+  });
+
+  it("メールは example.com / net / org のみ（配送不能な予約ドメイン）", () => {
+    for (const email of [
+      "a@example.com",
+      "a.b+c@example.net",
+      "x_1@example.org",
+    ]) {
+      expect(
+        registrantProfileSchema.safeParse({ ...VALID, email }).success,
+      ).toBe(true);
+    }
+    for (const email of [
+      "a@gmail.com",
+      "a@example.jp",
+      "a@sub.example.com",
+      "a@example.com.evil.jp",
+      "not-an-email",
+    ]) {
+      expect(
+        registrantProfileSchema.safeParse({ ...VALID, email }).success,
+      ).toBe(false);
+    }
+  });
+
+  it("住所・都市はプレースホルダのみ", () => {
+    for (const value of ALLOWED_CONTACT_ADDRESS_VALUES) {
+      expect(
+        registrantProfileSchema.safeParse({
+          ...VALID,
+          street: value,
+          city: value,
+        }).success,
+      ).toBe(true);
+    }
+    expect(
+      registrantProfileSchema.safeParse({ ...VALID, street: "1-2-3 Chiyoda" })
+        .success,
+    ).toBe(false);
+  });
+
+  it("国コードは JP / US のみ", () => {
+    expect(
+      registrantProfileSchema.safeParse({ ...VALID, countryCode: "US" })
+        .success,
+    ).toBe(true);
+    expect(
+      registrantProfileSchema.safeParse({ ...VALID, countryCode: "FR" })
+        .success,
+    ).toBe(false);
+  });
+
+  it("REGISTRY_CONTACT_KEY は registrant を持たない（EPP の専用フィールドのため）", () => {
+    expect(REGISTRY_CONTACT_KEY.tech).toBe("TECH");
+    expect(Object.keys(REGISTRY_CONTACT_KEY)).toEqual(["tech"]);
+    expect(CONTACT_ROLES).toEqual(["registrant", "tech"]);
   });
 });

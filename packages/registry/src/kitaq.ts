@@ -6,6 +6,9 @@ import {
   type DeleteResult,
   type DomainInfo,
   type HelloResult,
+  type PollMessage,
+  type PollMessageType,
+  type RegistrantProfile,
   type RenewInput,
   type TransferResult,
   type TransferStatus,
@@ -74,6 +77,55 @@ const transferResDataSchema = z.looseObject({
 type TransferResData = z.infer<typeof transferResDataSchema>;
 
 /**
+ * `PollResponse` / `PollMessageDto`。**形は両レジストリで完全に同一**
+ * （両 openapi.json で確認。差はエンドポイントだけ。docs/registry/spec-notes.md §2）。
+ *
+ * `id` は int64 宣言だが、JSON 数値の精度落ちを避けたい呼び出し側が文字列で返す実装も
+ * 想定して number / string の両方を受け、`PollMessage.id` では string に正規化する
+ * （ADR-0002 決定 8）。`payload` は中身が未確定【要確認: §21.2 #13】なので、
+ * 想定外の形で Poll ごと落とさないよう `unknown` のまま受けて後段で緩く読む。
+ */
+export const pollResDataSchema = z.looseObject({
+  count: z.number().int(),
+  message: z
+    .looseObject({
+      id: z.union([z.number(), z.string()]),
+      msgType: z.string(),
+      payload: z.unknown(),
+      qdate: z.string(),
+    })
+    .nullish(),
+});
+type PollResData = z.infer<typeof pollResDataSchema>;
+
+/**
+ * 読めたら string、欠けていても型が想定外でも undefined に倒すフィールド。
+ *
+ * `.catch()` が要る理由: `looseObject` が許すのは**未知キー**だけで、既知キーの型が
+ * 想定外だとオブジェクト全体の parse が失敗する。`payload` の中身は未確定
+ * 【要確認: §21.2 #13】なので、1 フィールドの型ずれ（例: `status` が
+ * `domain:info` と同じ配列で来る、日付が epoch 数値で来る）で `domain` まで
+ * 巻き添えに捨ててしまう。フィールド単位で倒せば読めた分は残る。
+ */
+const loosePayloadString = z.string().nullish().catch(undefined);
+
+/**
+ * `PollMessageDto.payload` から読み取れたら使うフィールド。
+ * `DomainTransferResponse` と同じ形で届く前提を置きつつ、欠けていても
+ * 型が違っても落とさない。読めなかった情報は `raw`（エンベロープ）側に残る。
+ */
+const pollPayloadSchema = z.looseObject({
+  domain: loosePayloadString,
+  name: loosePayloadString,
+  status: loosePayloadString,
+  gainingRegistrar: loosePayloadString,
+  losingRegistrar: loosePayloadString,
+  reDate: loosePayloadString,
+  acDate: loosePayloadString,
+});
+type PollPayload = z.infer<typeof pollPayloadSchema>;
+
+/**
  * hello の resData はレジストリで形が違う:
  * kitaqsign は `{ registryCode, tlds, message }`、kitaqnic は `{ svID, ..., info: { supportedTlds } }`。
  */
@@ -120,22 +172,17 @@ function toDomainInfo(
 }
 
 /**
- * レジストリの生の移管ステータス → 正規化ステータス。
+ * レジストリの生の移管ステータス → 正規化ステータス。対応づかなければ null。
  *
- * 両レジストリの OpenAPI は `status: string` としか書いておらず enum も例も無い
- * 【要確認: §21.2 #13】ため、EPP（RFC 5731）の trStatus 語彙
+ * 両レジストリの OpenAPI は `status` / `msgType` を `string` としか書いておらず enum も
+ * 例も無い【要確認: §21.2 #13】ため、EPP（RFC 5731）の trStatus 語彙
  * （pending / clientApproved / serverApproved / clientRejected / clientCancelled /
  * serverCancelled）を前提に部分一致で寄せる。生値は registryStatus に必ず残す。
  *
- * 未知値は例外にせず `fallback` に倒す（移管の応答そのものを落とさないため）。
- * `fallback` は呼んだ操作から決まる期待値で、request なら pending、
- * approve / reject / cancel ならその操作の結果。成功応答が返っている以上、
- * 「何が起きたか」はレジストリの語彙より呼んだ操作の方が確かなため。
+ * 「対応づかなかった」を呼び出し側が扱えるよう null を返す（倒す先は文脈で違う:
+ * transfer 応答は呼んだ操作、Poll は payload の status → `'unknown'`）。
  */
-function toTransferStatus(
-  raw: string,
-  fallback: TransferStatus,
-): TransferStatus {
+function matchTransferStatus(raw: string): TransferStatus | null {
   const normalized = raw.toLowerCase();
   if (normalized.includes("approve")) {
     return "approved";
@@ -150,7 +197,119 @@ function toTransferStatus(
   if (normalized.includes("pending")) {
     return "pending";
   }
-  return fallback;
+  return null;
+}
+
+/**
+ * 未知値は例外にせず `fallback` に倒す（移管の応答そのものを落とさないため）。
+ * `fallback` は呼んだ操作から決まる期待値で、request なら pending、
+ * approve / reject / cancel ならその操作の結果。成功応答が返っている以上、
+ * 「何が起きたか」はレジストリの語彙より呼んだ操作の方が確かなため。
+ */
+function toTransferStatus(
+  raw: string,
+  fallback: TransferStatus,
+): TransferStatus {
+  return matchTransferStatus(raw) ?? fallback;
+}
+
+/** 正規化した移管ステータス → Poll 通知の種別（どちらも正規化側の語彙）。 */
+const POLL_TYPE_BY_TRANSFER_STATUS: Record<TransferStatus, PollMessageType> = {
+  pending: "transfer_request",
+  approved: "transfer_approved",
+  rejected: "transfer_rejected",
+  cancelled: "transfer_cancelled",
+  // 「移管中でない」は transferQuery の導出専用の値で、通知としては意味を持たない
+  none: "unknown",
+};
+
+/**
+ * `msgType` が移管通知だと言っているか。
+ *
+ * `transfer` のほかに `trn` も見るのは、EPP（RFC 5730 / 5731）の Poll 応答が
+ * `<domain:trnData>` で移管を伝えるため。`msgType` がその要素名に寄った値
+ * （`trnData` 等）で来ても取りこぼさない。
+ */
+function looksLikeTransferMsgType(msgType: string): boolean {
+  const normalized = msgType.toLowerCase();
+  return normalized.includes("transfer") || normalized.includes("trn");
+}
+
+/**
+ * payload が移管通知の形（`DomainTransferResponse` 相当）か。
+ *
+ * `gainingRegistrar` / `losingRegistrar` / `reDate` / `acDate` は移管応答にしか無い
+ * フィールドなので、`msgType` が読めないときの判断材料になる。`status` は
+ * ドメインのライフサイクル通知でも使われうるため、ここでは根拠にしない。
+ */
+function looksLikeTransferPayload(payload: PollPayload | null): boolean {
+  if (payload === null) {
+    return false;
+  }
+  return Boolean(
+    payload.gainingRegistrar ??
+      payload.losingRegistrar ??
+      payload.reDate ??
+      payload.acDate,
+  );
+}
+
+/**
+ * `msgType` + `payload` → 正規化した Poll 種別（ADR-0002 決定 9）。
+ *
+ * `msgType` の値域は未確定【要確認: §21.2 #13】。拾いたいのは移管系の通知だけなので、
+ * まず `msgType` か payload の形で移管通知だと分かるかを見る。分からなければ
+ * `'unknown'`（捨てずに持ち上げる）。
+ *
+ * **`status` を先に見ない**のが要点: `matchTransferStatus` は部分一致なので、
+ * 移管と無関係な通知の `pendingDelete` / `pendingRestore` 等を移管として拾ってしまう。
+ * 種別は消費側（#58）が `transfers` 行を作る根拠になるため、取りこぼし（`'unknown'` は
+ * `domainName` / `registryStatus` / `raw` を残す非破壊の逃げ道）より捏造の方が高くつく。
+ */
+function toPollMessageType(
+  msgType: string,
+  payload: PollPayload | null,
+): PollMessageType {
+  if (
+    !looksLikeTransferMsgType(msgType) &&
+    !looksLikeTransferPayload(payload)
+  ) {
+    return "unknown";
+  }
+  const normalized = msgType.toLowerCase();
+  if (normalized.includes("approv")) {
+    return "transfer_approved";
+  }
+  if (normalized.includes("reject")) {
+    return "transfer_rejected";
+  }
+  if (normalized.includes("cancel")) {
+    return "transfer_cancelled";
+  }
+  if (normalized.includes("req")) {
+    return "transfer_request";
+  }
+  // 動詞が読めない（`"domain:transfer"` 等）ときだけ payload の status に降りる
+  const status = payload?.status ? matchTransferStatus(payload.status) : null;
+  return status === null ? "unknown" : POLL_TYPE_BY_TRANSFER_STATUS[status];
+}
+
+/** 通知の種別 → その通知が表す移管ステータス。移管通知でなければ null。 */
+function transferStatusForPollType(
+  type: PollMessageType,
+): TransferStatus | null {
+  switch (type) {
+    case "transfer_request":
+      return "pending";
+    case "transfer_approved":
+      return "approved";
+    case "transfer_rejected":
+      return "rejected";
+    case "transfer_cancelled":
+      return "cancelled";
+    default:
+      return null;
+  }
 }
 
 /**
@@ -173,6 +332,57 @@ function toTransferResult(
     actingRegistrarId: resData.losingRegistrar ?? undefined,
     requestedAt: resData.reDate ?? undefined,
     actByAt: resData.acDate ?? undefined,
+    raw: envelope,
+  };
+}
+
+/**
+ * `PollResponse` → 正規化 `PollMessage`（ADR-0002 決定 8 / 9）。通知が無ければ null。
+ *
+ * `payload` の中身は未確定【要確認: §21.2 #13】なので、`DomainTransferResponse` と同じ形で
+ * 届く前提で緩く読み、読めなかったフィールドは**そのフィールドだけ**落とす
+ * （`payload` がオブジェクトですらない場合のみ全体を諦める。`raw` にはエンベロープごと残る）。
+ * `registryStatus` は payload の `status`、無ければ生の `msgType` を入れる
+ * （正規化で潰れた情報の復元元になるのはこの 2 つだけのため）。
+ */
+function toPollMessage(
+  resData: PollResData,
+  envelope: EppEnvelope,
+): PollMessage | null {
+  const message = resData.message;
+  if (!message) {
+    return null;
+  }
+  const parsed = pollPayloadSchema.safeParse(message.payload);
+  const payload = parsed.success ? parsed.data : null;
+  const rawStatus = payload?.status ?? undefined;
+  const type = toPollMessageType(message.msgType, payload);
+  const domainName = (payload?.domain ?? payload?.name)?.toLowerCase();
+  const transferStatus = transferStatusForPollType(type);
+  const transfer: TransferResult | undefined =
+    transferStatus === null || domainName === undefined
+      ? undefined
+      : {
+          name: domainName,
+          status: transferStatus,
+          registryStatus: rawStatus ?? message.msgType,
+          ...(payload?.gainingRegistrar
+            ? { requestingRegistrarId: payload.gainingRegistrar }
+            : {}),
+          ...(payload?.losingRegistrar
+            ? { actingRegistrarId: payload.losingRegistrar }
+            : {}),
+          ...(payload?.reDate ? { requestedAt: payload.reDate } : {}),
+          ...(payload?.acDate ? { actByAt: payload.acDate } : {}),
+          raw: envelope,
+        };
+  return {
+    id: String(message.id),
+    count: resData.count,
+    queuedAt: message.qdate,
+    type,
+    ...(domainName === undefined ? {} : { domainName }),
+    ...(transfer === undefined ? {} : { transfer }),
     raw: envelope,
   };
 }
@@ -282,13 +492,14 @@ class KitaqRegistryAdapter implements RegistryAdapter {
     return info;
   }
 
-  async create(input: CreateInput): Promise<DomainInfo> {
-    // registrant は既存コンタクト ID の参照が必須のため、先にダミー PII でコンタクトを作る。
-    // ネームサーバも update と同様にホストオブジェクトを先に用意しておく。
-    if (input.nameservers && input.nameservers.length > 0) {
-      await this.ensureHosts(input.nameservers, input.name);
-    }
-    const contact = input.contact ?? DEFAULT_REGISTRANT_PROFILE;
+  /**
+   * `contact:create`。レジストラ内で一意な ID を採番して返す。
+   * `domainName` は操作ログ（FR-15）の紐付け先で、登録の一部として呼ばれた場合に渡す。
+   */
+  async createContact(
+    profile: RegistrantProfile,
+    domainName?: string,
+  ): Promise<string> {
     const contactId = newContactId();
     await this.client.command({
       method: "POST",
@@ -296,22 +507,63 @@ class KitaqRegistryAdapter implements RegistryAdapter {
       body: {
         id: contactId,
         postalInfo: {
-          name: contact.name,
+          name: profile.name,
           addr: {
-            street: contact.street,
-            city: contact.city,
-            cc: contact.countryCode,
+            street: profile.street,
+            city: profile.city,
+            cc: profile.countryCode,
           },
         },
-        email: contact.email,
+        email: profile.email,
         authInfo: randomUUID(),
       },
       kind: "write",
       command: "contact_create",
-      // コンタクト操作だが、操作ログでは登録対象のドメインに紐づける
-      domainName: input.name,
+      ...(domainName === undefined ? {} : { domainName }),
       resDataSchema: unitResDataSchema,
     });
+    return contactId;
+  }
+
+  /**
+   * `contact:update`（`PUT /contacts/{id}`）。指定した項目だけを差し替える。
+   * `authInfo` は省略すると現在値が維持される（Swagger）ので送らない。
+   */
+  async updateContact(id: string, profile: RegistrantProfile): Promise<void> {
+    await this.client.command({
+      method: "PUT",
+      path: `/contacts/${encodeURIComponent(id)}`,
+      body: {
+        postalInfo: {
+          name: profile.name,
+          addr: {
+            street: profile.street,
+            city: profile.city,
+            cc: profile.countryCode,
+          },
+        },
+        email: profile.email,
+      },
+      kind: "write",
+      command: "contact_update",
+      resDataSchema: unitResDataSchema,
+    });
+  }
+
+  async create(input: CreateInput): Promise<DomainInfo> {
+    // registrant は既存コンタクト ID の参照が必須のため、先にダミー PII でコンタクトを作る。
+    // ネームサーバも update と同様にホストオブジェクトを先に用意しておく。
+    if (input.nameservers && input.nameservers.length > 0) {
+      await this.ensureHosts(input.nameservers, input.name);
+    }
+    // 呼び出し側が用意済みのコンタクト ID を渡していればそれを使い回す
+    // （ユーザー × レジストリで 1 件。`apps/api` の contact.service.ts）
+    const contactId =
+      input.registrantContactId ??
+      (await this.createContact(
+        input.contact ?? DEFAULT_REGISTRANT_PROFILE,
+        input.name,
+      ));
 
     await this.client.command({
       method: "POST",
@@ -370,6 +622,15 @@ class KitaqRegistryAdapter implements RegistryAdapter {
     if (input.removeStatuses && input.removeStatuses.length > 0) {
       rem.statuses = input.removeStatuses;
     }
+    // ロール別コンタクトは差分（add）で指定する（Swagger の DomainChangeSet.contacts）
+    if (input.contacts && Object.keys(input.contacts).length > 0) {
+      add.contacts = input.contacts;
+    }
+    // 登録者は差分ではなく置換（chg）。EPP のドメインは registrant を 1 つしか持たない
+    const chg: Record<string, unknown> = {};
+    if (input.registrant !== undefined) {
+      chg.registrant = input.registrant;
+    }
 
     // レスポンス resData は kitaqsign が DomainResponse、kitaqnic が Unit（空）
     // （Swagger で確認済みの差分）。ドメイン情報が返ればそれを使い、無ければ info で取り直す。
@@ -379,6 +640,7 @@ class KitaqRegistryAdapter implements RegistryAdapter {
       body: {
         ...(Object.keys(add).length > 0 ? { add } : {}),
         ...(Object.keys(rem).length > 0 ? { rem } : {}),
+        ...(Object.keys(chg).length > 0 ? { chg } : {}),
       },
       kind: "write",
       command: "update",
@@ -508,6 +770,60 @@ class KitaqRegistryAdapter implements RegistryAdapter {
       });
     }
     return authInfo;
+  }
+
+  /**
+   * 最古の未 ack 通知を 1 件取得する（無ければ null）。
+   * エンドポイントだけがレジストリで違う（kitaqsign は `GET /messages/poll`、
+   * kitaqnic は `GET /messages`）。応答の形（`PollResponse`）は同一（spec-notes §2）。
+   */
+  async poll(): Promise<PollMessage | null> {
+    const { resData, envelope } = await this.client.command({
+      method: "GET",
+      path: this.id === "kitaqsign" ? "/messages/poll" : "/messages",
+      kind: "read",
+      command: "poll",
+      // 対象ドメインは payload を読むまで分からないので操作ログでは紐づけない（§9.1 は null 可）
+      resDataSchema: pollResDataSchema,
+    });
+    return toPollMessage(resData, envelope);
+  }
+
+  /**
+   * 通知の消し込み。kitaqsign は `POST /messages/{id}/ack`、kitaqnic は
+   * `DELETE /messages/{id}`（spec-notes §2）。応答はどちらも `EppResponseUnit`。
+   * ack しない限り同じメッセージが返り続けるため、Poll 消化の最後に必ず呼ぶ。
+   */
+  async ackMessage(id: string): Promise<void> {
+    const messageId = this.messageIdForPath(id);
+    const isKitaqsign = this.id === "kitaqsign";
+    await this.client.command({
+      method: isKitaqsign ? "POST" : "DELETE",
+      path: isKitaqsign
+        ? `/messages/${messageId}/ack`
+        : `/messages/${messageId}`,
+      kind: "write",
+      command: "ack",
+      resDataSchema: unitResDataSchema,
+    });
+  }
+
+  /**
+   * ack のパスパラメータは int64。`PollMessage.id` は桁落ちを避けるため string に
+   * 正規化した値（ADR-0002 決定 8）なので、URL に埋める前に整数表記かを確かめる。
+   * 整数でない値は正規化の前提が崩れている（= 仕様変更の疑い）ため
+   * REGISTRY_SPEC_MISMATCH で落とし、404 を引きに行かない。
+   */
+  private messageIdForPath(id: string): string {
+    if (!/^\d+$/.test(id)) {
+      throw new RegistryError({
+        code: "REGISTRY_SPEC_MISMATCH",
+        registry: this.id,
+        message: "ack: メッセージ ID が整数ではありません",
+        reason: `id=${id}`,
+      });
+    }
+    return id;
   }
 }
 

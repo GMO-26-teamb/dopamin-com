@@ -6,11 +6,18 @@ import { createTestDb, resetTestDb } from "./db";
 
 /** packages/db/drizzle の全マイグレーション（journal 順）が作るテーブル */
 const EXPECTED_TABLES = [
+  "ai_logs",
   "contacts",
+  // 疑似 DNS ゾーン（§9.1 / FR-13 / #36）
+  "dns_records",
   "domains",
+  // mock レジストリの状態（§11.1 / #46）。REGISTRY_MODE=mock のときだけ使う
+  "mock_registry_state",
   "operation_logs",
   "passkey_credentials",
   "sessions",
+  // サブドメイン設計（§9.1 / FR-13 / #36）
+  "subdomain_plans",
   "transfers",
   "users",
   "webauthn_challenges",

@@ -71,9 +71,9 @@ export async function createTestDb(): Promise<{
 /**
  * 全テーブルを空にする（テスト間の独立性用）。
  * users を TRUNCATE すると、users を参照する FK を持つ sessions / passkey_credentials /
- * domains / contacts / transfers / operation_logs も TRUNCATE ... CASCADE の対象になる
- * （operation_logs の FK は ON DELETE SET NULL だが、TRUNCATE CASCADE は delete rule に
- * 関係なく参照テーブルを空にする）。
+ * domains / contacts / transfers / operation_logs / ai_logs も TRUNCATE ... CASCADE の
+ * 対象になる（operation_logs の FK は ON DELETE SET NULL だが、TRUNCATE CASCADE は
+ * delete rule に関係なく参照テーブルを空にする）。
  * webauthn_challenges は FK を持たないので明示する。
  */
 export async function resetTestDb(db: Db): Promise<void> {

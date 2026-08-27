@@ -272,6 +272,8 @@ describe("domains.get（GET /domains/:name）", () => {
         updatedAt: null,
         expiresAt: "2027-08-01T00:00:00.000Z",
         lastTransferAt: null,
+        // 両レジストリの info に clID が無いため当面は null（§11.1 / ADR-0002 決定 4）
+        sponsoringRegistrarId: null,
         rgpStatuses: [],
       },
       summary: apiSummary({

@@ -155,3 +155,23 @@ pnpm --filter @dopamin/web e2e --ui         # Playwright UI
 `timeout` / `5xx` / `reject` / `spec_mismatch` に切り替えると、API がエラー応答
 （統一エラー形式 §10.3）を返すことを手元で確認できる。ユニットテストでは
 `packages/registry/src/mock.test.ts` が同じ挙動を常時検証している。
+
+### `timeout_after_write`（AC-18-2 の再現。#49）
+
+`timeout` はコマンドの**手前**で落ちるので、レジストリの状態は変わらず `info` も失敗する。
+これでは「更新系がタイムアウトしたが、実はレジストリには届いていた」ケース
+（AC-18-2 / §11.6 (d)）を手元で再現できない。
+
+`MOCK_REGISTRY_FAIL_MODE=timeout_after_write` は**更新系だけ**を
+「状態を変えてから `REGISTRY_TIMEOUT`」にし、参照系（check / info / transferQuery /
+poll / hello）は通す。これで `reconcileOnTimeout`（`apps/api/src/lib/reconcile.ts`）が
+参照系で結果を照合し、成功として確定する経路を実際に踏める。
+
+例:
+
+- `POST /domains`（**2 件目以降**）は 201。create はタイムアウトしたが `info` で存在を確認できる
+- `POST /domains`（**1 件目**）は 504。先に走る `contact:create`（#72）は作成した ID を
+  引く手段が無く照合できないので、`reconcileOnTimeout` の対象外。2 件目以降はコンタクトを
+  使い回すのでレジストリを呼ばず、create の照合まで到達する
+- `POST /domains/:name/auth-code` は 504 のまま。`info` に authInfo が含まれず照合できない
+  （`docs/specs/registry-api.md` §3-15）

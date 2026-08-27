@@ -53,17 +53,25 @@ describe("originCheck (§10.2)", () => {
 });
 
 describe("zod validation → VALIDATION_ERROR (§10.3)", () => {
-  it("rejects displayName longer than 32 chars with details.issues", async () => {
+  it("rejects displayName longer than 32 chars with an issue array in details", async () => {
     const res = await app.request(
       "/api/v1/auth/passkey/register/options",
       json({ displayName: "あ".repeat(33) }),
     );
     expect(res.status).toBe(400);
     const body = (await res.json()) as {
-      error: { code: string; details?: { issues?: unknown } };
+      error: { code: string; details?: unknown };
     };
     expect(body.error.code).toBe("VALIDATION_ERROR");
-    expect(Array.isArray(body.error.details?.issues)).toBe(true);
+    // §10.3: VALIDATION_ERROR の details は issue の配列（#141 で全ルート統一）
+    expect(body.error.details).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: expect.any(String),
+          message: expect.any(String),
+        }),
+      ]),
+    );
   });
 
   it("rejects a verify request without a UUID challengeId", async () => {

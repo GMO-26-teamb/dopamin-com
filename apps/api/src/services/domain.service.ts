@@ -1,15 +1,17 @@
 import { RegistryError } from "@dopamin/registry";
 import type {
-  ApiErrorCode,
   DomainInfo,
   DomainSummary,
   DomainSyncResponse,
+  ErrorCode,
 } from "@dopamin/shared";
-import { splitDomainName } from "@dopamin/shared";
+import { isOperationAllowed, splitDomainName } from "@dopamin/shared";
 import { ApiException } from "../lib/errors";
 import { adapterForDomain } from "../lib/registries";
 import { registryErrorMessage } from "../lib/registry-message";
+import { withReadRetry } from "../lib/retry";
 import { type DomainRecord, getDomainStore } from "./domain-store";
+import { getTransferStore, type TransferRecord } from "./transfer-store";
 
 /**
  * 保有ドメインの write-through（docs/requirements.md §6.5）。
@@ -36,14 +38,29 @@ export async function removeDomain(name: string): Promise<void> {
   await getDomainStore().remove(name);
 }
 
+export interface RequireOwnedDomainOptions {
+  /**
+   * 更新系（renew / update / delete / restore / authCode / 移管の承認・拒否）か。
+   * true のときだけ `ownership = 'transferred_out'` を 409 で弾く（AC-12-5）。
+   * 参照系（詳細表示）は移管 OUT 済みの行も読めないと履歴が見えなくなるので false のまま。
+   */
+  forWrite?: boolean;
+}
+
 /**
- * 所有権チェック（NFR-04 / AC-02-1）。すべてのドメイン操作の入り口で呼ぶ。
+ * 所有権チェック（NFR-04 / AC-02-1 / AC-12-5）。すべてのドメイン操作の入り口で呼ぶ。
  * - 行が無い: 404（このアプリで保有していないドメイン）
  * - 他ユーザーの行: 403（§10.3 の FORBIDDEN = 所有権なし）
+ * - `transferred_out` の行への更新系: 409（§11.3。可否の判定は `isOperationAllowed` が SSOT）
+ *
+ * 409 はレジストリに問い合わせる前に返す。移管 OUT 済みのドメインは自レジストラが
+ * スポンサーではなく、`info` の応答が未確定（【要確認 §21.2 #12】）なので、
+ * 呼びに行っても結果を信頼できないため。
  */
 export async function requireOwnedDomain(
   userId: string,
   name: string,
+  options?: RequireOwnedDomainOptions,
 ): Promise<DomainRecord> {
   const record = await getDomainStore().find(name);
   if (!record) {
@@ -58,18 +75,97 @@ export async function requireOwnedDomain(
       "このドメインを操作する権限がありません。",
     );
   }
+  if (options?.forWrite) {
+    // EPP ステータスは見ない（レジストリ未問い合わせ）。ownership だけで決まる判定を
+    // ここに閉じ込め、ステータス由来の可否は各ルートが info 取得後に改めて判定する。
+    const check = isOperationAllowed("update", [], {
+      ownership: record.ownership,
+    });
+    if (!check.allowed) {
+      throw new ApiException(
+        "OPERATION_NOT_ALLOWED",
+        "このドメインは他社へ移管済みのため操作できません。",
+        { reason: "transferred_out", statuses: check.blockedBy },
+      );
+    }
+  }
   return record;
+}
+
+/**
+ * 所有権チェックに加えて `domains.id` を取り出す。
+ * FR-13 のように `domain_id` を FK に使う機能（`subdomain_plans` / `dns_records`）用。
+ *
+ * `DomainRecord.id` が null になるのは「まだ書き込んでいないレコード」だけで、
+ * `requireOwnedDomain` は DB から読んだ行しか返さないため実際には起きない。
+ * それでも黙って進むと FK に空を書きに行くので、ここで明示的に落とす。
+ */
+export async function requireOwnedDomainId(
+  userId: string,
+  name: string,
+  options?: RequireOwnedDomainOptions,
+): Promise<{ record: DomainRecord; id: string }> {
+  const record = await requireOwnedDomain(userId, name, options);
+  if (record.id === null) {
+    throw new ApiException(
+      "INTERNAL",
+      "ドメインの識別子を取得できませんでした。",
+    );
+  }
+  return { record, id: record.id };
+}
+
+/**
+ * 移管系（FR-12）の所有権チェック（NFR-04）。
+ *
+ * 移管 IN の対象ドメインは承認を検知するまで `domains` 行を持たない（§6.5）ので、
+ * 行が無いことは正常として通す（ここで 404 にすると移管 IN そのものができない）。
+ * 止めるのは他ユーザーが保有中の行への操作だけ。他ユーザーの `transferred_out` 行は
+ * 既に自レジストラのスポンサー下に無く、誰が移管 IN しても構わないため通す
+ * （§2.2: 同一レジストラ内の所有者変更は EPP 移管にならない）。
+ */
+export async function requireNotOwnedByOtherUser(
+  userId: string,
+  name: string,
+): Promise<DomainRecord | null> {
+  const record = await getDomainStore().find(name);
+  if (record && record.ownership === "owned" && record.userId !== userId) {
+    throw new ApiException(
+      "FORBIDDEN",
+      "このドメインを操作する権限がありません。",
+    );
+  }
+  return record;
+}
+
+/**
+ * 進行中の移管 → 一覧・詳細の移管バッジ（§10.4 `transfer`）。
+ * `actByAt` はサーバ自動承認の期限で、レジストリが `acDate` を返さない場合は
+ * 申請 + 20 分が入っている（§9.2 / `recordInboundTransferRequest`）。
+ */
+function toTransferBadge(
+  transfer: TransferRecord | undefined,
+): DomainSummary["transfer"] {
+  if (transfer === undefined || transfer.actByAt === null) {
+    return null;
+  }
+  return {
+    direction: transfer.direction,
+    actByAt: transfer.actByAt.toISOString(),
+  };
 }
 
 /**
  * DB の行を一覧・詳細用の要約に写像する（FR-02）。
  *
  * `rgpUntil` は両レジストリの `info` が猶予期限を返さないため常に null
- * （§11.4 の目安日数からの算出は UI 側の責務）。`transfer` は移管一覧（FR-12）が入るまで null。
+ * （§11.4 の目安日数からの算出は UI 側の責務）。
+ * `transfer` は進行中の移管があれば入る（FR-12 / AC-07-3）。
  */
 export function toDomainSummary(
   record: DomainRecord,
   stale: boolean,
+  transfer?: TransferRecord,
 ): DomainSummary {
   const { sld, tld } = splitDomainName(record.name);
   const { info } = record;
@@ -86,16 +182,38 @@ export function toDomainSummary(
     rgpUntil: null,
     syncedAt: record.syncedAt.toISOString(),
     stale,
-    transfer: null,
+    transfer: toTransferBadge(transfer),
   };
+}
+
+/**
+ * ユーザーの進行中の移管をドメイン名で引ける形にする。
+ * 同じドメインに pending が複数ある状態は本来起きないので、新しい方を採る。
+ */
+export async function pendingTransfersByDomain(
+  userId: string,
+): Promise<Map<string, TransferRecord>> {
+  const pending = await getTransferStore().listPending(userId);
+  const byName = new Map<string, TransferRecord>();
+  for (const transfer of pending) {
+    if (!byName.has(transfer.domainName)) {
+      byName.set(transfer.domainName, transfer);
+    }
+  }
+  return byName;
 }
 
 /** FR-02: 保有ドメイン一覧（DB キャッシュを読むだけ。レジストリには問い合わせない）。 */
 export async function listDomainSummaries(
   userId: string,
 ): Promise<DomainSummary[]> {
-  const records = await getDomainStore().list(userId);
-  return records.map((record) => toDomainSummary(record, false));
+  const [records, transfers] = await Promise.all([
+    getDomainStore().list(userId),
+    pendingTransfersByDomain(userId),
+  ]);
+  return records.map((record) =>
+    toDomainSummary(record, false, transfers.get(record.name)),
+  );
 }
 
 /**
@@ -110,7 +228,7 @@ function toSyncFailure(
   if (err instanceof RegistryError) {
     return {
       name,
-      code: err.code as ApiErrorCode,
+      code: err.code as ErrorCode,
       message: registryErrorMessage(err),
     };
   }
@@ -125,32 +243,62 @@ function toSyncFailure(
  *
  * 1 件の失敗で全体を落とさず、失敗した行はキャッシュを `stale: true` で返す（AC-03-2 と同じ方針）。
  *
+ * 対象は `ownership = 'owned'` の行だけ（`DomainStore.list` が絞る）。移管 OUT 済みの行は
+ * 自レジストラがスポンサーではなく `info` の応答を信頼できないので、再同期しない。
+ *
+ * 移管の検知（`pendingTransfer` / スポンサー変更）は `onSynced` フックに切り出してある。
+ * Poll 消化（#58）と同じサービスから差し込むためで、こうしないと
+ * domain.service ↔ transfer.service が循環参照になる。
+ *
  * 【未実装・意図的な制約】
- * - Poll の消化（§10.1「同時に Poll も消化する」）は、アダプタに `poll` / `ackMessage` が
- *   入る #44 と Poll サービス #58 で足す。
- * - AC-02-4（移管 OUT 完了後に保有一覧から消える）は満たしていない。`ownership` 列（#33）は
- *   入ったが、それを `transferred_out` に遷移させる移管の永続化（#56 / #57）と Poll 消化（#58）が
- *   無いため、この関数は保有／非保有を判定できない。
- *   `info` が NOT_FOUND を返しても **行は消さない**（失敗一覧にコードを載せるだけ）。
+ * - `info` が NOT_FOUND を返しても **行は消さない**（失敗一覧にコードを載せるだけ）。
  *   非スポンサーからの `info` の応答が未確定（要確認 §21.2 #12）な段階で行を消すと、
  *   一時的な誤判定でユーザーのドメインが一覧から消える方が実害が大きいため。
  */
-export async function syncDomains(userId: string): Promise<DomainSyncResponse> {
+export interface SyncDomainsOptions {
+  /**
+   * `info` が取れた行ごとに呼ばれるフック（移管の検知を差し込む口）。
+   * 例外は同期本体に伝播させない: 付随処理の失敗で一覧が壊れる方が実害が大きいので、
+   * 呼び出し側が握りつぶす前提で使う。
+   */
+  onSynced?: (record: DomainRecord, info: DomainInfo) => Promise<void>;
+}
+
+export async function syncDomains(
+  userId: string,
+  options: SyncDomainsOptions = {},
+): Promise<DomainSyncResponse> {
   const records = await getDomainStore().list(userId);
   const failures: DomainSyncResponse["failures"] = [];
 
-  const domains = await Promise.all(
-    records.map(async (record): Promise<DomainSummary> => {
+  await Promise.all(
+    records.map(async (record) => {
       try {
-        const info = await adapterForDomain(record.name).info(record.name);
+        const info = await withReadRetry(() =>
+          adapterForDomain(record.name).info(record.name),
+        );
         const updated = await upsertDomainFromInfo(userId, info);
-        return toDomainSummary(updated, false);
+        await options.onSynced?.(updated, info);
       } catch (err) {
         failures.push(toSyncFailure(record.name, err));
-        return toDomainSummary(record, true);
       }
     }),
   );
 
+  // 同期と onSynced（移管の検知）が終わってから読み直す。
+  // 移管 OUT に倒れた行はここで一覧から外れる（AC-02-4）。
+  // 失敗した行は DB キャッシュのまま残るので stale: true で返す
+  const [stillOwned, transfers] = await Promise.all([
+    getDomainStore().list(userId),
+    pendingTransfersByDomain(userId),
+  ]);
+  const failedNames = new Set(failures.map((f) => f.name));
+  const domains = stillOwned.map((record) =>
+    toDomainSummary(
+      record,
+      failedNames.has(record.name),
+      transfers.get(record.name),
+    ),
+  );
   return { domains, failures };
 }

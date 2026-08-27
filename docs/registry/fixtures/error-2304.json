@@ -1,0 +1,9 @@
+{
+  "result": {
+    "code": 2304,
+    "message": "Object status prohibits operation",
+    "reason": "clientTransferProhibited",
+    "extValue": null
+  },
+  "trID": { "clTRID": "dp-fixture-2304", "svTRID": "KQSGN-20260825-002304" }
+}

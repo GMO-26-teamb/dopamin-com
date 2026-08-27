@@ -1,0 +1,9 @@
+{
+  "result": {
+    "code": 2202,
+    "message": "Invalid authorization information",
+    "reason": "authInfo mismatch",
+    "extValue": null
+  },
+  "trID": { "clTRID": "dp-fixture-2202", "svTRID": "KQSGN-20260825-002202" }
+}

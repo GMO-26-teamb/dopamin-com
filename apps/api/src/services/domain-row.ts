@@ -15,6 +15,11 @@ import { z } from "zod";
  * 表示に必要な値は最後の `info` の正規化結果（{@link DomainRecord.info}）から取り出す。
  */
 export interface DomainRecord {
+  /**
+   * `domains.id`。DB が採番するので、まだ書き込んでいないレコードでは null。
+   * 移管の取り込み（FR-12）で `transfers.domain_id` に紐付けるために必要（§9.1）。
+   */
+  id: string | null;
   userId: string;
   name: string;
   registry: DomainInfo["registry"];
@@ -28,6 +33,9 @@ export interface DomainRecord {
   /** 最後にレジストリと同期できた時刻。 */
   syncedAt: Date;
 }
+
+/** 書き込み時の入力。`id` は DB が採番するので渡さない。 */
+export type DomainUpsert = Omit<DomainRecord, "id">;
 
 export type DomainRow = typeof schema.domains.$inferSelect;
 export type DomainValues = typeof schema.domains.$inferInsert;
@@ -79,6 +87,7 @@ export function toDomainRecord(row: DomainRow): DomainRecord {
   const parsed = storedInfoSchema.safeParse(row.rawInfo);
   const info = parsed.success ? parsed.data : fallbackInfo(row);
   return {
+    id: row.id,
     userId: row.userId,
     name: row.name,
     registry: info.registry,
@@ -90,7 +99,7 @@ export function toDomainRecord(row: DomainRow): DomainRecord {
 }
 
 /** アプリ内表現 → DB の行（insert / update の値）。 */
-export function toDomainValues(record: DomainRecord): DomainValues {
+export function toDomainValues(record: DomainUpsert): DomainValues {
   const { sld, tld } = splitDomainName(record.name);
   const { info } = record;
   // RGP の主ステータス（§9.1 rgp_status）。復旧可否の判定は rgpStatuses 全体で行うため、

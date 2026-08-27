@@ -3,13 +3,12 @@ import {
   passkeyVerifyRequestSchema,
   registerOptionsRequestSchema,
 } from "@dopamin/shared";
-import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
-import type { ZodType } from "zod";
 import { clearSessionCookie, setSessionCookie } from "../lib/cookies";
 import { getDb } from "../lib/db";
 import { getApiEnv } from "../lib/env";
 import { ApiException } from "../lib/errors";
+import { jsonValidator } from "../lib/validator";
 import { requireSession } from "../middleware/session";
 import {
   createAddPasskeyOptions,
@@ -25,19 +24,14 @@ import {
 import { deleteSession } from "../services/session";
 import { getAiSettingsForUser } from "../services/settings";
 
-/** zod 検証失敗を統一エラー形式（VALIDATION_ERROR）にする zValidator ラッパー */
-const json = <T extends ZodType>(schema: T) =>
-  zValidator("json", schema, (result) => {
-    if (!result.success) {
-      throw new ApiException(
-        "VALIDATION_ERROR",
-        "入力内容が正しくありません。",
-        {
-          issues: result.error.issues,
-        },
-      );
-    }
-  });
+/**
+ * zod 検証失敗を統一エラー形式（VALIDATION_ERROR）にする（#141 で `jsonValidator` に統一）。
+ * 以前はこのファイルだけ `details: { issues: <zod の生 issue> }` の形で、
+ * 他のルート（`lib/validator.ts`）は `details: [{ path, message }]` だった。
+ * §10.3 は「issue の配列」を正としているうえ、zod の生 issue は
+ * 入力値を含むことがあるのでクライアントには出さない（NFR-03）。
+ */
+const json = jsonValidator;
 
 export const auth = new Hono()
   // ---- サインアップ ----

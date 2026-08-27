@@ -6,9 +6,10 @@ import {
   type RegistryErrorCode,
 } from "@dopamin/registry";
 import {
-  type ApiErrorBody,
-  apiErrorBodySchema,
+  type ApiError,
+  apiErrorSchema,
   type DomainUniqueness,
+  domainDetailResponseSchema,
   domainListResponseSchema,
   domainSyncResponseSchema,
   domainUniquenessSchema,
@@ -24,11 +25,20 @@ import {
 } from "vitest";
 import app from "../../src/index";
 import { setRegistrySetForTesting } from "../../src/lib/registries";
+import { setRetrySleepForTesting } from "../../src/lib/retry";
+import {
+  createInMemoryContactStore,
+  setContactStoreForTesting,
+} from "../../src/services/contact.service";
 import {
   createInMemoryDomainStore,
   type DomainStore,
   setDomainStoreForTesting,
 } from "../../src/services/domain-store";
+import {
+  createInMemoryTransferStore,
+  setTransferStoreForTesting,
+} from "../../src/services/transfer-store";
 import {
   clearTestSession,
   installTestSession,
@@ -82,11 +92,18 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  // 参照系の自動再試行（#60）のバックオフでテストが待たされないようにする
+  setRetrySleepForTesting(() => Promise.resolve());
+
   kitaqsign = new MockRegistryAdapter({ id: "kitaqsign" });
   kitaqnic = new MockRegistryAdapter({ id: "kitaqnic" });
   // DB を立てずに所有権チェック・write-through を検証する（#40 のテスト DB が入るまでの seam）
   store = createInMemoryDomainStore();
   setDomainStoreForTesting(store);
+  // 一覧・詳細は移管バッジ（§10.4 `transfer`）のために transfers も読む（#53）
+  setTransferStoreForTesting(createInMemoryTransferStore());
+  // 登録・情報修正はユーザー × レジストリのコンタクトを引く（#72）
+  setContactStoreForTesting(createInMemoryContactStore());
   installTestSession();
   setRegistrySetForTesting(
     createRegistrySet({
@@ -99,8 +116,12 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  setRetrySleepForTesting(null);
+
   setRegistrySetForTesting(null);
   setDomainStoreForTesting(null);
+  setTransferStoreForTesting(null);
+  setContactStoreForTesting(null);
   clearTestSession();
   vi.restoreAllMocks();
 });
@@ -120,12 +141,13 @@ async function api(path: string, init?: RequestInit): Promise<Response> {
 async function seedDomain(
   name: string,
   userId: string = TEST_USER.id,
+  ownership: "owned" | "transferred_out" = "owned",
 ): Promise<void> {
   await store.upsert({
     userId,
     name,
     registry: "kitaqsign",
-    ownership: "owned",
+    ownership,
     info: {
       name,
       registry: "kitaqsign",
@@ -162,8 +184,8 @@ async function createDomain(name: string, period = 1): Promise<DomainPayload> {
   return (await res.json()) as DomainPayload;
 }
 
-async function parseError(res: Response): Promise<ApiErrorBody> {
-  return apiErrorBodySchema.parse(await res.json());
+async function parseError(res: Response): Promise<ApiError> {
+  return apiErrorSchema.parse(await res.json());
 }
 
 describe("POST /api/v1/domains/check（FR-03）", () => {
@@ -434,6 +456,124 @@ describe("POST /api/v1/domains/:name/renew（FR-08 更新）", () => {
     const res = await sendJson("/domains/noperiod.com/renew", {});
     expect(res.status).toBe(400);
     expect((await parseError(res)).error.code).toBe("VALIDATION_ERROR");
+  });
+});
+
+describe("MOCK_REGISTRY_FAIL_MODE=timeout_after_write（#49 / AC-18-2）", () => {
+  it("create がタイムアウトしても info で照合して 201 を返す", async () => {
+    // 先に 1 件作ってコンタクトを用意しておく（#72 の再利用）。
+    // contact:create 自体は照合できない更新系なので、そこで落ちると
+    // create の照合まで到達しない
+    await createDomain("first.com");
+    kitaqsign.setFailMode("timeout_after_write");
+
+    const res = await sendJson("/domains", { name: "reconciled.com" });
+    // 更新系はタイムアウトしたが、参照系（info）で存在を確認できるので成功に確定する
+    expect(res.status).toBe(201);
+    const { domain } = (await res.json()) as DomainPayload;
+    expect(domain?.name).toBe("reconciled.com");
+
+    // 保有一覧にも入る（write-through が走っている）
+    kitaqsign.setFailMode("none");
+    const list = await api("/domains");
+    const body = domainListResponseSchema.parse(await list.json());
+    expect(body.domains.map((d) => d.name)).toEqual([
+      "first.com",
+      "reconciled.com",
+    ]);
+  });
+
+  it("コンタクト未作成の初回 create は contact:create の 504 で止まる", async () => {
+    // contact:create は `info` で照合できない（作成した ID を引く手段が無い）ため
+    // reconcileOnTimeout の対象外。偽の成功にせず 504 を返す
+    kitaqsign.setFailMode("timeout_after_write");
+    const res = await sendJson("/domains", { name: "nocontact.com" });
+    expect(res.status).toBe(504);
+    expect((await parseError(res)).error.code).toBe("REGISTRY_TIMEOUT");
+  });
+
+  it("照合できない更新系（auth-code）は 504 のまま", async () => {
+    await createDomain("noconfirm.com");
+    kitaqsign.setFailMode("timeout_after_write");
+
+    // rotate-auth-info は info で照合できない（authInfo が resData に含まれない）
+    const res = await api("/domains/noconfirm.com/auth-code", {
+      method: "POST",
+    });
+    expect(res.status).toBe(504);
+    expect((await parseError(res)).error.code).toBe("REGISTRY_TIMEOUT");
+  });
+});
+
+describe("FR-06 / FR-09: コンタクトの再利用（#72）", () => {
+  const PROFILE = {
+    name: "Hanako Test",
+    email: "hanako.test@example.net",
+    street: "Redacted for Privacy",
+    city: "Redacted for Privacy",
+    countryCode: "US",
+  } as const;
+
+  it("同じユーザーの 2 件目の登録は同じ登録者コンタクトを参照する", async () => {
+    await createDomain("one.com");
+    await createDomain("two.com");
+
+    const first = (await kitaqsign.info("one.com")).registrant;
+    const second = (await kitaqsign.info("two.com")).registrant;
+    expect(first).toBeTruthy();
+    // 使い捨てのコンタクトを毎回作らない（§9.1 contacts の再利用）
+    expect(second).toBe(first);
+  });
+
+  it("PATCH で登録者プロファイルを変えても同じ ID のまま中身が差し替わる", async () => {
+    await createDomain("edit.com");
+    const contactId = (await kitaqsign.info("edit.com")).registrant;
+
+    const res = await sendJson(
+      "/domains/edit.com",
+      { contacts: { registrant: PROFILE } },
+      "PATCH",
+    );
+    expect(res.status).toBe(200);
+
+    // ドメインが参照する ID は変わらず、レジストリ側のコンタクトの内容だけが変わる
+    expect((await kitaqsign.info("edit.com")).registrant).toBe(contactId);
+    expect(kitaqsign.peekContact(contactId)).toEqual(PROFILE);
+  });
+
+  it("tech コンタクトは登録者とは別の ID になる", async () => {
+    await createDomain("tech.com");
+    const res = await sendJson(
+      "/domains/tech.com",
+      { contacts: { tech: PROFILE } },
+      "PATCH",
+    );
+    expect(res.status).toBe(200);
+
+    const info = await kitaqsign.info("tech.com");
+    expect(info.contacts.TECH).toBeTruthy();
+    expect(info.contacts.TECH).not.toBe(info.registrant);
+    expect(kitaqsign.peekContact(String(info.contacts.TECH))).toEqual(PROFILE);
+  });
+
+  it("許可されていないダミー値は 400 VALIDATION_ERROR（レジストリに送る前に弾く）", async () => {
+    await createDomain("pii.com");
+    for (const contacts of [
+      { registrant: { ...PROFILE, name: "山田 太郎" } },
+      { registrant: { ...PROFILE, email: "real.person@gmail.com" } },
+      { registrant: { ...PROFILE, street: "1-2-3 Chiyoda" } },
+      { registrant: { ...PROFILE, countryCode: "FR" } },
+    ]) {
+      const res = await sendJson("/domains/pii.com", { contacts }, "PATCH");
+      expect(res.status).toBe(400);
+      expect((await parseError(res)).error.code).toBe("VALIDATION_ERROR");
+    }
+  });
+
+  it("contacts が空オブジェクトなら 400（変更内容が無い）", async () => {
+    await createDomain("empty.com");
+    const res = await sendJson("/domains/empty.com", { contacts: {} }, "PATCH");
+    expect(res.status).toBe(400);
   });
 });
 
@@ -761,6 +901,8 @@ describe("エラー変換（§10.3: RegistryError → 統一エラー形式）",
       check: async () => fail(),
       info: async () => fail(),
       create: async () => fail(),
+      createContact: async () => fail(),
+      updateContact: async () => fail(),
       renew: async () => fail(),
       update: async () => fail(),
       delete: async () => fail(),
@@ -771,6 +913,8 @@ describe("エラー変換（§10.3: RegistryError → 統一エラー形式）",
       transferReject: async () => fail(),
       transferCancel: async () => fail(),
       authCode: async () => fail(),
+      poll: async () => fail(),
+      ackMessage: async () => fail(),
     };
     setRegistrySetForTesting(
       createRegistrySet({ mode: "real", adapters: [stub] }),
@@ -809,7 +953,7 @@ describe("エラー変換（§10.3: RegistryError → 統一エラー形式）",
       const res = await sendJson("/domains/foo.com/renew", { period: 1 });
       expect(res.status).toBe(status);
       const text = await res.text();
-      const body = apiErrorBodySchema.parse(JSON.parse(text));
+      const body = apiErrorSchema.parse(JSON.parse(text));
       expect(body.error).toMatchObject({
         code,
         retryable,
@@ -829,7 +973,7 @@ describe("エラー変換（§10.3: RegistryError → 統一エラー形式）",
     const res = await sendJson("/domains/foo.com/renew", { period: 1 });
     expect(res.status).toBe(500);
     const text = await res.text();
-    const body = apiErrorBodySchema.parse(JSON.parse(text));
+    const body = apiErrorSchema.parse(JSON.parse(text));
     expect(body.error.code).toBe("INTERNAL");
     expect(body.error.requestId).toBeTruthy();
     expect(text).not.toContain("boom-secret-detail");
@@ -870,6 +1014,56 @@ describe("AC-01-3 / NFR-04: 認証と所有権", () => {
     const write = await api("/domains/someone-else.com", { method: "DELETE" });
     expect(write.status).toBe(403);
   });
+
+  /** 更新系は requireOwnedDomain(forWrite) で入口を揃える（NFR-04）。 */
+  const writeRoutes: Array<[string, (name: string) => Promise<Response>]> = [
+    [
+      "POST /:name/renew",
+      (n) => sendJson(`/domains/${n}/renew`, { period: 1 }),
+    ],
+    [
+      "PATCH /:name",
+      (n) => sendJson(`/domains/${n}`, { nameservers: [] }, "PATCH"),
+    ],
+    ["DELETE /:name", (n) => api(`/domains/${n}`, { method: "DELETE" })],
+    [
+      "POST /:name/restore",
+      (n) => api(`/domains/${n}/restore`, { method: "POST" }),
+    ],
+    [
+      "POST /:name/auth-code",
+      (n) => api(`/domains/${n}/auth-code`, { method: "POST" }),
+    ],
+  ];
+
+  it.each(writeRoutes)(
+    "%s: 他ユーザーのドメインは 403 FORBIDDEN（レジストリには問い合わせない）",
+    async (_label, call) => {
+      await seedDomain("theirs-write.com", OTHER_USER.id);
+      const info = vi.spyOn(kitaqsign, "info");
+
+      const res = await call("theirs-write.com");
+      expect(res.status).toBe(403);
+      expect((await parseError(res)).error.code).toBe("FORBIDDEN");
+      expect(info).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(writeRoutes)(
+    "AC-12-5: %s: transferred_out のドメインは 409 OPERATION_NOT_ALLOWED",
+    async (_label, call) => {
+      await seedDomain("moved-out.com", TEST_USER.id, "transferred_out");
+      const info = vi.spyOn(kitaqsign, "info");
+
+      const res = await call("moved-out.com");
+      expect(res.status).toBe(409);
+      const body = await parseError(res);
+      expect(body.error.code).toBe("OPERATION_NOT_ALLOWED");
+      expect(body.error.details).toMatchObject({ reason: "transferred_out" });
+      // 移管 OUT 済みは自レジストラがスポンサーでないので info を呼ばずに弾く
+      expect(info).not.toHaveBeenCalled();
+    },
+  );
 
   it("保有していないドメインは 404 NOT_FOUND（レジストリには問い合わせない）", async () => {
     const res = await api("/domains/unknown.com");
@@ -968,14 +1162,24 @@ describe("AC-07-2: info 失敗時のキャッシュフォールバック", () =>
 
     const res = await api("/domains/cache.xyz");
     expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      domain: { name: string };
-      stale: boolean;
-      syncedAt: string;
-    };
+    // 応答の形は packages/shared の契約に合わせる（#53）
+    const body = domainDetailResponseSchema.parse(await res.json());
     expect(body.domain.name).toBe("cache.xyz");
     expect(body.stale).toBe(true);
     expect(body.syncedAt).toBeTruthy();
+    // AC-07-2: 「なぜ最新でないか」を画面が出せるように理由を添える
+    expect(body.error).toEqual({
+      code: "REGISTRY_UNAVAILABLE",
+      message: expect.stringContaining("接続できません"),
+    });
+  });
+
+  it("繋がったときは error を付けない", async () => {
+    await createDomain("fresh.xyz");
+    const res = await api("/domains/fresh.xyz");
+    const body = domainDetailResponseSchema.parse(await res.json());
+    expect(body.stale).toBe(false);
+    expect(body.error).toBeUndefined();
   });
 
   it("NOT_FOUND はキャッシュに退避せずそのまま返す", async () => {
@@ -1132,6 +1336,10 @@ describe("廃止後に info が引けないときの扱い", () => {
       transferReject: (name) => base.transferReject(name),
       transferCancel: (name) => base.transferCancel(name),
       authCode: (name) => base.authCode(name),
+      createContact: (profile) => base.createContact(profile),
+      updateContact: (id, profile) => base.updateContact(id, profile),
+      poll: () => base.poll(),
+      ackMessage: (id) => base.ackMessage(id),
     };
     setRegistrySetForTesting(
       createRegistrySet({ mode: "real", adapters: [adapter] }),
@@ -1278,6 +1486,10 @@ describe("sync で info が NOT_FOUND のとき（AC-02-4 は #33 / #56 待ち�
       transferReject: (name) => base.transferReject(name),
       transferCancel: (name) => base.transferCancel(name),
       authCode: (name) => base.authCode(name),
+      createContact: (profile) => base.createContact(profile),
+      updateContact: (id, profile) => base.updateContact(id, profile),
+      poll: () => base.poll(),
+      ackMessage: (id) => base.ackMessage(id),
     };
     setRegistrySetForTesting(
       createRegistrySet({ mode: "real", adapters: [adapter] }),

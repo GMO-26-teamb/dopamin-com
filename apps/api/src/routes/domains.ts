@@ -1,85 +1,44 @@
 import { randomBytes } from "node:crypto";
-import { type RegistryAdapter, RegistryError } from "@dopamin/registry";
+import { RegistryError } from "@dopamin/registry";
 import {
-  type ApiErrorCode,
-  type DomainAvailability,
+  type DomainDetailResponse,
   type DomainInfo,
-  type DomainUniqueness,
   domainCheckRequestSchema,
   domainCreateRequestSchema,
-  domainNameSchema,
   domainRenewRequestSchema,
   domainUpdateRequestSchema,
-  getDefaultPreparedCorpus,
   isOperationAllowed,
   isRestorable,
-  type RegistryId,
-  scoreDistinctiveness,
-  splitDomainName,
-  toDomainUniqueness,
+  REGISTRY_CONTACT_KEY,
   type UpdateInput,
 } from "@dopamin/shared";
 import { Hono } from "hono";
 import { ApiException } from "../lib/errors";
+import { parseDomainNameParam } from "../lib/params";
 import { reconcileOnTimeout } from "../lib/reconcile";
-import { adapterForDomain, getRegistrySet } from "../lib/registries";
+import { adapterForDomain } from "../lib/registries";
+import { registryErrorMessage } from "../lib/registry-message";
+import { withReadRetry } from "../lib/retry";
 import { jsonValidator } from "../lib/validator";
 import { requireSession } from "../middleware/session";
+import { checkDomains } from "../services/check.service";
+import { ensureRegistryContact } from "../services/contact.service";
 import {
   listDomainSummaries,
+  pendingTransfersByDomain,
   removeDomain,
   requireOwnedDomain,
-  syncDomains,
   toDomainSummary,
   upsertDomainFromInfo,
 } from "../services/domain.service";
 import type { DomainRecord } from "../services/domain-store";
+import { syncDomainsAndConsumePoll } from "../services/poll.service";
+import type { TransferRecord } from "../services/transfer-store";
 import type { AuthedEnv } from "../types";
-
-/** check 結果の 1 件分（§10.4）。uniqueness は available のときのみ付く（§10.4 の例に準拠）。 */
-interface DomainCheckItem {
-  name: string;
-  registry: RegistryId | null;
-  availability: DomainAvailability;
-  reason?: string;
-  uniqueness: DomainUniqueness | null;
-  error?: { code: ApiErrorCode; message: string };
-}
-
-/**
- * FR-05: SLD の独自性スコアを計算する（リクエスト内で SLD ごとにメモ化）。
- * スコア計算は check 本体の付随情報なので、失敗しても check 結果は返す。
- */
-function createUniquenessResolver(): (name: string) => DomainUniqueness | null {
-  const bySld = new Map<string, DomainUniqueness | null>();
-  return (name) => {
-    try {
-      const { sld } = splitDomainName(name);
-      let u = bySld.get(sld);
-      if (u === undefined) {
-        u = toDomainUniqueness(
-          scoreDistinctiveness(sld, getDefaultPreparedCorpus()),
-        );
-        bySld.set(sld, u);
-      }
-      return u;
-    } catch {
-      return null;
-    }
-  };
-}
 
 /** 登録時の authInfo を自動生成する（RFC 9154: 128bit 以上のエントロピー推奨）。 */
 function generateAuthInfo(): string {
   return randomBytes(24).toString("base64url");
-}
-
-function parseDomainNameParam(raw: string): string {
-  const parsed = domainNameSchema.safeParse(raw);
-  if (!parsed.success) {
-    throw new ApiException("VALIDATION_ERROR", "ドメイン名の形式が不正です。");
-  }
-  return parsed.data;
 }
 
 /** AC-08-2: 合計の有効期間が上限（10 年）を超える更新要求は送信前に弾く。 */
@@ -141,16 +100,34 @@ function isTransportFailure(err: RegistryError): boolean {
 }
 
 /**
- * 詳細レスポンス（FR-07）。`domain` は正規化済み `info`、`summary` は一覧と同じ要約。
- * `stale = true` はレジストリに繋がらず DB キャッシュを返したことを示す（AC-07-2）。
+ * 詳細レスポンス（FR-07。契約は `domainDetailResponseSchema`）。
+ * `domain` は正規化済み `info`、`summary` は一覧と同じ要約。
+ * `stale = true` はレジストリに繋がらず DB キャッシュを返したことを示し（AC-07-2）、
+ * `error` にその理由が入る。
  */
-function detailResponse(record: DomainRecord, stale: boolean) {
+function detailResponse(
+  record: DomainRecord,
+  stale: boolean,
+  options: {
+    transfer?: TransferRecord;
+    error?: DomainDetailResponse["error"];
+  } = {},
+): DomainDetailResponse {
   return {
     domain: record.info,
-    summary: toDomainSummary(record, stale),
+    summary: toDomainSummary(record, stale, options.transfer),
     stale,
     syncedAt: record.syncedAt.toISOString(),
+    ...(options.error ? { error: options.error } : {}),
   };
+}
+
+/** 詳細で返す移管バッジ用に、そのドメインの進行中の移管を引く（FR-12 / AC-07-3）。 */
+async function pendingTransferFor(
+  userId: string,
+  name: string,
+): Promise<TransferRecord | undefined> {
+  return (await pendingTransfersByDomain(userId)).get(name);
 }
 
 export const domains = new Hono<AuthedEnv>()
@@ -163,10 +140,12 @@ export const domains = new Hono<AuthedEnv>()
     return c.json({ domains: list });
   })
 
-  /** FR-02: 全保有ドメインを info で再同期する。1 件の失敗では全体を落とさない。 */
+  /**
+   * FR-02 / FR-12 / AC-02-4: 全保有ドメインを info で再同期し、Poll も消化する（§10.1）。
+   * 1 件の失敗では全体を落とさない。
+   */
   .post("/sync", async (c) => {
-    const result = await syncDomains(c.get("user").id);
-    return c.json(result);
+    return c.json(await syncDomainsAndConsumePoll(c.get("user").id));
   })
 
   /** FR-03: ドメイン検索・空き確認。部分失敗を許容する（AC-03-2）。 */
@@ -176,92 +155,7 @@ export const domains = new Hono<AuthedEnv>()
       "names" in body
         ? body.names
         : body.tlds.map((tld) => `${body.sld}.${tld}`);
-    const uniqueNames = [...new Set(names)];
-    const uniquenessFor = createUniquenessResolver();
-
-    const registrySet = getRegistrySet();
-    const groups = new Map<
-      string,
-      { adapter: RegistryAdapter; names: string[] }
-    >();
-    const resultByName = new Map<string, DomainCheckItem>();
-
-    for (const name of uniqueNames) {
-      const adapter = registrySet.forDomain(name);
-      if (!adapter) {
-        resultByName.set(name, {
-          name,
-          registry: null,
-          availability: "error",
-          uniqueness: null,
-          error: { code: "VALIDATION_ERROR", message: "未対応の TLD です。" },
-        });
-        continue;
-      }
-      const group = groups.get(adapter.id) ?? { adapter, names: [] };
-      group.names.push(name);
-      groups.set(adapter.id, group);
-    }
-
-    await Promise.all(
-      [...groups.values()].map(async ({ adapter, names: groupNames }) => {
-        try {
-          const results = await adapter.check(groupNames);
-          const byName = new Map(results.map((r) => [r.name, r]));
-          for (const name of groupNames) {
-            const result = byName.get(name);
-            if (result) {
-              resultByName.set(name, {
-                name,
-                registry: adapter.id,
-                availability: result.available ? "available" : "unavailable",
-                ...(result.reason ? { reason: result.reason } : {}),
-                // FR-05: 独自性スコアは「空き」のときだけ意味を持つ（§10.4 の例に準拠）
-                uniqueness: result.available ? uniquenessFor(name) : null,
-              });
-            } else {
-              resultByName.set(name, {
-                name,
-                registry: adapter.id,
-                availability: "error",
-                // AC-05-2: スコア算出はレジストリ通信と独立しているので、
-                // check が失敗した行でもスコアは返す（ui-screens §Unknown バリアント）
-                uniqueness: uniquenessFor(name),
-                error: {
-                  code: "REGISTRY_SPEC_MISMATCH",
-                  message: "check の結果に対象ドメインが含まれていません。",
-                },
-              });
-            }
-          }
-        } catch (err) {
-          // 一方のレジストリが落ちていても他方の結果は返す（部分失敗の許容）
-          const item: DomainCheckItem["error"] =
-            err instanceof RegistryError
-              ? {
-                  code: err.code,
-                  message: "レジストリへの確認に失敗しました。",
-                }
-              : { code: "INTERNAL", message: "空き確認に失敗しました。" };
-          for (const name of groupNames) {
-            resultByName.set(name, {
-              name,
-              registry: adapter.id,
-              availability: "error",
-              // AC-05-2: レジストリ障害時もスコアは表示する
-              uniqueness: uniquenessFor(name),
-              error: item,
-            });
-          }
-        }
-      }),
-    );
-
-    const results = uniqueNames.flatMap((name) => {
-      const item = resultByName.get(name);
-      return item ? [item] : [];
-    });
-    return c.json({ results });
+    return c.json({ results: await checkDomains(names) });
   })
 
   /** FR-06: ドメイン登録。直前に check を再実行してから create する。 */
@@ -278,6 +172,14 @@ export const domains = new Hono<AuthedEnv>()
       );
     }
 
+    // FR-06「登録者プロファイルを自動適用」: ユーザー × レジストリで 1 件のコンタクトを
+    // 用意して使い回す（未作成なら contact:create）。#72
+    const registrantContactId = await ensureRegistryContact(
+      c.get("user").id,
+      adapter,
+      "registrant",
+    );
+
     // AC-06-2: create タイムアウト時は再送せず info で存在確認して結果を確定する
     const domain = await reconcileOnTimeout(
       () =>
@@ -288,6 +190,7 @@ export const domains = new Hono<AuthedEnv>()
             ? { nameservers: body.nameservers }
             : {}),
           authInfo: generateAuthInfo(),
+          registrantContactId,
         }),
       () => adapter.info(body.name),
     );
@@ -304,10 +207,20 @@ export const domains = new Hono<AuthedEnv>()
     const adapter = adapterForDomain(name);
     const cached = await requireOwnedDomain(userId, name);
 
+    const transfer = await pendingTransferFor(userId, name);
+
+    // AC-12-5: 移管 OUT 済みの行はレジストリに問い合わせない。
+    // 自レジストラがスポンサーではないので `info` の応答を信頼できず（【要確認 §21.2 #12】）、
+    // さらに `upsertDomainFromInfo` は常に `ownership = 'owned'` で書くため、
+    // 部分一意インデックス（保有中の行のみ）をすり抜けて保有行が復活してしまう。
+    if (cached.ownership !== "owned") {
+      return c.json(detailResponse(cached, false, { transfer }));
+    }
+
     try {
-      const info = await adapter.info(name);
+      const info = await withReadRetry(() => adapter.info(name));
       const record = await upsertDomainFromInfo(userId, info);
-      return c.json(detailResponse(record, false));
+      return c.json(detailResponse(record, false, { transfer }));
     } catch (err) {
       if (!(err instanceof RegistryError) || !isTransportFailure(err)) {
         throw err;
@@ -323,7 +236,12 @@ export const domains = new Hono<AuthedEnv>()
           code: err.code,
         }),
       );
-      return c.json(detailResponse(cached, true));
+      return c.json(
+        detailResponse(cached, true, {
+          transfer,
+          error: { code: err.code, message: registryErrorMessage(err) },
+        }),
+      );
     }
   })
 
@@ -333,7 +251,7 @@ export const domains = new Hono<AuthedEnv>()
     const { period } = c.req.valid("json");
     const userId = c.get("user").id;
     const adapter = adapterForDomain(name);
-    const owned = await requireOwnedDomain(userId, name);
+    const owned = await requireOwnedDomain(userId, name, { forWrite: true });
 
     const current = await adapter.info(name);
     const opCheck = isOperationAllowed("renew", current.statuses, {
@@ -384,7 +302,7 @@ export const domains = new Hono<AuthedEnv>()
     const body = c.req.valid("json");
     const userId = c.get("user").id;
     const adapter = adapterForDomain(name);
-    const owned = await requireOwnedDomain(userId, name);
+    const owned = await requireOwnedDomain(userId, name, { forWrite: true });
 
     const current = await adapter.info(name);
     // ロック解除だけの要求は clientUpdateProhibited 中でも許可する（解除経路を残す）
@@ -429,12 +347,34 @@ export const domains = new Hono<AuthedEnv>()
     if (body.clientStatuses?.remove && body.clientStatuses.remove.length > 0) {
       input.removeStatuses = body.clientStatuses.remove;
     }
+    // FR-09: コンタクトは ID の参照でしか指定できないので、先に用意して ID に変換する。
+    // 同じ ID を使い回すため、内容だけが変わった場合はレジストリ側で contact:update になる
+    if (body.contacts?.registrant) {
+      input.registrant = await ensureRegistryContact(
+        userId,
+        adapter,
+        "registrant",
+        body.contacts.registrant,
+      );
+    }
+    if (body.contacts?.tech) {
+      input.contacts = {
+        [REGISTRY_CONTACT_KEY.tech]: await ensureRegistryContact(
+          userId,
+          adapter,
+          "tech",
+          body.contacts.tech,
+        ),
+      };
+    }
 
     const hasChanges =
       (input.addNameservers?.length ?? 0) > 0 ||
       (input.removeNameservers?.length ?? 0) > 0 ||
       (input.addStatuses?.length ?? 0) > 0 ||
-      (input.removeStatuses?.length ?? 0) > 0;
+      (input.removeStatuses?.length ?? 0) > 0 ||
+      input.registrant !== undefined ||
+      input.contacts !== undefined;
     if (!hasChanges) {
       const unchanged = await upsertDomainFromInfo(userId, current);
       return c.json(detailResponse(unchanged, false));
@@ -457,7 +397,7 @@ export const domains = new Hono<AuthedEnv>()
     const name = parseDomainNameParam(c.req.param("name"));
     const userId = c.get("user").id;
     const adapter = adapterForDomain(name);
-    const owned = await requireOwnedDomain(userId, name);
+    const owned = await requireOwnedDomain(userId, name, { forWrite: true });
 
     const current = await adapter.info(name);
     const opCheck = isOperationAllowed("delete", current.statuses, {
@@ -520,7 +460,7 @@ export const domains = new Hono<AuthedEnv>()
     const name = parseDomainNameParam(c.req.param("name"));
     const userId = c.get("user").id;
     const adapter = adapterForDomain(name);
-    await requireOwnedDomain(userId, name);
+    await requireOwnedDomain(userId, name, { forWrite: true });
 
     const current = await adapter.info(name);
     if (!isRestorable(current.rgpStatuses, current.statuses)) {
@@ -553,7 +493,9 @@ export const domains = new Hono<AuthedEnv>()
   .post("/:name/auth-code", async (c) => {
     const name = parseDomainNameParam(c.req.param("name"));
     const adapter = adapterForDomain(name);
-    const owned = await requireOwnedDomain(c.get("user").id, name);
+    const owned = await requireOwnedDomain(c.get("user").id, name, {
+      forWrite: true,
+    });
 
     const current = await adapter.info(name);
     const opCheck = isOperationAllowed("authCode", current.statuses, {

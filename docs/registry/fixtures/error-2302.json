@@ -1,0 +1,9 @@
+{
+  "result": {
+    "code": 2302,
+    "message": "Object exists",
+    "reason": "example.com is already registered",
+    "extValue": null
+  },
+  "trID": { "clTRID": "dp-fixture-2302", "svTRID": "KQSGN-20260825-002302" }
+}

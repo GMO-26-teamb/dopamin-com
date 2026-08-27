@@ -22,12 +22,8 @@ const MANAGED_KEYS = [
   "MOCK_TRANSFER_AUTO_APPROVE_MS",
   "AI_PROVIDER",
   "AI_MODEL",
-  "EMBEDDING_PROVIDER",
-  "EMBEDDING_MODEL",
   "GOOGLE_GENERATIVE_AI_API_KEY",
   "ANTHROPIC_API_KEY",
-  "UNIQUENESS_THETA_LOW",
-  "UNIQUENESS_THETA_HIGH",
   "GITHUB_TOKEN",
   "DEMO_RESET_ENABLED",
   "LOG_LEVEL",
@@ -46,15 +42,11 @@ describe("getApiEnv: 最小構成（§17）", () => {
     expect(env.REGISTRY_MODE).toBe("mock");
     expect(env.MOCK_REGISTRY_FAIL_MODE).toBe("none");
     expect(env.AI_PROVIDER).toBe("google");
-    expect(env.EMBEDDING_PROVIDER).toBe("google");
     expect(env.LOG_LEVEL).toBe("info");
     expect(env.DEMO_RESET_ENABLED).toBe(false);
-    expect(env.UNIQUENESS_THETA_LOW).toBe(0.05);
-    expect(env.UNIQUENESS_THETA_HIGH).toBe(0.45);
     expect(env.MOCK_TRANSFER_AUTO_APPROVE_MS).toBe(20 * 60 * 1000);
     // 秘密情報・未確定値は既定を持たず undefined のまま
     expect(env.AI_MODEL).toBeUndefined();
-    expect(env.EMBEDDING_MODEL).toBeUndefined();
     expect(env.GOOGLE_GENERATIVE_AI_API_KEY).toBeUndefined();
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(env.GITHUB_TOKEN).toBeUndefined();
@@ -87,19 +79,6 @@ describe("getApiEnv: 空文字は未設定扱い", () => {
 });
 
 describe("getApiEnv: 数値の環境変数", () => {
-  it("UNIQUENESS_THETA_LOW / HIGH を文字列から数値に変換する", () => {
-    process.env.UNIQUENESS_THETA_LOW = "0.1";
-    process.env.UNIQUENESS_THETA_HIGH = "0.4";
-    const env = getApiEnv();
-    expect(env.UNIQUENESS_THETA_LOW).toBe(0.1);
-    expect(env.UNIQUENESS_THETA_HIGH).toBe(0.4);
-  });
-
-  it("UNIQUENESS_THETA_LOW が範囲外（>1）だと例外", () => {
-    process.env.UNIQUENESS_THETA_LOW = "1.5";
-    expect(() => getApiEnv()).toThrow();
-  });
-
   it("MOCK_TRANSFER_AUTO_APPROVE_MS を文字列から数値に変換する", () => {
     process.env.MOCK_TRANSFER_AUTO_APPROVE_MS = "1000";
     expect(getApiEnv().MOCK_TRANSFER_AUTO_APPROVE_MS).toBe(1000);
@@ -123,7 +102,7 @@ describe("getApiEnv: LOG_LEVEL", () => {
   });
 });
 
-describe("getApiEnv: AI_PROVIDER / EMBEDDING_PROVIDER", () => {
+describe("getApiEnv: AI_PROVIDER", () => {
   it("google / anthropic 以外は例外になる", () => {
     process.env.AI_PROVIDER = "openai";
     expect(() => getApiEnv()).toThrow();

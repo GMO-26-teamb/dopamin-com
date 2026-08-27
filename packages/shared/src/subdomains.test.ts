@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DOPAMIN_NAMESERVERS } from "./constants";
 import {
+  buildDnsSetupInstructions,
   type DesiredDnsRecord,
   type DnsRecord,
   diffDnsRecords,
@@ -390,5 +391,51 @@ describe("needsNameserverSwitch", () => {
   it("他社 DNS・未設定なら切替が要る（AC-13-5）", () => {
     expect(needsNameserverSwitch(["ns1.example-dns.com"])).toBe(true);
     expect(needsNameserverSwitch([])).toBe(true);
+  });
+});
+
+describe("buildDnsSetupInstructions（FR-13 手動設定）", () => {
+  const items = [
+    {
+      host: "www",
+      purpose: "ランディングページ",
+      recordType: "CNAME" as const,
+      target: "cname.vercel-dns.com.",
+      priority: "required" as const,
+    },
+    {
+      host: "@",
+      purpose: "apex",
+      recordType: "A" as const,
+      target: "203.0.113.10",
+      priority: "optional" as const,
+    },
+  ];
+
+  it("ホストを FQDN にし、重要度を日本語で出す", () => {
+    const text = buildDnsSetupInstructions("demo.com", items);
+    expect(text).toContain("demo.com のサブドメイン設定手順");
+    expect(text).toContain("1. www.demo.com（必須）— ランディングページ");
+    // apex は FQDN としてドメイン自身になる
+    expect(text).toContain("2. demo.com（任意）— apex");
+  });
+
+  it("target は末尾ドットを落として出す（保存する値と揃える）", () => {
+    const text = buildDnsSetupInstructions("demo.com", items);
+    expect(text).toContain("値: cname.vercel-dns.com /");
+    expect(text).not.toContain("cname.vercel-dns.com.");
+  });
+
+  it("TTL は既定 3600 で、指定すればその値を出す", () => {
+    expect(buildDnsSetupInstructions("demo.com", items)).toContain("TTL: 3600");
+    expect(buildDnsSetupInstructions("demo.com", items, 600)).toContain(
+      "TTL: 600",
+    );
+  });
+
+  it("設計が空でも見出しだけは返す", () => {
+    expect(buildDnsSetupInstructions("demo.com", [])).toContain(
+      "demo.com のサブドメイン設定手順",
+    );
   });
 });

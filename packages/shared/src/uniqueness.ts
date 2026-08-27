@@ -1,6 +1,8 @@
 /**
- * 独自性スコア（0〜100）からラベル / レアリティ表示を導出する（docs/requirements.md §9.2、§11 の
- * `UNIQUENESS_THETA_LOW` / `UNIQUENESS_THETA_HIGH` に対応する既定の較正閾値: 40 / 70）。
+ * 独自性スコア（0〜100）からラベル / レアリティ表示を導出する（docs/requirements.md §9.2 / §14.2）。
+ *
+ * ラベルの境界（40 / 70）は実装が固定で持つ。環境変数（`UNIQUENESS_THETA_*`）による較正は
+ * 埋め込み方式が前提だったため、ADR-0003 で lexical 方式に変えた時点で不採用になった。
  */
 
 export type UniquenessLabel = "high" | "medium" | "low";

@@ -1,0 +1,16 @@
+{
+  "result": { "code": 1000, "message": "Command completed successfully" },
+  "resData": {
+    "domain": "example.com",
+    "status": ["ok"],
+    "registrant": "C-0001",
+    "contacts": { "TECH": "C-0002" },
+    "nameservers": ["ns1.example.com", "ns2.example.com"],
+    "crDate": "2026-05-05T10:00:00Z",
+    "upDate": "2026-08-25T12:00:00Z",
+    "exDate": "2027-05-05T10:00:00Z",
+    "trDate": null,
+    "rgpStatus": []
+  },
+  "trID": { "clTRID": "dp-fixture-0012", "svTRID": "KQSGN-20260825-000012" }
+}

@@ -149,15 +149,23 @@ describe("PATCH /api/v1/auth/passkeys/:id", () => {
     ["33 文字", "あ".repeat(33)],
     ["空白のみ", "   "],
   ])(
-    "%s は 400 VALIDATION_ERROR（details.issues 付き）",
+    "%s は 400 VALIDATION_ERROR（details に issue の配列が付く）",
     async (_label, name) => {
       const res = await patch(ALICE_CRED, { name }, alice.cookie);
       expect(res.status).toBe(400);
       const body = (await res.json()) as {
-        error: { code: string; details?: { issues?: unknown } };
+        error: { code: string; details?: unknown };
       };
       expect(body.error.code).toBe("VALIDATION_ERROR");
-      expect(Array.isArray(body.error.details?.issues)).toBe(true);
+      // §10.3: VALIDATION_ERROR の details は issue の配列（#141 で全ルート統一）
+      expect(body.error.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: expect.any(String),
+            message: expect.any(String),
+          }),
+        ]),
+      );
     },
   );
 

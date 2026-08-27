@@ -1,0 +1,9 @@
+{
+  "result": {
+    "code": 2306,
+    "message": "Parameter value policy error",
+    "reason": "curExpDate does not match the current expiration date",
+    "extValue": null
+  },
+  "trID": { "clTRID": "dp-fixture-2306", "svTRID": "KQSGN-20260825-002306" }
+}
