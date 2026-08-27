@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardKicker } from "@/components/ui/card";
-import { ErrorCard } from "@/components/ui/error-card";
 import { useDemoReset } from "@/lib/api/hooks";
 import { DemoResetDialog } from "./demo-reset-dialog";
 import type { NotifySettings } from "./notice";
@@ -12,11 +11,9 @@ import type { NotifySettings } from "./notice";
  * Figma: S-70 `85:6709`（Card Warn kicker「デモデータリセット」）/ D-10 / S-71 `85:6884`
  * FR-16。`GET /auth/me` の `features.demoReset` が false のときは呼び出し側でカードごと出さない
  * （ui-screens §7-3 の仮置き）。
+ *
+ * 何が起きるかは D-10 の subtitle に 1 度だけ書く。ここと完了 Banner は繰り返さない。
  */
-
-/** S-71 のリセット完了バナー本文 */
-const DONE_BODY =
-  "デモ用ドメイン 4 件を投入しました（移管中サンプルは mock レジストリ）。ダッシュボードで確認できます。";
 
 export interface DemoResetSectionProps {
   onNotify: NotifySettings;
@@ -35,13 +32,17 @@ export function DemoResetSection({
       onSuccess: () => {
         setOpen(false);
         onNotify({
+          kind: "banner",
           tone: "ok",
           title: "デモデータをリセットしました",
-          body: DONE_BODY,
+          body: "ダッシュボードで確認できます。",
         });
       },
       // 更新系の失敗は Error Card（code / HTTP / request ID）で出す（ui-screens §4）
-      onError: () => setOpen(false),
+      onError: (error) => {
+        setOpen(false);
+        onNotify({ kind: "error", error });
+      },
     });
   };
 
@@ -54,6 +55,7 @@ export function DemoResetSection({
         </p>
         <Button
           onClick={() => {
+            onNotify(null);
             demoReset.reset();
             setOpen(true);
           }}
@@ -63,7 +65,6 @@ export function DemoResetSection({
           リセット実行
         </Button>
       </div>
-      {demoReset.error ? <ErrorCard error={demoReset.error} /> : null}
 
       <DemoResetDialog
         busy={demoReset.isPending}

@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { Card } from "@/components/ui/card";
-import { ErrorCard } from "@/components/ui/error-card";
 import { Select, type SelectOption } from "@/components/ui/select";
 import { useUpdateAiSettings } from "@/lib/api/hooks";
 import type { AiSettings } from "@/lib/api/types";
@@ -56,16 +55,21 @@ export function AiSettingsSection({
 
   const save = (next: Draft) => {
     setDraft(next);
+    onNotify(null);
     update.mutate(next, {
+      // 何を選んだかは直上の Select が見せているので、帯では繰り返さない
       onSuccess: () => {
         onNotify({
+          kind: "banner",
           tone: "ok",
           title: "AI 設定を保存しました",
-          body: `${PROVIDER_LABEL[next.provider]} / ${next.model}`,
         });
       },
       // 失敗したら表示を保存済みの値に戻す（ローカルだけ進んで見えないように）
-      onError: () => setDraft({ provider: ai.provider, model: ai.model }),
+      onError: (error) => {
+        setDraft({ provider: ai.provider, model: ai.model });
+        onNotify({ kind: "error", error });
+      },
     });
   };
 
@@ -105,7 +109,6 @@ export function AiSettingsSection({
           value={draft.model}
         />
       </div>
-      {update.error ? <ErrorCard error={update.error} /> : null}
     </Card>
   );
 }
