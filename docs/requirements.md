@@ -989,7 +989,7 @@ export interface RegistryAdapter {
 | `clientHold` / `serverHold` | 停止中 | 警告表示 |
 | `clientTransferProhibited` / `serverTransferProhibited` | 移管ロック | 移管 OUT 不可 |
 | `clientDeleteProhibited` / `serverDeleteProhibited` | 削除ロック | 廃止不可 |
-| `clientUpdateProhibited` / `serverUpdateProhibited` | 変更ロック | 情報修正不可（Client 側はロック解除可、Server 側は不可） |
+| `clientUpdateProhibited` / `serverUpdateProhibited` | 情報修正ロック | 情報修正不可（Client 側はロック解除可、Server 側は不可） |
 | `clientRenewProhibited` / `serverRenewProhibited` | 更新ロック | 更新（有効期限延長・FR-08）不可（Client 側は情報修正から解除可、Server 側は不可） |
 | `pendingTransfer` | 移管中 | 更新 / 情報修正 / 廃止 / 復旧 / 新規移管申請は不可。losing（自レジストラがスポンサー）は承認 / 拒否、gaining は取消のみ可 |
 | `redemptionPeriod` | 復旧猶予（RGP） | 復旧のみ可 |
