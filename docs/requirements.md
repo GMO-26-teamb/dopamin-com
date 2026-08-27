@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.1.24（2026-08-27） |
+| 版 | v0.1.25（2026-08-27） |
 | プロダクト | ドパ民.com / dopamin.com — Z世代向けドメイン管理プラットフォーム（疑似レジストラ） |
 | チーム | チームドパ民（Team B）: 佐々木 琢登・星 はるか・上原 拓也 |
 | 位置づけ | GMO Internet Internship in kitaQ Webアプリケーションコース（2026/08/24–28）成果物 |
@@ -269,7 +269,7 @@
 - **振る舞い**:
   - NS: 2〜13 件のホスト名を追加・削除（差分を `add` / `rem` として送る）。
   - コンタクト: 登録者（Registrant）必須、技術（Technical）任意。管理（Admin）・請求（Billing）は扱わない（ICANN Registration Data Policy 2025-08-21 準拠）。
-  - Client ステータスの付与・解除（`clientTransferProhibited` 等）を「ロック」トグルとして提供。Swagger 上は `domain:update` で 5 種の client ステータスに対応（2026-08-25 確定）。ただし【要確認】実測では `add.statuses` が成功応答のまま反映されない（両レジストリ・spec-notes 要確認 10。運営確認まで UI のロックトグルは保留）。
+  - Client ステータスの付与・解除（`clientTransferProhibited` 等）を「ロック」トグルとして提供。Swagger 上は `domain:update` で 5 種の client ステータスに対応（2026-08-25 確定）。2026-08-27 の運営修正で `add.statuses` / `rem.statuses` がレジストリに反映されるようになった（kitaqnic 実測。kitaqsign はメンテナンス中で未実測。spec-notes §3 #10 で解決）ため、UI のロックトグルは保留を解いて提供する。UI が付け外しするのは `clientTransferProhibited` のみ。
   - NS 変更はレジストリ側でホストオブジェクトの事前作成が必須（実測）。アダプタが `ensureHosts` で自動作成して吸収する。
 - **AC**:
   - AC-09-1: NS 変更後 `info` で反映を確認し、画面に表示される。
@@ -780,7 +780,7 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。アプリのテーブル
 | POST | `/domains/sync` | 要 | 全保有ドメインを `info` で再同期し、Poll を消化する | FR-02/12 |
 | POST | `/domains/check` | 要 | `{ sld, tlds[] }` または `{ names[] }` → 各結果（空き・レジストリ・スコア） | FR-03/05 |
 | POST | `/domains` | 要 | `{ name, period, nameservers? }` → check → create → info | FR-06 |
-| GET | `/domains/:name` | 要 | `info` で最新化して返す（失敗時はキャッシュ + `stale: true`） | FR-07 |
+| GET | `/domains/:name` | 要 | `info` で最新化して返す（失敗時はキャッシュ + `stale: true`）。応答には登録者コンタクトの中身 `registrantProfile` を添える（`info` は ID しか返さないため。そのドメインがアプリのコンタクトを参照していなければ `null`）。更新系（`POST /domains`・`renew`・`PATCH`・`restore`）の応答も同じ形 | FR-07 / FR-09 |
 | POST | `/domains/:name/renew` | 要 | `{ period }` | FR-08 |
 | PATCH | `/domains/:name` | 要 | `{ nameservers?, contacts?, clientStatuses? }` | FR-09 |
 | DELETE | `/domains/:name` | 要 | 廃止 | FR-10 |
@@ -1466,4 +1466,5 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | v0.1.21 | 2026-08-27 | §11.2: 運営アナウンス（8/27 16:00〜のメンテナンス）による **`.org` / `.info` の管轄移管（kitaqsign → kitaqnic）** を反映。kitaqsign は `.com` `.net` の 2 種、kitaqnic は 20 種に（計 22 種は不変）。`REGISTRY_TLDS` / fixture / `specVersion`（`v2 (2026-08-27)`）を更新し、既存 `.org` / `.info` 行の `domains.registry` / `transfers.registry` を付け替えるデータマイグレーションを追加。§21.2 #2 に追記。#195（採番が衝突していたため v0.1.20 から採り直した）|
 | v0.1.22 | 2026-08-27 | §16.1 / §16.4 / §17: **参照されていない環境変数を削除**。`NEXT_PUBLIC_APP_ORIGIN`（「表示・OGP 用」として §17 に載っていたが、`apps/web` のコードから一度も読まれていなかった。Vercel の web プロジェクトと `.env.example` / `playwright.config.ts` / README からも削除）。GitHub Secrets の `DIRECT_DATABASE_URL` も、v0.1.13 で `migrate` ジョブを外して以降どのワークフローからも参照されていないため削除した（`ci.yml` の `e2e` は Secret ではなくリテラル値を使う。本番 DB への適用は §16.2 のとおりローカルから手で当てる）。Vercel の api プロジェクトからも同変数を削除（ランタイムでは未使用で、`packages/db/drizzle.config.ts` がローカルで読むだけ） |
 | v0.1.23 | 2026-08-27 | FR-13 / FR-04 の AI 解析まわりの時間制限を 2 倍に緩和。上限が厳しく解析を通せない公開リポジトリが実在したため、`GITHUB_FETCH_TIMEOUT_MS` を 4 → 8 秒、`AI_CALL_TIMEOUT_MS` を 10 → 20 秒に変更した。追随して AC-13-1「15 秒以内」→「30 秒以内」（内訳は GitHub 解析 8 秒 + AI 20 秒）、AC-04-2「10 秒以内」→「20 秒以内」、§13.1「タイムアウト 10 秒」→「20 秒」。`AI_CALL_TIMEOUT_MS` は FR-04 と FR-13 で共有のため、AC-04-2 も同時に緩む。#199（Gemini の thinking を絞って 10 秒予算を守る案）とは方針が異なり、本件は上限そのものを引き上げる判断（#199 の受け入れ条件「配分は変えない」を上書きする）（採番が衝突していたため v0.1.22 から採り直した。#200 の thinking budget 対応と併用する: #200 が既定の所要時間を約 5 秒に下げ、本件が上限を引き上げて遅いリポジトリぶんの余裕を作る）|
+| v0.1.25 | 2026-08-27 | FR-09 の残り 2 件を実装に合わせて確定（#172 / #205）。§10.1: 詳細レスポンス（`GET /domains/:name` と更新系）に **`registrantProfile`** を追加。レジストリの `info` は登録者をコンタクト ID でしか返さないため、S-30 のコンタクトカードと D-02 の初期値が出せなかった。ドメインがアプリのコンタクトを参照していないとき（移管 IN 直後など）は中身を知らないので `null` を返す（要確認 #14 は未解決のまま）。FR-09: 「ロック」トグルの【要確認】を削除。2026-08-27 の運営修正で `add.statuses` / `rem.statuses` が反映されるようになった（kitaqnic 実測、spec-notes §3 #10 で解決済み）ため保留を解き、UI から `clientTransferProhibited` を付け外しできるようにした |
 | v0.1.24 | 2026-08-27 | §16.2 / §16.3: マイグレーションの手動適用で**直結ホスト（`db.<project-ref>.supabase.co`）が IPv6 でしか公開されておらず、IPv4 しか出られない回線からは届かない**ことを明記（`drizzle-kit migrate` が無言で失敗する。2026-08-27 に実際に踏んだ）。Supavisor session mode（ポート 5432）の URL を使う具体的な手順と、`nc` / `dig` での到達性の確かめ方を §16.2 の手順 3 に追記。§16.3 の「GitHub Actions ランナーが該当」という限定を外した |

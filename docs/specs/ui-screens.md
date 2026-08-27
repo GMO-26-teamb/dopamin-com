@@ -99,7 +99,7 @@
 
 | ID | ルート | 状態 | 表示 / 振る舞い | 使用コンポーネント |
 |---|---|---|---|---|
-| S-30 | `/domains/[name]` | Active | ヘッダー（ドメイン名 + 状態バッジ + ロックバッジ + 最終同期 / 再同期）。基本情報カード: レジストリ / EPP ステータス一覧（バッジ + 日本語説明ツールチップ）/ 登録日 / 有効期限（残日数 + 進捗）/ Grace Period（Renew / Transfer / Auto-Renew GP は種別と残日数を表示のみ）/ 移管可能日（ツールチップ「ICANN 実運用の参考。可否判定には使いません」）。ネームサーバー / コンタクト / サブドメイン設計カード（`反映済み n / m`、未作成時は「未作成 → 設計をはじめる」）。右: 操作パネル（更新 / 情報修正 / 移管 OUT / 廃止 / 復旧 + 移管ロック表示）。不可操作は Disabled + 理由（AC-07-1） | Card, Key Value Row, Progress Bar, Badge, Button |
+| S-30 | `/domains/[name]` | Active | ヘッダー（ドメイン名 + 状態バッジ + ロックバッジ + 最終同期 / 再同期）。基本情報カード: レジストリ / EPP ステータス一覧（バッジ + 日本語説明ツールチップ）/ 登録日 / 有効期限（残日数 + 進捗）/ Grace Period（Renew / Transfer / Auto-Renew GP は種別と残日数を表示のみ）/ 移管可能日（ツールチップ「ICANN 実運用の参考。可否判定には使いません」）。ネームサーバー / コンタクト / サブドメイン設計カード（`反映済み n / m`、未作成時は「未作成 → 設計をはじめる」）。右: 操作パネル（更新 / 情報修正 / 移管 OUT / 廃止 / 復旧 + 移管ロックの ON / OFF 表示。切り替えは D-02 で行う）。コンタクトカードの登録者・メールは API の `registrantProfile` から出し、アプリのコンタクトを参照していないドメイン（移管 IN 直後など）は「未取得」と書く（コンタクト ID は出さない）。不可操作は Disabled + 理由（AC-07-1） | Card, Key Value Row, Progress Bar, Badge, Button |
 | S-31 | `/domains/[name]` | info 失敗（AC-07-2） | Banner Warn + キャッシュ表示（最終同期時刻）。操作ボタンは全て Disabled、「再同期」で S-35 → 成功なら S-30 | Banner |
 | S-32 | `/domains/[name]` | 移管申請を受信（AC-07-3） | Banner Warn + 状態バッジ「移管中（申請受信）」。操作パネル先頭に「拒否」「承認」+「自動承認まで mm:ss」（1 秒更新）。他操作は Disabled。タイマーが 0 になったらボタンを Disabled にし「状態を確認中…」→ 再照会 → S-34 | Banner, Button |
 | S-33 | `/domains/[name]` | 復旧猶予（RGP） | Banner Info「残り n 日」、バッジ「復旧猶予 残 n 日」。操作は「復旧する」のみ有効 → D-04 | Banner, Badge |
@@ -111,7 +111,7 @@
 | S-39 | `/domains/[name]` | コンタクト未移行（移管 IN 後） | Banner Warn「登録者情報が旧レジストラのままです」+ CTA「情報修正」（登録者プロファイルへ差し替えを再実行）。要確認 #14 が解決するまでの暫定表示 | Banner |
 | D-01 | dialog | 更新（FR-08） | Dialog / Form：期間 Select + Helper に新しい有効期限と税込合計。合計 10 年超は送信前に弾く（AC-08-2）。「お支払いへ」→ D-11 | Dialog / Form, Input |
 | D-11 | dialog | 更新のお支払い（FR-19・モック） | S-29 と同じ構成（ご注文内容 + カード入力）。「¥n を支払って延長する」→ 決済成立で `renew` → S-30 + Banner Ok（金額・受付番号つき）/「戻る」→ D-01。拒否時は `renew` を呼ばずダイアログ内に Banner Warn（AC-19-3）。レジストリ側の失敗は従来どおり D-07 | Dialog / Form, Card, Key Value Row, Input, Banner, Badge |
-| D-02 | dialog | 情報修正（FR-09） | Dialog / Form：NS 2〜13 件（追加行）。コンタクト（登録者必須・技術任意）は同ダイアログのセクション。成功 → S-30 + Banner Ok | Dialog / Form |
+| D-02 | dialog | 情報修正（FR-09） | Dialog / Form：NS 2〜13 件（追加行）。コンタクト（登録者必須・技術任意）は同ダイアログのセクション。氏名・メールはレジストリが許可するダミー値のみで、送る前にその場で弾く（`ALLOWED_CONTACT_NAMES` の 8 種 / `@example.com` `.net` `.org`）。`street` / `city` / `countryCode` は入力欄を持たず `DEFAULT_REGISTRANT_PROFILE` で補う。移管ロックは同ダイアログのトグル（`clientTransferProhibited` の付け外し）で、`serverUpdateProhibited` / `serverTransferProhibited` 中は Disabled + 理由（AC-09-2）。送るのは**変更した項目だけ**（解除だけの要求を API の `unlockOnly` 経路に乗せるため。何も変えていなければ NS を送る）。成功 → S-30 + Banner Ok | Dialog / Form |
 | D-03 | dialog | 廃止（FR-10） | Dialog / Danger：ドメイン名再入力が一致するまで「廃止する」Disabled。AGP 内（登録後 5 日）は見出し・本文を「無課金で取消扱い」に切替。成功 → RGP 入り: S-33 / 即時削除: S-10 + Banner Ok「example.com を取り消しました」 | Dialog / Danger |
 | D-04 | dialog | 復旧（FR-11） | 汎用 Dialog：費用（ダミー、`RESTORE_FEE`）と復旧後の状態を明示。お支払いステップは挟まない（`docs/specs/payment-mock.md` §8 #2）。成功 → S-30 + Banner Ok | Dialog |
 | D-05 | dialog | AuthCode 発行（FR-12） | Dialog / Form：Code Block + コピー、「再発行」。注意文「発行すると以前のコードは使えなくなります」。値は保存せず操作ログはマスク。再入力は不要（§7-4） | Dialog / Form, Code Block |

@@ -8,6 +8,7 @@
 
 import type {
   AuthUser,
+  ClientStatus,
   DomainCheckRequest,
   PasskeySummary,
 } from "@dopamin/shared";
@@ -29,12 +30,19 @@ import type {
   Transfer,
 } from "./types";
 
-/** `DomainService.update` の入力（要件 §10.1 の `PATCH /domains/:name`）。 */
+/**
+ * `DomainService.update` の入力（要件 §10.1 の `PATCH /domains/:name`）。
+ *
+ * **変更した項目だけを渡す。** 未変更の項目まで載せると、ロック解除だけの要求が
+ * API の `unlockOnly` 経路（`clientUpdateProhibited` 中でも解除を通す）から外れる。
+ */
 export interface DomainUpdateInput {
   /** 変更後の全量（0 件 = 全解除、または 2〜13 件）。 */
   nameservers?: string[];
   /** 登録者コンタクトの差し替え（S-39 の再実行）。 */
   contacts?: DomainContactsInput;
+  /** ロックの付与・解除（D-02 の移管ロックトグル。FR-09） */
+  clientStatuses?: { add?: ClientStatus[]; remove?: ClientStatus[] };
 }
 
 export interface AuthService {
@@ -50,7 +58,7 @@ export interface AuthService {
 }
 
 export interface DomainService {
-  /** GET /domains（未実装 → NOT_IMPLEMENTED） */
+  /** GET /domains */
   list(): Promise<DomainSummary[]>;
   /** POST /domains/sync（部分失敗は例外にせず `failures` に載せて返す・S-13） */
   sync(): Promise<SyncResult>;
@@ -61,7 +69,7 @@ export interface DomainService {
   /** POST /domains */
   register(input: { name: string; period: number }): Promise<DomainDetail>;
   renew(name: string, input: { period: number }): Promise<DomainDetail>;
-  /** PATCH /domains/:name（FR-09。contacts は S-39 の再実行で使う） */
+  /** PATCH /domains/:name（FR-09。contacts は S-39 の再実行、clientStatuses はロック） */
   update(name: string, input: DomainUpdateInput): Promise<DomainDetail>;
   remove(name: string): Promise<{ outcome: "rgp" | "deleted" }>;
   restore(name: string): Promise<DomainDetail>;

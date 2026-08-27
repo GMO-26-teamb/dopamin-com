@@ -8,6 +8,7 @@ import {
 import {
   type ApiError,
   apiErrorSchema,
+  DEFAULT_REGISTRANT_PROFILE,
   type DomainUniqueness,
   domainDetailResponseSchema,
   domainListResponseSchema,
@@ -492,6 +493,21 @@ describe("MOCK_REGISTRY_FAIL_MODE=timeout_after_write（#49 / AC-18-2）", () =>
     expect((await parseError(res)).error.code).toBe("REGISTRY_TIMEOUT");
   });
 
+  it("ロックだけの update もタイムアウト後に info で照合して 200 を返す（#205）", async () => {
+    await createDomain("lock-timeout.com");
+    kitaqsign.setFailMode("timeout_after_write");
+
+    // NS を送らないロック単体の要求でも、付与されたステータスは info に出るので照合できる
+    const res = await sendJson(
+      "/domains/lock-timeout.com",
+      { clientStatuses: { add: ["clientTransferProhibited"] } },
+      "PATCH",
+    );
+    expect(res.status).toBe(200);
+    const { domain } = (await res.json()) as DomainPayload;
+    expect(domain?.statuses).toContain("clientTransferProhibited");
+  });
+
   it("照合できない更新系（auth-code）は 504 のまま", async () => {
     await createDomain("noconfirm.com");
     kitaqsign.setFailMode("timeout_after_write");
@@ -574,6 +590,45 @@ describe("FR-06 / FR-09: コンタクトの再利用（#72）", () => {
     await createDomain("empty.com");
     const res = await sendJson("/domains/empty.com", { contacts: {} }, "PATCH");
     expect(res.status).toBe(400);
+  });
+
+  it("詳細レスポンスに登録者プロファイルが載る（S-30 のコンタクトカード・#172）", async () => {
+    await createDomain("profile.com");
+
+    const res = await api("/domains/profile.com");
+    expect(res.status).toBe(200);
+    const body = domainDetailResponseSchema.parse(await res.json());
+    // domain.registrant はコンタクト ID なので、画面に出す氏名・メールは別に返す
+    expect(body.registrantProfile).toEqual(DEFAULT_REGISTRANT_PROFILE);
+  });
+
+  it("PATCH で差し替えた登録者プロファイルが詳細レスポンスに反映される", async () => {
+    await createDomain("profile-edit.com");
+    const patched = await sendJson(
+      "/domains/profile-edit.com",
+      { contacts: { registrant: PROFILE } },
+      "PATCH",
+    );
+    expect(
+      domainDetailResponseSchema.parse(await patched.json()).registrantProfile,
+    ).toEqual(PROFILE);
+
+    const res = await api("/domains/profile-edit.com");
+    expect(
+      domainDetailResponseSchema.parse(await res.json()).registrantProfile,
+    ).toEqual(PROFILE);
+  });
+
+  it("ドメインがアプリのコンタクトを参照していなければ null（移管 IN 直後・S-39）", async () => {
+    await createDomain("foreign.com");
+    // 移管で取り込んだドメインは相手レジストラのコンタクト ID を参照したままになる。
+    // アプリ側にそのプロファイルは無いので、推測で自分のものを出さない（要確認 #14）
+    setContactStoreForTesting(createInMemoryContactStore());
+
+    const res = await api("/domains/foreign.com");
+    expect(
+      domainDetailResponseSchema.parse(await res.json()).registrantProfile,
+    ).toBeNull();
   });
 });
 
@@ -843,8 +898,9 @@ describe("AC-06-2 / AC-18-2: 更新系タイムアウト時の info 照合", () 
     expect(domain?.statuses).not.toContain("clientRenewProhibited");
   });
 
-  it("update: status 変更だけのタイムアウトは照合不能なため 504 のまま", async () => {
+  it("update: status を反映しないレジストリでは status 変更だけの要求は 504 のまま", async () => {
     await createDomain("slowstatus.com");
+    // status を無視するレジストリ（8/27 の運営修正前の実測挙動）では照合材料が無い
     adapter.ignoreStatusUpdates = true;
     adapter.timeoutMode = "after-success";
     const res = await sendJson(

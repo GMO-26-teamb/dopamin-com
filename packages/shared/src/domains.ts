@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { domainSummarySchema } from "./api";
 import { errorCodeSchema } from "./errors";
-import { registryIdSchema } from "./registry";
+import { registrantProfileSchema, registryIdSchema } from "./registry";
 
 /**
  * ドメイン詳細（`GET /domains/:name`。FR-07 / AC-07-2 / §6.5）の API 契約。
@@ -51,6 +51,7 @@ export const domainStaleReasonSchema = z.object({
  *
  * - `domain`: 正規化済み `info`（レジストリが正。§6.5）
  * - `summary`: 一覧と同じ要約。所有権・移管バッジ・同期時刻はここから読む
+ * - `registrantProfile`: 登録者コンタクトの中身（FR-07 の「登録者コンタクト（ダミー）」表示用）
  * - `stale`: true = レジストリに繋がらず DB キャッシュを返した（AC-07-2）
  * - `error`: `stale` の理由。繋がった場合は付かない
  *
@@ -63,6 +64,16 @@ export const domainStaleReasonSchema = z.object({
 export const domainDetailResponseSchema = z.object({
   domain: domainInfoSchema,
   summary: domainSummarySchema,
+  /**
+   * `domain.registrant`（レジストリのコンタクト ID）が指す登録者プロファイル。
+   *
+   * レジストリの `info` は ID しか返さないので、画面が氏名・メールを出すには
+   * アプリが `contacts` に持っている中身を添える必要がある（FR-07 / FR-09）。
+   * **そのドメインが実際にアプリのコンタクトを参照しているときだけ**値が入る。
+   * 移管 IN 直後のように相手レジストラの ID を参照したままなら `null`
+   * （中身を知らないため。非スポンサーの `contact info` 可否は要確認 #14）。
+   */
+  registrantProfile: registrantProfileSchema.nullable(),
   stale: z.boolean(),
   /** 最後にレジストリと同期できた時刻（ISO 8601）。 */
   syncedAt: z.string(),
