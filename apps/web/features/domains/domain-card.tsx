@@ -10,7 +10,6 @@ import Link from "next/link";
 import { type ReactNode, useId } from "react";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { Button, type ButtonProps } from "@/components/ui/button";
-import { HelpTip } from "@/components/ui/help-tip";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import type { DomainSummary } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
@@ -28,6 +27,10 @@ import { statusBadgeTone, statusBadgeVariant } from "./status-badge";
  *
  * 保有ドメイン 1 件。Status は ui-screens §2.2 の 8 種で、`deriveDisplayStatus` の結果
  * （+ 有効期限 30 日以内なら Expiring）だけで決まる。EPP ステータスの再解釈はしない。
+ *
+ * カード面そのものが詳細画面へのリンク（stretched link）で、操作ボタンは主操作 1 つだけ。
+ * 同じ事実を何度も言わないよう、バッジは状態名・Meta は「いつまで / 次に何ができるか」に
+ * 役割を分けている（#216）。
  */
 
 /** AC-02-2: 残り 30 日以内で Expiring に落とす。 */
@@ -78,22 +81,6 @@ export function deriveCardStatus(
   }
 }
 
-/** 状態バッジ横の「？」で出す補足（初めての人向け。ui-screens §2.2 の意味を平易に）。 */
-export const STATUS_HELP: Record<DomainCardStatus, string> = {
-  active: "使える状態です。有効期限が近づくと、ここで更新できます。",
-  expiring: "有効期限まで 30 日を切りました。切れる前に「更新」してください。",
-  redeemable: "期限切れで停止中ですが、猶予期間内なら「復旧」で元に戻せます。",
-  transferring:
-    "移管の手続き中です。完了するまで名前や設定の変更はできません。",
-  hold: "レジストリ側で保留中です。理由は詳細画面の EPP ステータスで確認できます。",
-  inactive:
-    "ネームサーバー未設定などで動いていません。詳細画面で設定を確認してください。",
-  pendingDelete:
-    "削除待ちです。猶予期間を過ぎたため、このドメインは復旧できません。",
-  locked:
-    "ロック中です。誤操作や不正な移管を防ぐため、該当する操作が止まっています。",
-};
-
 /** Locked のバッジ文言（ui-screens §2.2「移管ロック / 削除ロック / 更新ロック」）。 */
 const LOCK_LABELS: readonly (readonly [RegExp, string])[] = [
   [/(client|server)TransferProhibited$/, "移管ロック"],
@@ -136,10 +123,14 @@ interface CardPresentation {
   progress: "brand" | "warn" | null;
   /** Meta 右端（有効期限など）。stale のときは「最終同期 n 分前」に差し替わる */
   meta: string;
-  primary: PrimaryAction;
-  showDetail: boolean;
+  /** 主操作。詳細を開くだけで足りる状態（PendingDelete）は null にしてボタンを出さない。 */
+  primary: PrimaryAction | null;
 }
 
+/**
+ * 「2027-07-23 · 残330日」。
+ * 残日数はバッジではなく Meta のこの 1 箇所だけに出す（バッジは状態名だけ・#216）。
+ */
 function expiryMeta(domain: DomainSummary, now: Date): string {
   if (domain.expiresAt === null) {
     return "—";
@@ -149,12 +140,16 @@ function expiryMeta(domain: DomainSummary, now: Date): string {
   return remaining === null ? date : `${date} · 残${remaining}日`;
 }
 
+/** 「つながりません · 2027-07-23」。状態の意味を先に、有効期限を後ろに置く。 */
+function stateMeta(text: string, expiresAt: string | null): string {
+  return expiresAt === null ? text : `${text} · ${formatDate(expiresAt)}`;
+}
+
 function present(
   domain: DomainSummary,
   status: DomainCardStatus,
   now: Date,
 ): CardPresentation {
-  const detailHref = `/domains/${encodeURIComponent(domain.name)}`;
   const rgpRemaining =
     domain.rgpUntil === null ? null : daysUntil(domain.rgpUntil, now);
   // Tone / Variant は ui-screens §2.2 の表（`./status-badge`）が SSOT。
@@ -165,9 +160,7 @@ function present(
   } as const;
 
   switch (status) {
-    case "expiring": {
-      const remaining =
-        domain.expiresAt === null ? null : daysUntil(domain.expiresAt, now);
+    case "expiring":
       return {
         border: "border-warn",
         faded: false,
@@ -175,28 +168,23 @@ function present(
           tone: "warn",
           variant: "outline",
           icon: <TriangleAlert />,
-          label: remaining === null ? "まもなく期限" : `残${remaining}日`,
+          label: "まもなく期限",
         },
         progress: "warn",
-        // 残日数はバッジ側が持つので、Meta には期限日だけを出す（Figma S-10）
-        meta: domain.expiresAt === null ? "—" : formatDate(domain.expiresAt),
+        meta: expiryMeta(domain, now),
         primary: { kind: "renew", label: "今すぐ更新", variant: "solid" },
-        showDetail: true,
       };
-    }
     case "redeemable":
       return {
         border: "border-line",
         faded: false,
-        badge: {
-          ...badgeStyle,
-          label:
-            rgpRemaining === null ? "復旧猶予" : `復旧猶予 残${rgpRemaining}日`,
-        },
+        badge: { ...badgeStyle, label: DISPLAY_STATUS_LABEL.rgp },
         progress: null,
-        meta: "廃止済み — 復旧可能",
+        meta:
+          rgpRemaining === null
+            ? "いまなら復旧できます"
+            : `復旧できます · 残${rgpRemaining}日`,
         primary: { kind: "restore", label: "復旧する", variant: "solid" },
-        showDetail: true,
       };
     case "transferring":
       return {
@@ -204,7 +192,7 @@ function present(
         faded: true,
         badge: { ...badgeStyle, label: "移管申請中" },
         progress: null,
-        meta: "完了までロック中",
+        meta: "完了するまで変更できません",
         primary: {
           kind: "link",
           label: "状態を確認",
@@ -212,7 +200,6 @@ function present(
           href: `/transfers?domain=${encodeURIComponent(domain.name)}`,
           trailingIcon: true,
         },
-        showDetail: false,
       };
     case "hold":
       return {
@@ -226,7 +213,6 @@ function present(
         progress: null,
         meta: expiryMeta(domain, now),
         primary: { kind: "edit", label: "情報修正", variant: "outline" },
-        showDetail: true,
       };
     case "inactive":
       return {
@@ -237,9 +223,8 @@ function present(
           label: DISPLAY_STATUS_LABEL.inactive,
         },
         progress: "brand",
-        meta: expiryMeta(domain, now),
+        meta: stateMeta("つながりません", domain.expiresAt),
         primary: { kind: "edit", label: "NS を設定", variant: "solid" },
-        showDetail: true,
       };
     case "pendingDelete":
       return {
@@ -253,15 +238,9 @@ function present(
         meta:
           rgpRemaining === null
             ? "完全削除の手続き中"
-            : `完全削除まで 残${rgpRemaining}日`,
-        primary: {
-          kind: "link",
-          label: "詳細",
-          variant: "subtle",
-          href: detailHref,
-          trailingIcon: true,
-        },
-        showDetail: false,
+            : `完全削除まで · 残${rgpRemaining}日`,
+        // できる操作が無い状態。詳細はカード面を押せば開くのでボタンは出さない
+        primary: null,
       };
     case "locked":
       return {
@@ -275,7 +254,6 @@ function present(
         progress: "brand",
         meta: expiryMeta(domain, now),
         primary: { kind: "renew", label: "更新", variant: "outline" },
-        showDetail: true,
       };
     case "active":
       return {
@@ -288,18 +266,18 @@ function present(
         progress: "brand",
         meta: expiryMeta(domain, now),
         primary: { kind: "renew", label: "更新", variant: "outline" },
-        showDetail: true,
       };
   }
 }
 
 /** S-13: 同期に失敗したカードは更新系を Disabled にする。 */
-const STALE_REASON =
-  "同期に失敗しています。「最新化」で最新の状態にしてから操作してください。";
+const STALE_REASON = "「最新化」を押すと操作できます。";
 
 /**
  * 主操作を実行できない理由（AC-07-1）。null なら実行できる。
- * 参照系（詳細 / 状態を確認）は stale でも塞がない。
+ *
+ * カードに見える形で出す文なので、EPP ステータス名をそのまま並べず
+ * 「次に何をすれば動くか」だけを書く。詳細を開く導線（カード面 / 状態を確認）は塞がない。
  */
 function blockedReason(domain: DomainSummary, kind: ActionKind): string | null {
   if (kind === "link") {
@@ -311,13 +289,20 @@ function blockedReason(domain: DomainSummary, kind: ActionKind): string | null {
   if (kind === "restore") {
     return isRestorable(domain.rgpStatuses, domain.statuses)
       ? null
-      : "復旧できる状態ではありません。";
+      : "復旧できる期間を過ぎています。";
   }
   const operation = kind === "renew" ? "renew" : "update";
   const check = isOperationAllowed(operation, domain.statuses);
-  return check.allowed
-    ? null
-    : `${check.blockedBy.join(" / ")} のため実行できません。`;
+  if (check.allowed) {
+    return null;
+  }
+  // client* のロックは自分で外せる。server* や手続き中はレジストリ側の都合。
+  const selfUnlockable =
+    check.blockedBy.length > 0 &&
+    check.blockedBy.every((status) => status.startsWith("client"));
+  return selfUnlockable
+    ? "詳細画面でロックを外すと操作できます。"
+    : "レジストリ側で止まっているため操作できません。";
 }
 
 export interface DomainCardProps {
@@ -342,32 +327,37 @@ export function DomainCard({
   className,
 }: DomainCardProps) {
   const titleId = useId();
+  const detailId = useId();
   const reasonId = useId();
   const status = deriveCardStatus(domain, now);
   const view = present(domain, status, now);
   const detailHref = `/domains/${encodeURIComponent(domain.name)}`;
+  const primary = view.primary;
 
   const handlers: Record<
     Exclude<ActionKind, "link">,
     ((domain: DomainSummary) => void) | undefined
   > = { renew: onRenew, restore: onRestore, edit: onEdit };
   const onPrimary =
-    view.primary.kind === "link" ? undefined : handlers[view.primary.kind];
-  const reason = blockedReason(domain, view.primary.kind);
-  const trailingIcon = view.primary.trailingIcon ? <ArrowRight /> : undefined;
+    primary === null || primary.kind === "link"
+      ? undefined
+      : handlers[primary.kind];
+  const reason = primary === null ? null : blockedReason(domain, primary.kind);
 
   // 実行できないときは常に Disabled（S-13 / AC-07-1）。
   // 実行できるならコールバック優先で、無ければ詳細画面へ送る（ダイアログは詳細画面が持つ）。
-  let primaryButton: ReactNode;
-  if (reason !== null) {
+  let primaryButton: ReactNode = null;
+  if (primary === null) {
+    primaryButton = null;
+  } else if (reason !== null) {
     primaryButton = (
       <Button
         aria-describedby={reasonId}
         disabled
         size="sm"
-        variant={view.primary.variant}
+        variant={primary.variant}
       >
-        {view.primary.label}
+        {primary.label}
       </Button>
     );
   } else if (onPrimary === undefined) {
@@ -375,10 +365,10 @@ export function DomainCard({
       <Button
         asChild
         size="sm"
-        variant={view.primary.variant}
-        {...(trailingIcon ? { trailingIcon } : {})}
+        variant={primary.variant}
+        {...(primary.trailingIcon ? { trailingIcon: <ArrowRight /> } : {})}
       >
-        <Link href={view.primary.href ?? detailHref}>{view.primary.label}</Link>
+        <Link href={primary.href ?? detailHref}>{primary.label}</Link>
       </Button>
     );
   } else {
@@ -386,9 +376,9 @@ export function DomainCard({
       <Button
         onClick={() => onPrimary(domain)}
         size="sm"
-        variant={view.primary.variant}
+        variant={primary.variant}
       >
-        {view.primary.label}
+        {primary.label}
       </Button>
     );
   }
@@ -397,14 +387,32 @@ export function DomainCard({
     <article
       aria-labelledby={titleId}
       className={cn(
-        "flex w-full flex-col gap-2 border-2 border-solid bg-panel px-4 py-3 transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-[0_6px_0_-2px_var(--color-line)] motion-reduce:transition-none motion-reduce:hover:translate-y-0",
+        "group relative flex w-full flex-col gap-2 border-2 border-solid bg-panel px-4 py-3 transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-[0_6px_0_-2px_var(--color-line)] motion-reduce:transition-none motion-reduce:hover:translate-y-0",
         view.border,
         view.faded && "opacity-[var(--opacity-muted)]",
         className,
       )}
     >
+      {/*
+        カード面のどこを押しても詳細へ（stretched link）。
+        絶対配置なので Tab の順番は「カード → 主操作」のままで、フォーカスリング
+        （globals.css の :focus-visible）はカードの外周にそのまま出る。
+        主操作は下の relative なブロックが前面に来るので、クリックを奪われない。
+      */}
+      <Link
+        aria-labelledby={`${titleId} ${detailId}`}
+        className="absolute inset-0"
+        href={detailHref}
+      />
+      <span className="sr-only" id={detailId}>
+        の詳細
+      </span>
+
       <div className="flex w-full items-center justify-between gap-2 overflow-hidden">
-        <p className="min-w-0 truncate text-domain-card text-ink" id={titleId}>
+        <p
+          className="min-w-0 truncate text-domain-card text-ink group-hover:underline group-hover:underline-offset-2"
+          id={titleId}
+        >
           {domain.name}
         </p>
         <Badge
@@ -414,10 +422,6 @@ export function DomainCard({
         >
           {view.badge.label}
         </Badge>
-        <HelpTip
-          content={STATUS_HELP[status]}
-          label={`${view.badge.label}とは`}
-        />
       </div>
 
       {view.progress === null ? null : (
@@ -440,24 +444,17 @@ export function DomainCard({
         </span>
       </div>
 
-      <div className="flex items-center gap-1.5">
-        {primaryButton}
-        {view.showDetail ? (
-          <Button
-            asChild
-            size="sm"
-            trailingIcon={<ArrowRight />}
-            variant="subtle"
-          >
-            <Link href={detailHref}>詳細</Link>
-          </Button>
-        ) : null}
-        {reason === null ? null : (
-          <span className="sr-only" id={reasonId}>
-            {reason}
-          </span>
-        )}
-      </div>
+      {primary === null ? null : (
+        <div className="relative flex flex-col items-start gap-1">
+          {primaryButton}
+          {reason === null ? null : (
+            // Disabled の理由は目にも見せる（読み上げは aria-describedby が拾う）
+            <p className="text-caption text-muted" id={reasonId}>
+              {reason}
+            </p>
+          )}
+        </div>
+      )}
     </article>
   );
 }

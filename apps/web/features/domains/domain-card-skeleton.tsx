@@ -26,10 +26,8 @@ export function DomainCardSkeleton({ className }: { className?: string }) {
         <Skeleton className="h-4 w-16" />
         <Skeleton className="h-4 w-32" />
       </div>
-      <div className="flex items-center gap-1.5">
-        <Skeleton className="h-control-sm w-20" />
-        <Skeleton className="h-control-sm w-20" />
-      </div>
+      {/* 操作はカードあたり主操作 1 つだけ（#216） */}
+      <Skeleton className="h-control-sm w-20" />
     </div>
   );
 }
