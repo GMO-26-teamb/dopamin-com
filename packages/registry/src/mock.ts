@@ -137,6 +137,14 @@ export class MockRegistryAdapter implements RegistryAdapter {
   private readonly onCall?: RegistryCallObserver;
   private readonly makeClTrid?: ClTridFactory;
   private readonly store?: MockStateStore;
+  /**
+   * ストア併用時の直列化（このインスタンス内）。`recorded()` の
+   * hydrate → 実行 → persist を 1 単位として並べる。並行リクエストの hydrate が
+   * 「変更済み・未 persist」の状態を消すと、変更検知（before 比較）まで一致して
+   * 成功応答を返した書き込みが黙って失われるため。
+   * インスタンスを跨ぐ競合は従来どおり後勝ち（mock-store.ts の割り切り）。
+   */
+  private storeQueue: Promise<unknown> = Promise.resolve();
 
   constructor(options?: {
     /**
@@ -266,20 +274,38 @@ export class MockRegistryAdapter implements RegistryAdapter {
   ): Promise<T> {
     const fn = () => this.withPostWriteTimeout(command, run);
     if (this.store) {
-      await this.hydrate();
-      // 参照系（check / info / hello / poll の空振り）は状態を変えないので書き戻さない。
-      // /health は定期的に叩かれるため、変わっていないのに毎回書くと無駄が積み上がる。
-      // 変更の有無はスナップショットの比較で見る（変更点を各所で追うより崩れにくい）
-      const before = JSON.stringify(this.snapshot());
-      try {
-        return await this.record(command, domainName, request, fn, toResponse);
-      } finally {
-        if (JSON.stringify(this.snapshot()) !== before) {
-          await this.persist();
+      return this.serialized(async () => {
+        await this.hydrate();
+        // 参照系（check / info / hello / poll の空振り）は状態を変えないので書き戻さない。
+        // /health は定期的に叩かれるため、変わっていないのに毎回書くと無駄が積み上がる。
+        // 変更の有無はスナップショットの比較で見る（変更点を各所で追うより崩れにくい）
+        const before = JSON.stringify(this.snapshot());
+        try {
+          return await this.record(
+            command,
+            domainName,
+            request,
+            fn,
+            toResponse,
+          );
+        } finally {
+          if (JSON.stringify(this.snapshot()) !== before) {
+            await this.persist();
+          }
         }
-      }
+      });
     }
     return this.record(command, domainName, request, fn, toResponse);
+  }
+
+  /** {@link storeQueue} に載せて順番に実行する。前の失敗は後続に伝播させない。 */
+  private serialized<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.storeQueue.then(task);
+    this.storeQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
   }
 
   /**

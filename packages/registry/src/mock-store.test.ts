@@ -134,6 +134,47 @@ describe("MockRegistryAdapter + MockStateStore", () => {
     ]);
   });
 
+  it("書き込みの persist 前に同一インスタンスで並行リクエストが走っても書き込みが失われない", async () => {
+    const store = createInMemoryMockStore();
+
+    // onCall（操作ログ書き込み相当）の await 中に別リクエストが割り込む状況を再現する。
+    // 最初の create の emit だけを止め、その間に参照系の hydrate を走らせる
+    let releaseCreateEmit = (): void => {};
+    const createEmitGate = new Promise<void>((resolve) => {
+      releaseCreateEmit = resolve;
+    });
+    let createEmitted = false;
+    const adapter = new MockRegistryAdapter({
+      id: "mock",
+      store,
+      onCall: async (record) => {
+        if (record.command === "create" && !createEmitted) {
+          createEmitted = true;
+          await createEmitGate;
+        }
+      },
+    });
+
+    const creating = adapter.create({
+      name: "lost.com",
+      periodYears: 1,
+      authInfo: "s3cret",
+    });
+    // create が emit で止まるところまで進める
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // 同じインスタンスへの並行リクエスト（/health の hello など参照系でよい）
+    const reading = adapter.hello();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    releaseCreateEmit();
+    await creating;
+    await reading;
+
+    // 成功応答を返した create は、別インスタンス（= 次のリクエスト）から見えなければならない
+    await expect(adapterOn(store).info("lost.com")).resolves.toMatchObject({
+      name: "lost.com",
+    });
+  });
+
   it("状態を変えない参照系は書き戻さない（/health のたびに書かない）", async () => {
     const store = createInMemoryMockStore();
     let saves = 0;
