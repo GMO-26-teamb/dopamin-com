@@ -13,6 +13,8 @@ export interface PlanTreeProps {
   domain: string;
   hosts: readonly SubdomainHost[];
   selectedId: string | null;
+  /** 上限（契約は 1〜8 件）に達したら追加ボタンを止める。既定は追加できる。 */
+  canAdd?: boolean;
   onSelect: (id: string) => void;
   onAddHost: () => void;
 }
@@ -21,6 +23,7 @@ export function PlanTree({
   domain,
   hosts,
   selectedId,
+  canAdd = true,
   onSelect,
   onAddHost,
 }: PlanTreeProps) {
@@ -44,7 +47,8 @@ export function PlanTree({
         <li className="flex items-center">
           <span aria-hidden="true" className="h-0.5 w-5 shrink-0 bg-line" />
           <button
-            className="inline-flex items-center gap-1.5 border-2 border-soft border-dashed bg-panel px-2.5 py-1.5 text-label-sm text-muted transition-colors hover:bg-hover hover:text-ink"
+            className="inline-flex items-center gap-1.5 border-2 border-soft border-dashed bg-panel px-2.5 py-1.5 text-label-sm text-muted transition-colors hover:bg-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-[var(--opacity-disabled)] disabled:hover:bg-panel disabled:hover:text-muted"
+            disabled={!canAdd}
             onClick={onAddHost}
             type="button"
           >

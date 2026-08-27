@@ -242,4 +242,91 @@ describe("SubdomainsScreen", () => {
       ).toBeInTheDocument();
     });
   });
+
+  // 保存前の入力検証（AC-13-3）。契約（savedSubdomainProposalSchema）を満たさない設計を
+  // サーバーに投げると 400 が返るだけなので、押した時点で欄に戻す
+  it("追加した直後のホストのまま保存すると、欄でエラーを出して保存しない", async () => {
+    const user = renderScreen("takutaku.com");
+
+    await screen.findByText("反映済み 2・変更あり 1・未反映 1");
+    await user.click(screen.getByRole("button", { name: "ホストを追加" }));
+    await user.click(screen.getByRole("button", { name: "設計を保存" }));
+
+    expect(screen.getByText("new: 用途を入力してください")).toBeInTheDocument();
+    expect(screen.getByText("用途を入力してください")).toBeInTheDocument();
+    expect(screen.getByText("向き先を入力してください")).toBeInTheDocument();
+    // 保存されていないので未保存のままで、反映もできない
+    expect(
+      screen.getByText(
+        "未保存の変更があります。先に「設計を保存」してください。",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("欄を埋めれば保存できる（エラーは消える）", async () => {
+    const user = renderScreen("takutaku.com");
+
+    await screen.findByText("反映済み 2・変更あり 1・未反映 1");
+    await user.click(screen.getByRole("button", { name: "ホストを追加" }));
+    await user.click(screen.getByRole("button", { name: "設計を保存" }));
+    await user.type(screen.getByLabelText("用途"), "管理画面");
+    await user.type(screen.getByLabelText("向き先"), "admin.example-app.com");
+    await user.click(screen.getByRole("button", { name: "設計を保存" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("反映済み 2・変更あり 1・未反映 2"),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByText("用途を入力してください"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("A レコードにホスト名を入れたまま保存すると欄で指摘する", async () => {
+    const user = renderScreen("takutaku.com");
+
+    await screen.findByText("反映済み 2・変更あり 1・未反映 1");
+    const target = screen.getByLabelText("向き先");
+    await user.clear(target);
+    await user.type(target, "cname.example.com");
+    await user.click(screen.getByRole("button", { name: "設計を保存" }));
+
+    expect(
+      screen.getByText(
+        "A レコードの向き先は IPv4 アドレスで指定してください（例 203.0.113.10）",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("ホストを全部消して保存すると 1 件以上必要だと出す", async () => {
+    const user = renderScreen("takutaku.com");
+
+    await screen.findByText("反映済み 2・変更あり 1・未反映 1");
+    for (let i = 0; i < 4; i += 1) {
+      await user.click(
+        screen.getByRole("button", { name: "このホストを削除" }),
+      );
+    }
+
+    expect(
+      screen.getByText("ホストを追加すると編集できます。"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "設計を保存" }));
+
+    expect(
+      screen.getByText("ホストは 1 件以上必要です。ホストを追加してください"),
+    ).toBeInTheDocument();
+  });
+
+  it("上限（8 件）に達したら「ホストを追加」を押せなくする", async () => {
+    const user = renderScreen("takutaku.com");
+
+    await screen.findByText("反映済み 2・変更あり 1・未反映 1");
+    for (let i = 0; i < 4; i += 1) {
+      await user.click(screen.getByRole("button", { name: "ホストを追加" }));
+    }
+
+    expect(screen.getByRole("button", { name: "ホストを追加" })).toBeDisabled();
+  });
 });

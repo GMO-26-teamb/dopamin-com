@@ -30,6 +30,7 @@ import { EditPanel } from "./edit-panel";
 import { ManualInstructions } from "./manual-instructions";
 import { DescriptionForm, RepoForm } from "./repo-form";
 import { PlanTree } from "./tree";
+import { canAddHost, hostFieldErrors, validatePlan } from "./validate";
 
 /**
  * サブドメイン設計（FR-13 / S-40 〜 S-46）。
@@ -42,6 +43,9 @@ import { PlanTree } from "./tree";
  * - S-44   反映確認ダイアログ（AC-13-7、`ApplyDnsDialog`）
  * - S-45   反映後 Banner Ok + 全ノード「反映済み」（AC-13-4）
  * - S-46   NS 切替失敗 → Banner Warn、レコードは未変更（AC-13-5）
+ *
+ * 保存は `validate.ts` で契約（`savedSubdomainProposalSchema`）を満たすか先に見る。
+ * 満たさない場合はサーバーに投げず、該当ホストを選び直して欄にエラーを出す。
  */
 
 const S40_TITLE = "リポジトリを解析して構成を提案します";
@@ -96,6 +100,8 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
   const [banner, setBanner] = useState<ScreenBanner | null>(null);
   const [dismissedProposeError, setDismissedProposeError] = useState(false);
   const [dismissedDiffError, setDismissedDiffError] = useState(false);
+  // 保存を押すまでは欄を赤くしない（D-02 のネームサーバー編集と同じ扱い）
+  const [submitted, setSubmitted] = useState(false);
 
   // 取得した設計を編集用の下書きに写す（保存・反映のたびに取り直される）
   if (planData !== syncedPlan) {
@@ -103,6 +109,7 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
     setSyncedPlan(planData);
     setDraft(planData);
     setRepoUrl(planData?.repoUrl ?? "");
+    setSubmitted(false);
     setSelectedId((current) =>
       current !== null && hosts.some((host) => host.id === current)
         ? current
@@ -118,6 +125,13 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
     draft?.hosts.find((host) => host.id === selectedId) ??
     draft?.hosts[0] ??
     null;
+
+  // 保存できない理由（件数・全体方針・各ホストの欄）。null なら PUT してよい
+  const planError = draft === null ? null : validatePlan(draft);
+  const fieldErrors =
+    submitted && draft !== null && selected !== null
+      ? hostFieldErrors(selected, draft.hosts)
+      : {};
 
   const diffPending = hasPlan && diff.isPending;
   const diffError = hasPlan ? diff.error : null;
@@ -200,6 +214,14 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
       return;
     }
     setBanner(null);
+    setSubmitted(true);
+    if (planError !== null) {
+      // サーバーに投げれば 400 が返るだけなので、該当ホストを開いて欄で直させる
+      if (planError.hostId !== null) {
+        setSelectedId(planError.hostId);
+      }
+      return;
+    }
     save.mutate(draft);
   }
 
@@ -345,6 +367,7 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
         <div className="flex w-full flex-col items-start gap-4 lg:flex-row">
           <div className="w-full min-w-0 flex-1">
             <PlanTree
+              canAdd={canAddHost(draft.hosts)}
               domain={domain}
               hosts={draft.hosts}
               onAddHost={addHost}
@@ -359,6 +382,7 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
               </p>
             ) : (
               <EditPanel
+                errors={fieldErrors}
                 host={selected}
                 onChange={updateHost}
                 onRemove={() => removeHost(selected.id)}
@@ -433,6 +457,12 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
           onRepoUrlChange={setRepoUrl}
           repoUrl={repoUrl}
         />
+      ) : null}
+
+      {submitted && planError !== null ? (
+        <p className="w-full text-caption text-warn" role="alert">
+          {planError.message}
+        </p>
       ) : null}
 
       {save.error === null ? null : <ErrorCard error={save.error} />}
