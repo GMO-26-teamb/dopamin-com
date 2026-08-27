@@ -65,6 +65,6 @@ export async function signUpWithPasskey(
 ): Promise<void> {
   await page.goto("/signup");
   await page.getByLabel("表示名").fill(displayName);
-  await page.getByRole("button", { name: "パスキーを作成する" }).click();
+  await page.getByRole("button", { name: "パスキーを作成" }).click();
   await expect(page).toHaveURL(/\/dashboard$/);
 }

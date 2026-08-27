@@ -49,12 +49,12 @@ const COPY: Record<string, EppStatusCopy> = {
     tone: "warn",
   },
   clientUpdateProhibited: {
-    label: "変更ロック（レジストラ）",
+    label: "情報修正ロック（レジストラ）",
     description: "情報修正ができません。ロック解除だけは実行できます。",
     tone: "neutral",
   },
   serverUpdateProhibited: {
-    label: "変更ロック（レジストリ）",
+    label: "情報修正ロック（レジストリ）",
     description:
       "情報修正ができません。解除にはレジストリ運営への依頼が必要です。",
     tone: "warn",
@@ -71,13 +71,13 @@ const COPY: Record<string, EppStatusCopy> = {
   },
   clientRenewProhibited: {
     label: "更新ロック（レジストラ）",
-    description: "有効期限の延長ができません。情報修正から解除できます。",
+    description: "有効期限を更新できません。情報修正から解除できます。",
     tone: "neutral",
   },
   serverRenewProhibited: {
     label: "更新ロック（レジストリ）",
     description:
-      "有効期限の延長ができません。解除にはレジストリ運営への依頼が必要です。",
+      "有効期限を更新できません。解除にはレジストリ運営への依頼が必要です。",
     tone: "warn",
   },
   pendingTransfer: {

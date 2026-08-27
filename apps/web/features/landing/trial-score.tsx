@@ -30,7 +30,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import type { ApiClientError } from "@/lib/api/errors";
 import { usePreviewUniqueness } from "@/lib/api/hooks";
 import type { UniquenessPreview } from "@/lib/api/types";
-import { ScoreField } from "./score-field";
 
 /** 類似候補は上位 3 件まで（Figma と同じ）。 */
 const NEAREST_LIMIT = 3;
@@ -39,7 +38,7 @@ const NEAREST_LIMIT = 3;
 const EXAMPLES = ["gogle", "takutaku", "amazan"] as const;
 
 const INVALID_INPUT =
-  "英数字とハイフンで入力してください（例: takutaku / takutaku.com）。";
+  "英数字とハイフンで入力してください（例: takutaku / takutaku.com）";
 
 /** 「gogle」なら `{ sld }`、「gogle.com」なら `{ name }` に振り分ける。 */
 function toPreviewRequest(raw: string): UniquenessPreviewRequest | null {
@@ -78,57 +77,59 @@ export function TrialScore() {
   };
 
   return (
-    <section className="flex flex-col justify-center gap-4 px-6 py-10 md:px-10 lg:py-14 xl:px-14">
-      <ScoreField placement="top" />
-
-      <div className="flex flex-col gap-1">
-        <label className="text-label text-ink" htmlFor={inputId}>
-          ためしてみる
-        </label>
-        <p className="text-caption text-muted">
-          ログイン不要。0〜100 で返します。
-        </p>
-      </div>
-
-      <form
-        className="flex flex-col gap-2 sm:flex-row sm:items-start"
-        onSubmit={(event) => {
-          event.preventDefault();
-          run(value);
-        }}
-      >
-        <div className="min-w-0 flex-1">
-          <Input
-            error={invalid ? INVALID_INPUT : undefined}
-            id={inputId}
-            name="trial"
-            onChange={(event) => {
-              setValue(event.target.value);
-              setInvalid(false);
-            }}
-            placeholder="gogle"
-            value={value}
-          />
+    <section className="flex flex-col justify-center px-6 py-10 md:px-10 lg:py-14 xl:px-14">
+      {/*
+        右半分はブランドグラデーションの地なので、入力ブロックは半透明のカードに
+        載せて読めるようにする（#224）。角丸は使わない（Modernist）。
+      */}
+      <div className="flex w-full flex-col gap-4 border-2 border-ink border-solid bg-panel/85 p-5 backdrop-blur-[2px] lg:p-6">
+        <div className="flex flex-col gap-1">
+          <label className="text-label text-ink" htmlFor={inputId}>
+            ためしてみる
+          </label>
+          <p className="text-caption text-muted">
+            ログイン不要。0〜100 で返します。
+          </p>
         </div>
-        <Button
-          leadingIcon={<Search />}
-          loading={preview.isPending}
-          type="submit"
-          variant="solid"
+
+        <form
+          className="flex flex-col gap-2 sm:flex-row sm:items-start"
+          onSubmit={(event) => {
+            event.preventDefault();
+            run(value);
+          }}
         >
-          {preview.isPending ? "確認中…" : "スコアを見る"}
-        </Button>
-      </form>
+          <div className="min-w-0 flex-1">
+            <Input
+              error={invalid ? INVALID_INPUT : undefined}
+              id={inputId}
+              name="trial"
+              onChange={(event) => {
+                setValue(event.target.value);
+                setInvalid(false);
+              }}
+              placeholder="gogle"
+              value={value}
+            />
+          </div>
+          <Button
+            leadingIcon={<Search />}
+            loading={preview.isPending}
+            type="submit"
+            variant="solid"
+          >
+            {preview.isPending ? "確認中…" : "スコアを見る"}
+          </Button>
+        </form>
 
-      <TrialResult
-        error={preview.error}
-        isPending={preview.isPending}
-        onExample={tryExample}
-        onRetry={() => run(value)}
-        result={preview.data ?? null}
-      />
-
-      <ScoreField placement="bottom" />
+        <TrialResult
+          error={preview.error}
+          isPending={preview.isPending}
+          onExample={tryExample}
+          onRetry={() => run(value)}
+          result={preview.data ?? null}
+        />
+      </div>
     </section>
   );
 }
@@ -174,25 +175,26 @@ function TrialResult({
   return <TrialCard result={result} />;
 }
 
-/** まだ何も試していないときの右カラム。何が返るのかと、そのまま押せる例を出す。 */
+/**
+ * まだ何も試していないときの右カラム。そのまま押せる例だけを出す。
+ * 外側が半透明のカードなので、ここは入れ子のカードにしない（#224）。
+ */
 function TrialEmpty({ onExample }: { onExample: (example: string) => void }) {
   return (
-    <Card emphasis="muted">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-caption text-muted">例</span>
-        {EXAMPLES.map((example) => (
-          <Button
-            key={example}
-            onClick={() => onExample(example)}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            {example}
-          </Button>
-        ))}
-      </div>
-    </Card>
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-caption text-muted">例</span>
+      {EXAMPLES.map((example) => (
+        <Button
+          key={example}
+          onClick={() => onExample(example)}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          {example}
+        </Button>
+      ))}
+    </div>
   );
 }
 

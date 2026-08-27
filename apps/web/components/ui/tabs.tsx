@@ -1,7 +1,7 @@
 "use client";
 
 import { Tabs as TabsPrimitive } from "radix-ui";
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -35,10 +35,13 @@ export function TabsList({
 export interface TabsTriggerProps
   extends ComponentProps<typeof TabsPrimitive.Trigger> {
   count?: number;
+  /** ラベルの前に置く記号（Button の leadingIcon と同じ 16px 枠） */
+  icon?: ReactNode;
 }
 
 export function TabsTrigger({
   count,
+  icon,
   className,
   children,
   ...props
@@ -51,6 +54,14 @@ export function TabsTrigger({
       )}
       {...props}
     >
+      {icon ? (
+        <span
+          aria-hidden="true"
+          className="inline-flex size-4 shrink-0 items-center justify-center [&_svg]:size-full"
+        >
+          {icon}
+        </span>
+      ) : null}
       {children}
       {count === undefined ? null : (
         <span className="inline-flex items-center border-[length:var(--stroke-medium)] border-muted px-2 py-0.5 text-label-xs text-muted">

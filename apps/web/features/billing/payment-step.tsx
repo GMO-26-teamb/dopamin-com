@@ -53,7 +53,7 @@ export function PaymentStep({
 
       <div className="flex w-full flex-wrap items-center justify-between gap-2">
         <p className="inline-flex items-center gap-1.5 text-label text-ink">
-          <CreditCard aria-hidden="true" className="size-4" />
+          <CreditCard aria-hidden="true" className="size-4 shrink-0" />
           お支払い方法
         </p>
         {isDemoCard ? (

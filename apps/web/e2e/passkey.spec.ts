@@ -50,9 +50,9 @@ test.describe("FR-01 パスキー認証", () => {
     const deleteButtons = page.getByRole("button", {
       name: /のパスキーを削除/,
     });
-    // 最後の 1 件だけ aria-label に「（最後の1つは不可）」が付く（passkey-section.tsx）
+    // 最後の 1 件だけ aria-label に「（最後の 1 つは不可）」が付く（passkey-section.tsx）
     const lastPasskeyButton = page.getByRole("button", {
-      name: /最後の1つは不可/,
+      name: /最後の 1 つは不可/,
     });
 
     await test.step("S-01: 表示名を入れてパスキーを作成すると /dashboard に着く", async () => {

@@ -147,7 +147,7 @@ describe("DomainCard の 8 ステータス（ui-screens §2.2）", () => {
     expect(screen.getByRole("progressbar")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "更新" })).toBeInTheDocument();
     expect(
-      screen.getByText(/^\d{4}-\d{2}-\d{2} · 残330日$/),
+      screen.getByText(/^\d{4}-\d{2}-\d{2} · 残 330 日$/),
     ).toBeInTheDocument();
     expect(screen.getByText("Kitaqsign")).toBeInTheDocument();
   });
@@ -160,7 +160,7 @@ describe("DomainCard の 8 ステータス（ui-screens §2.2）", () => {
       screen.getByRole("link", { name: "今すぐ更新" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/^\d{4}-\d{2}-\d{2} · 残23日$/),
+      screen.getByText(/^\d{4}-\d{2}-\d{2} · 残 23 日$/),
     ).toBeInTheDocument();
   });
 
@@ -175,8 +175,8 @@ describe("DomainCard の 8 ステータス（ui-screens §2.2）", () => {
     });
 
     expect(screen.getByText("復旧猶予")).toBeInTheDocument();
-    expect(screen.getByText("復旧できます · 残18日")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "復旧する" })).toBeInTheDocument();
+    expect(screen.getByText("復旧できます · 残 18 日")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "復旧" })).toBeInTheDocument();
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
   });
 
@@ -190,20 +190,21 @@ describe("DomainCard の 8 ステータス（ui-screens §2.2）", () => {
     });
 
     expect(screen.getByText("復旧猶予")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "復旧する" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "復旧" })).toBeInTheDocument();
   });
 
-  it("Transferring: 移管申請中 + 状態を確認（/transfers へ）", () => {
+  it("Transferring: 状態名は statusLabel（SSOT）+ 移管を見る（/transfers へ）", () => {
     renderCard({
       name: "tkt-lab.net",
       statuses: ["ok", "pendingTransfer"],
       transfer: { direction: "out", actByAt: at(1) },
     });
 
-    expect(screen.getByText("移管申請中")).toBeInTheDocument();
+    // 受信した OUT 申請なので「移管申請中」ではない（詳細ヘッダーと同じ statusLabel）
+    expect(screen.getByText("移管中（申請受信）")).toBeInTheDocument();
     expect(screen.getByText("完了するまで変更できません")).toBeInTheDocument();
     // 宛先がカード面（詳細）と違うので、この導線だけはボタンとして残す
-    expect(screen.getByRole("link", { name: "状態を確認" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "移管を見る" })).toHaveAttribute(
       "href",
       "/transfers?domain=tkt-lab.net",
     );
@@ -239,7 +240,7 @@ describe("DomainCard の 8 ステータス（ui-screens §2.2）", () => {
     });
 
     expect(screen.getByText("削除待ち")).toBeInTheDocument();
-    expect(screen.getByText("完全削除まで · 残4日")).toBeInTheDocument();
+    expect(screen.getByText("完全削除まで · 残 4 日")).toBeInTheDocument();
     // 残るリンクはカード面の 1 本だけ
     expect(screen.getAllByRole("link")).toHaveLength(1);
     expect(cardLink()).toHaveAttribute("href", "/domains/takutaku.com");

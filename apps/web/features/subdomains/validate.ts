@@ -65,10 +65,10 @@ function targetError(
     return "向き先は IPv4 アドレスまたはホスト名で指定してください";
   }
   if (recordType === "A" && !isIpv4(trimmed)) {
-    return "A レコードの向き先は IPv4 アドレスで指定してください（例 203.0.113.10）";
+    return "A レコードの向き先は IPv4 アドレスで指定してください（例: 203.0.113.10）";
   }
   if (recordType !== "A" && isIpv4(trimmed)) {
-    return `${recordType} レコードの向き先はホスト名で指定してください（例 cname.example.com）`;
+    return `${recordType} レコードの向き先はホスト名で指定してください（例: cname.example.com）`;
   }
   return undefined;
 }

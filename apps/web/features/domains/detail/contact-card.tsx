@@ -24,10 +24,10 @@ export interface ContactCardProps {
 /**
  * レジストリの `info` は登録者をコンタクト ID でしか返さないので、アプリが
  * そのコンタクトを持っていないと中身が分からない（API の `registrantProfile` が null）。
- * ID を氏名として出しても読めないため、空のまま「未取得」と書く。
+ * ID を氏名として出しても読めないため、空のまま「未設定」と書く。
  */
 function contactValue(value: string): string {
-  return value.length === 0 ? "未取得" : value;
+  return value.length === 0 ? "未設定" : value;
 }
 
 export function ContactCard({ domain, onEdit }: ContactCardProps) {
@@ -50,13 +50,13 @@ export function ContactCard({ domain, onEdit }: ContactCardProps) {
           )}
           {onEdit === undefined ? null : (
             <Button
-              aria-label="登録者情報を変更"
+              aria-label="登録者の情報修正"
               leadingIcon={<Pencil />}
               onClick={onEdit}
               size="sm"
               variant="subtle"
             >
-              変更
+              情報修正
             </Button>
           )}
         </div>
