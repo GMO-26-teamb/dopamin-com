@@ -753,3 +753,201 @@ describe("domains.check（FR-03 / FR-05）", () => {
     expect(results[1]?.uniqueness).toBeNull();
   });
 });
+
+// ---- AI 候補生成（FR-04 / #178） ----
+
+/** `POST /ai/domain-candidates` の候補 1 件分（shared の domainCandidateResultSchema と同じ形）。 */
+function apiCandidate(overrides: Record<string, unknown> = {}) {
+  return {
+    sld: "takutaku",
+    tld: "com",
+    reason: "覚えやすく短い",
+    check: {
+      name: "takutaku.com",
+      registry: "kitaqsign",
+      availability: "available",
+      uniqueness: {
+        score: 82,
+        label: "high",
+        topSimilar: [{ name: "taku", similarity: 0.42 }],
+        confidence: "normal",
+        algorithmVersion: "v3.4-r2-ts.1",
+        corpusVersion: "tranco-74V4X-2026-08-26-top10k+curated-v1",
+      },
+    },
+    ...overrides,
+  };
+}
+
+describe("candidates.generate（POST /ai/domain-candidates。FR-04）", () => {
+  it("同一オリジンの /api/v1/ai/domain-candidates に JSON を POST する", async () => {
+    stubFetch(200, { candidates: [apiCandidate()] });
+
+    await services().candidates.generate({
+      nickname: "たくたく",
+      purpose: "ポートフォリオ",
+      tlds: ["com"],
+      exclude: ["taku.com"],
+    });
+
+    expect(calls[0]?.url).toContain("/api/v1/ai/domain-candidates");
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.contentType).toBe("application/json");
+    expect(JSON.parse(calls[0]?.body ?? "null")).toEqual({
+      nickname: "たくたく",
+      purpose: "ポートフォリオ",
+      tlds: ["com"],
+      exclude: ["taku.com"],
+    });
+  });
+
+  it("候補に理由と空き確認・独自性スコアが載る（AC-04-1 / topSimilar → nearest）", async () => {
+    stubFetch(200, { candidates: [apiCandidate()] });
+
+    const [candidate] = await services().candidates.generate({
+      nickname: "たくたく",
+    });
+
+    expect(candidate).toEqual({
+      sld: "takutaku",
+      tld: "com",
+      reason: "覚えやすく短い",
+      registry: "kitaqsign",
+      availability: "available",
+      uniqueness: {
+        score: 82,
+        label: "high",
+        nearest: [{ name: "taku", similarity: 0.42 }],
+      },
+      alternatives: [],
+    });
+  });
+
+  it("空きでない候補は uniqueness: null のまま通す（§10.4）", async () => {
+    stubFetch(200, {
+      candidates: [
+        apiCandidate({
+          check: {
+            name: "taken.com",
+            registry: "kitaqsign",
+            availability: "unavailable",
+            reason: "登録済み",
+            uniqueness: null,
+          },
+        }),
+      ],
+    });
+
+    const [candidate] = await services().candidates.generate({
+      nickname: "たくたく",
+    });
+
+    expect(candidate?.availability).toBe("unavailable");
+    expect(candidate?.uniqueness).toBeNull();
+  });
+
+  it("レジストリ障害の行でもスコアは付く（AC-05-2。検索経路と同じ写像）", async () => {
+    stubFetch(200, {
+      candidates: [
+        apiCandidate({
+          check: {
+            name: "takutaku.com",
+            registry: null,
+            availability: "error",
+            uniqueness: {
+              score: 82,
+              label: "high",
+              topSimilar: [],
+              confidence: "normal",
+              algorithmVersion: "v3.4-r2-ts.1",
+              corpusVersion: "tranco-74V4X-2026-08-26-top10k+curated-v1",
+            },
+            error: {
+              code: "REGISTRY_UNAVAILABLE",
+              message: "レジストリに接続できませんでした。",
+            },
+          },
+        }),
+      ],
+    });
+
+    const [candidate] = await services().candidates.generate({
+      nickname: "たくたく",
+    });
+
+    expect(candidate?.availability).toBe("error");
+    // 未対応 TLD / 障害で registry: null が返っても ViewModel は null を持てない
+    expect(candidate?.registry).toBe("mock");
+    expect(candidate?.uniqueness?.score).toBe(82);
+  });
+
+  it("0 件でも例外にしない（揃った分だけ返す実装に合わせる）", async () => {
+    stubFetch(200, { candidates: [] });
+    await expect(
+      services().candidates.generate({ nickname: "たくたく" }),
+    ).resolves.toEqual([]);
+  });
+
+  it("形が違う応答は INTERNAL（API との契約ずれを検知する）", async () => {
+    stubFetch(200, { candidates: [{ sld: "broken" }] });
+
+    const error = await services()
+      .candidates.generate({ nickname: "たくたく" })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiClientError);
+    expect((error as ApiClientError).code).toBe("INTERNAL");
+  });
+
+  it('503 AI_UNAVAILABLE は origin: "ai" 付きで返す（S-23 の文言出し分け）', async () => {
+    stubFetch(503, {
+      error: {
+        code: "AI_UNAVAILABLE",
+        message: "AI 機能が利用できません。",
+        retryable: true,
+        requestId: "req_ai",
+      },
+    });
+
+    const error = await services()
+      .candidates.generate({ nickname: "たくたく" })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiClientError);
+    expect(error).toMatchObject({
+      code: "AI_UNAVAILABLE",
+      origin: "ai",
+      retryable: true,
+      requestId: "req_ai",
+    });
+  });
+
+  it("AI のタイムアウト（REGISTRY_TIMEOUT）も AI の失敗として扱う（AC-04-2）", async () => {
+    stubFetch(504, {
+      error: {
+        code: "REGISTRY_TIMEOUT",
+        message: "AI が 10 秒以内に応答しませんでした。",
+        retryable: true,
+      },
+    });
+
+    const error = await services()
+      .candidates.generate({ nickname: "たくたく" })
+      .catch((e: unknown) => e);
+    // レジストリ用の文言に落ちないよう origin で相手を明示する
+    expect(error).toMatchObject({ code: "REGISTRY_TIMEOUT", origin: "ai" });
+  });
+
+  it("401 は UNAUTHORIZED（requireSession。AC-01-3）", async () => {
+    stubFetch(401, {
+      error: {
+        code: "UNAUTHORIZED",
+        message: "ログインが必要です。",
+        retryable: false,
+      },
+    });
+
+    const error = await services()
+      .candidates.generate({ nickname: "たくたく" })
+      .catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: "UNAUTHORIZED", origin: "ai" });
+  });
+});

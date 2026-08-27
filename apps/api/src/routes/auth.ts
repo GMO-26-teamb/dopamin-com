@@ -7,7 +7,6 @@ import { Hono } from "hono";
 import { clearSessionCookie, setSessionCookie } from "../lib/cookies";
 import { getDb } from "../lib/db";
 import { getApiEnv } from "../lib/env";
-import { ApiException } from "../lib/errors";
 import { jsonValidator } from "../lib/validator";
 import { requireSession } from "../middleware/session";
 import {

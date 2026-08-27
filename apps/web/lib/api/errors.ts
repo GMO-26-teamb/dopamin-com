@@ -94,11 +94,20 @@ function isApiRequestErrorLike(
 /**
  * 何を投げられても `ApiClientError` に正規化する。
  * `ApiRequestError`（既存の lib/webauthn.ts）/ §10.3 のレスポンスボディ / 素の Error を吸収する。
+ *
+ * `origin` は「失敗した相手」を呼び出し側が知っている場合に渡す（AI 経路なら `"ai"`）。
+ * API の統一エラー形式は相手を持たないので、`REGISTRY_TIMEOUT` などの共用コードを
+ * AI 向けの文言に振り分けるにはここで補うしかない（ui-screens S-23 / S-41）。
+ * 既に `ApiClientError` なものは自分で相手を知っているとみなして上書きしない。
  */
-export function toApiClientError(e: unknown): ApiClientError {
+export function toApiClientError(
+  e: unknown,
+  origin?: ErrorOrigin,
+): ApiClientError {
   if (e instanceof ApiClientError) {
     return e;
   }
+  const withOrigin = origin === undefined ? {} : { origin };
 
   // §10.3 の統一エラー形式（fetch で読んだ JSON をそのまま渡せる）
   const body = apiErrorSchema.safeParse(e);
@@ -108,6 +117,7 @@ export function toApiClientError(e: unknown): ApiClientError {
       code: error.code,
       message: error.message,
       retryable: error.retryable,
+      ...withOrigin,
       ...(error.registry === undefined ? {} : { registry: error.registry }),
       ...(error.registryCode === undefined
         ? {}
@@ -122,6 +132,7 @@ export function toApiClientError(e: unknown): ApiClientError {
     return new ApiClientError({
       code: code.success ? code.data : "INTERNAL",
       message: e.message,
+      ...withOrigin,
     });
   }
 
@@ -130,11 +141,13 @@ export function toApiClientError(e: unknown): ApiClientError {
     return new ApiClientError({
       code: "NETWORK",
       message: "通信に失敗しました。",
+      ...withOrigin,
     });
   }
 
   return new ApiClientError({
     code: "INTERNAL",
     message: e instanceof Error ? e.message : "エラーが発生しました。",
+    ...withOrigin,
   });
 }

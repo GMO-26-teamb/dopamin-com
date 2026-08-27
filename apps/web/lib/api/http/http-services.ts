@@ -9,6 +9,7 @@
 import {
   aiSettingsResponseSchema,
   type DomainCheckRequest,
+  type DomainCheckResult,
   type DomainSyncResponse,
   deriveDisplayStatus,
   meResponseSchema,
@@ -31,6 +32,7 @@ import { notImplemented, toApiClientError } from "../errors";
 import { createMockPaymentService } from "../payments/mock-gateway";
 import type { Services } from "../services";
 import type {
+  Candidate,
   DomainDetail,
   DomainSummary,
   SearchResult,
@@ -41,6 +43,7 @@ import {
   type ApiDomainSummary,
   apiClient,
   authCodeSchema,
+  candidatesResponseSchema,
   checkResponseSchema,
   type DomainEnvelope,
   domainEnvelopeSchema,
@@ -104,6 +107,39 @@ function toSyncFailure(
   failure: DomainSyncResponse["failures"][number],
 ): SyncFailure {
   return { ...failure, registry: registryIdForDomain(failure.name) };
+}
+
+/**
+ * `POST /domains/check` の 1 行（§10.4）を、画面用の共通フィールドに写す。
+ *
+ * 検索結果（`SearchResult`）と AI 候補（`Candidate`）は同じ `check` の形を共有するので、
+ * レジストリ・空き状況・独自性スコアの写像はここ 1 か所に置く（FR-03 / FR-04 / FR-05）。
+ */
+function toCheckedFields(result: DomainCheckResult): {
+  registry: SearchResult["registry"];
+  availability: SearchResult["availability"];
+  uniqueness: SearchResult["uniqueness"];
+  alternatives: string[];
+} {
+  return {
+    // 未対応 TLD は registry: null で返る。ViewModel は null を持てないため
+    // 表示上のプレースホルダを入れる（当該行は必ず availability: "error"）。
+    registry: result.registry ?? "mock",
+    availability: result.availability,
+    // FR-05: API の実スコアを ViewModel に写像する（topSimilar → nearest）
+    uniqueness:
+      result.uniqueness === null
+        ? null
+        : {
+            score: result.uniqueness.score,
+            label: result.uniqueness.label,
+            nearest: result.uniqueness.topSimilar.map((t) => ({
+              name: t.name,
+              similarity: t.similarity,
+            })),
+          },
+    alternatives: [],
+  };
 }
 
 /**
@@ -265,23 +301,7 @@ export function createHttpServices(): Services {
             name: result.name,
             sld,
             tld,
-            // 未対応 TLD は registry: null で返る。ViewModel は null を持てないため
-            // 表示上のプレースホルダを入れる（当該行は必ず availability: "error"）。
-            registry: result.registry ?? "mock",
-            availability: result.availability,
-            // FR-05: API の実スコアを ViewModel に写像する（topSimilar → nearest）
-            uniqueness:
-              result.uniqueness === null
-                ? null
-                : {
-                    score: result.uniqueness.score,
-                    label: result.uniqueness.label,
-                    nearest: result.uniqueness.topSimilar.map((t) => ({
-                      name: t.name,
-                      similarity: t.similarity,
-                    })),
-                  },
-            alternatives: [],
+            ...toCheckedFields(result),
             error:
               result.error === undefined
                 ? null
@@ -372,10 +392,27 @@ export function createHttpServices(): Services {
     },
 
     candidates: {
-      /** POST /ai/domain-candidates（FR-04、未実装） */
-      generate() {
-        return Promise.reject(
-          notImplemented("POST /ai/domain-candidates", "ai"),
+      /**
+       * POST /ai/domain-candidates（FR-04 / §10.1）。
+       *
+       * API は候補 1 件ごとに空き確認（FR-03）と独自性スコア（FR-05）を載せた `check` を
+       * 返すので、検索結果と同じ `toCheckedFields` で写す（AC-04-1）。
+       * 失敗は AI 側の相手として扱い、`REGISTRY_TIMEOUT` などの共用コードでも
+       * AI 向けの文言が出るようにする（S-23）。
+       */
+      async generate(input) {
+        const { candidates } = await unwrap(
+          apiClient.api.v1.ai["domain-candidates"].$post({ json: input }),
+          candidatesResponseSchema,
+          "ai",
+        );
+        return candidates.map(
+          (candidate): Candidate => ({
+            sld: candidate.sld,
+            tld: candidate.tld,
+            reason: candidate.reason,
+            ...toCheckedFields(candidate.check),
+          }),
         );
       },
     },

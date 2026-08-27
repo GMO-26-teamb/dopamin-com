@@ -157,7 +157,7 @@ sequenceDiagram
 | DELETE | `/auth/passkeys/:id` | 要 | — | `{ ok: true }` |
 | PATCH | `/auth/passkeys/:id` | 要 | `{ name: string(1..32) }` | `{ passkey }` |
 
-`*JSON` 型は `@simplewebauthn/types` のものをそのまま使う。zod スキーマは `packages/shared/src/schemas/auth.ts` に置き、`response` は最低限 `{ id: string, rawId: string, type: 'public-key', response: object }` の形を検証してから SimpleWebAuthn に渡す。
+`*JSON` 型は SimpleWebAuthn v13 で `@simplewebauthn/types` が本体に統合されたため、各パッケージから取る。API 側は `@simplewebauthn/server` から `RegistrationResponseJSON` / `AuthenticationResponseJSON` を import する（`apps/api/src/services/auth.ts`）。web 側は `@simplewebauthn/browser` の `Parameters<typeof startRegistration>[0]["optionsJSON"]` / `Parameters<typeof startAuthentication>[0]["optionsJSON"]` で options の型を導出する（`apps/web/lib/webauthn.ts`、バージョン追従のため）。zod スキーマは `packages/shared/src/auth.ts` に置き（`webauthnResponseSchema` / `passkeyVerifyRequestSchema`）、`response` は最低限 `{ id: string, rawId: string, type: 'public-key', response: object }`（任意で `clientExtensionResults` / `authenticatorAttachment`）の形を検証してから SimpleWebAuthn に渡す。
 
 エラーコード（`CHALLENGE_NOT_FOUND` 400 / `VERIFICATION_FAILED` 401 / `CREDENTIAL_NOT_FOUND` 401 / `LAST_PASSKEY` 409）は requirements v0.1.8 で §10.3 に取り込み済み。定義は `packages/shared/src/errors.ts` の `ERROR_CODES` / `ERROR_STATUS`（#30 で統合）。
 
@@ -210,7 +210,7 @@ verifyAuthenticationResponse({
 // → authenticationInfo.newCounter を保存
 ```
 
-ブラウザ側は `@simplewebauthn/browser` の `startRegistration({ optionsJSON })` / `startAuthentication({ optionsJSON })` を `apps/web/src/lib/webauthn.ts` でラップし、`browserSupportsWebAuthn()` が false なら非対応案内を出す（AC-01-5）。
+ブラウザ側は `@simplewebauthn/browser` の `startRegistration({ optionsJSON })` / `startAuthentication({ optionsJSON })` を `apps/web/lib/webauthn.ts` でラップし、`browserSupportsWebAuthn()` が false なら非対応案内を出す（AC-01-5）。
 
 バージョンは `@simplewebauthn/server` / `browser` ともに **v13 系**に固定する（v13 で引数名が `optionsJSON` / `credential` に変わっているため、古い記事のコードをそのまま貼らない）。
 

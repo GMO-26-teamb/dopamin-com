@@ -80,6 +80,40 @@ jobs:
       - run: pnpm add -g vercel@${{ env.VERCEL_CLI_VERSION }}
       - name: Pull Vercel project settings / env
         run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+      # Web のビルドは環境変数を静的に焼き込む（NEXT_PUBLIC_* はクライアント JS へ、
+      # API_ORIGIN は next.config.ts の rewrites へ）。Vercel で Sensitive 属性を付けた変数は
+      # pull / build に復号されず リテラル "[SENSITIVE]" が渡るため、NEXT_PUBLIC_* に
+      # Sensitive を付けるとビルドが落ちるか、黙って壊れた本番が出来上がる（2026-08-27 の障害）。
+      # next build が不親切なプリレンダーエラーで落ちる前に、ここで原因を名指しして止める。
+      # 注意: dopamin-web プロジェクトは「既定で Sensitive」ポリシーが有効なので、
+      # `vercel env add` はフラグ無しだと Sensitive で登録される。NEXT_PUBLIC_* を足すときは
+      # 必ず `vercel env add <NAME> production --no-sensitive` を使うこと。
+      - name: Verify pulled build-time env
+        run: |
+          env_file=.vercel/.env.production.local
+          if [ ! -f "$env_file" ]; then
+            echo "::error title=vercel pull failed::$env_file がありません。vercel pull が本番環境を取得できていません。"
+            exit 1
+          fi
+          read_env() {
+            grep -E "^$1=" "$env_file" | tail -n1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//'
+          }
+          mode=$(read_env NEXT_PUBLIC_API_MODE)
+          api_origin=$(read_env API_ORIGIN)
+          fail=0
+          if [ "$mode" != "http" ]; then
+            echo "::error title=NEXT_PUBLIC_API_MODE が不正::受け取った値 '$mode'。本番は 'http' 必須（docs/requirements.md §17）。Vercel の dopamin-web プロジェクトで Sensitive を外した平文の環境変数として登録し直してください。"
+            fail=1
+          fi
+          case "$api_origin" in
+            https://*) ;;
+            *)
+              echo "::error title=API_ORIGIN が不正::受け取った値 '$api_origin'。https:// で始まる API のオリジンが必要です（next.config.ts の rewrites がビルド時に読みます）。Sensitive 属性が付いていないか確認してください。"
+              fail=1
+              ;;
+          esac
+          [ "$fail" -eq 0 ] || exit 1
+          echo "NEXT_PUBLIC_API_MODE=$mode / API_ORIGIN=$api_origin"
       - name: Build
         # API_ORIGIN は Vercel プロジェクトに設定した固定値を使う
         run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}

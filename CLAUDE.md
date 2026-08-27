@@ -34,6 +34,14 @@
 | `pnpm build` | Next.js ビルド + API バンドル |
 | `pnpm db:generate` / `pnpm db:migrate` | Drizzle マイグレーション生成 / 適用（`DIRECT_DATABASE_URL` が必要） |
 
+副作用や前提がある実行は上の表から外してある。使う前に [`docs/testing.md`](docs/testing.md) を読むこと。
+
+| コマンド | 内容 |
+|---|---|
+| `pnpm --filter @dopamin/api test:connect` | **実レジストリに接続する**疎通テスト。ドメインを実際に登録・削除するので副作用がある。`apps/api/.env.local` の認証情報が必要（`docs/testing.md` §2） |
+| `pnpm --filter @dopamin/shared test:perf` | 性能テスト（FR-05 / AC-05-3）。他の負荷と同居させると測れないので `pnpm test` からは外してある（`docs/testing.md` §1） |
+| `pnpm --filter @dopamin/web e2e` | Playwright e2e（FR-01）。Chromium と Postgres が必要（`docs/testing.md` §3） |
+
 環境変数は各 app の `.env.example` を `.env.local` にコピーして設定する。
 
 ## 規約
@@ -45,6 +53,7 @@
 - ロジック変更にはテストを伴う。契約テストの fixture は `docs/registry/**`。
 - 大きな設計判断は `docs/adr/` に ADR を残す。
 - issue は `.github/ISSUE_TEMPLATE/`（feature / bug）、PR は `.github/PULL_REQUEST_TEMPLATE.md` の雛形に従う。
+- `apps/web/AGENTS.md` / `apps/web/CLAUDE.md` は `next dev` が自動生成・再追記するファイル。**消さずにコミットしてよい**（手で書いた内容ではないので、差分が出ても驚かなくてよい）。
 
 ## 禁止
 

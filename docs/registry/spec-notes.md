@@ -7,6 +7,8 @@
 - Kitaqnic: <https://docs.kitaqnic.com/swagger-ui/index.html> — `registry-kitaqnic EPP-over-REST API (18 gTLD)` v1 / OAS 3.0
 - 取得日: 2026-08-25
 - OpenAPI 定義の実物（`/v3/api-docs`、Basic ゲート認証付きで取得）: [`kitaqsign.openapi.json`](kitaqsign.openapi.json) / [`kitaqnic.openapi.json`](kitaqnic.openapi.json)
+- 仕様変更の記録先（requirements §11.5 の手順 1）: [`kitaqsign/CHANGELOG.md`](kitaqsign/CHANGELOG.md) / [`kitaqnic/CHANGELOG.md`](kitaqnic/CHANGELOG.md)
+- 契約テストの fixture: [`fixtures/README.md`](fixtures/README.md)
 
 RFC 5730–5733 の EPP をトランスポートだけ HTTP/REST + JSON に置き換えた擬似レジストリ（ハッカソン教材）。
 コマンド体系と result code の意味論は本物準拠。
@@ -105,8 +107,11 @@ host（ネームサーバ）────────┘
   作成すれば通る。対象 TLD 外のホスト名（kitaqnic に `*.example.net` 等）の作成可否は未検証のため、
   アダプタ（`packages/registry` の `ensureHosts`）が参照前に info → create で自動作成する。
 - ドメイン配下のホスト（`ns1.<domain>`）を NS に設定していても `domain:delete` は成功する（実測）。
-- **`add.statuses` / `rem.statuses` は result 1000 を返すが status に反映されない**（clientHold /
-  clientTransferProhibited / clientDeleteProhibited で確認。Swagger の記述と矛盾 →【要確認】10）。
+- **`add.statuses` / `rem.statuses` は 2026-08-27 の運営修正で反映されるようになった**（§3 #10 で解決）。
+  2026-08-25 時点では result 1000 を返すのに `domain:info` の status が変わらなかった（clientHold /
+  clientTransferProhibited / clientDeleteProhibited で確認）。kitaqnic は実測で修正を確認済み、
+  kitaqsign はメンテナンス中で未実測。経緯は [`kitaqnic/CHANGELOG.md`](kitaqnic/CHANGELOG.md) /
+  [`kitaqsign/CHANGELOG.md`](kitaqsign/CHANGELOG.md)。
 - リクエストボディの未知フィールドは 400 / 2001 `Malformed JSON` で拒否される（厳格パース）。
 
 ### 非同期通知（Poll）
