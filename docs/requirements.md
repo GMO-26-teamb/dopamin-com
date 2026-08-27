@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.1.18（2026-08-27） |
+| 版 | v0.1.19（2026-08-27） |
 | プロダクト | ドパ民.com / dopamin.com — Z世代向けドメイン管理プラットフォーム（疑似レジストラ） |
 | チーム | チームドパ民（Team B）: 佐々木 琢登・星 はるか・上原 拓也 |
 | 位置づけ | GMO Internet Internship in kitaQ Webアプリケーションコース（2026/08/24–28）成果物 |
@@ -98,7 +98,7 @@
 ### 2.2 非スコープ
 
 - **実決済・課金・請求**（PSP 連携、カード情報の保存・送信、返金、請求書発行、実価格の取得）。FR-19 の決済画面はブラウザ内で完結するモックで、金額は固定ダミー価格（`packages/shared/src/pricing.ts`）。レジストリの実料金とは無関係で、実際の請求は発生しない
-- 汎用 DNS ゾーン管理（MX / TXT 等の任意レコード編集、外部 DNS プロバイダへの反映）。サブドメイン設計（FR-13）は **アプリ内の疑似 DNS ゾーンへの反映まで** を行い、実インターネットの名前解決には関与しない
+- 汎用 DNS ゾーン管理（MX / TXT 等の任意レコード編集、外部 DNS プロバイダへの反映）。サブドメイン設計（FR-13）は **アプリ内の疑似 DNS ゾーンへの反映まで** を行い、実インターネットの名前解決には関与しない（判断は ADR-0004）
 - Whois 情報公開代行、ドメインパーキング、オークション、バックオーダー
 - メール / プッシュ通知、多言語対応（日本語のみ）、管理者画面、リセラー機能
 - 本物の EPP（XML over TLS）接続
@@ -1450,3 +1450,4 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | v0.1.16 | 2026-08-26 | §16.2: Vercel Hobby の「commit author = チーム所有者」制約で他メンバー author のデプロイが `BLOCKED` になり固着する問題への対策として、`deploy.yml` の `api` / `web` ジョブでチェックアウト上の author を所有者に書き換えてから deploy する運用（`--meta originalSha` で元 SHA を保持、`timeout-minutes: 10`）を明記（採番が衝突していたため v0.1.11 から再採番。日付は原文のまま） |
 | v0.1.17 | 2026-08-26 | §11.1: `poll` / `ackMessage` の実装（#44）と mock の移管シミュレーション（#45）を実装に合わせて確定。Poll のエンドポイント差はアダプタで吸収し（応答の形は両レジストリ同一）、`msgType` が未知の通知は捨てず `'unknown'` に倒す。mock は相手レジストラ保有ドメインの seed・レジストラ別 Poll キュー・役割チェック（approve / reject は対応側、cancel は申請側、更新系は現スポンサー）を持ち、**自動承認は `setTimeout` ではなく `info` / `transferQuery` / `poll` 時の遅延評価**で確定させる（Vercel Functions でタイマーが生き残らないため）。`transferRequest` は自レジストラ保有のドメインには出せない（暫定 2304、§21.2 #15）（採番が衝突していたため v0.1.14 から再採番。日付は原文のまま） |
 | v0.1.18 | 2026-08-27 | 実装が先行していた記述を現状に同期。§6.4 / §11.1: `RegistryAdapter` に `hello` / `createContact` / `updateContact` を追記し `getAuthInfo` を `authCode` に訂正、mock の状態の永続先を `domains.raw_info` から専用テーブル `mock_registry_state` に訂正、`MOCK_REGISTRY_FAIL_MODE` に `timeout_after_write` を追加。§8: `apps/web/lib/api/` と `apps/api` の routes / services / middleware / lib を実ファイルに合わせる。§9 前書き / §9.1: `mock_registry_state` の表を追加、`operation_logs.command` を SSOT どおり 21 種（主 15 + 補助 5 + アプリ内 1）に、`contacts` の例値を許可値に修正。§10.2: `requestContext` を追加し `Origin` ヘッダ欠落は通す仕様を明記。§10.4: 応答例に `confidence` / `algorithmVersion` / `corpusVersion` と `error` 行の `uniqueness` を反映。§11.3: renew ロックの行を追加し UpdateProhibited の表示を「変更ロック」に修正（FR-08 に AC-08-3 を追加）。§14.1: コーパス生成コマンドに `TRANCO_RETRIEVED_DATE` と出力リダイレクトを明記。§15: shadcn/ui CLI ではなく Radix UI + cva の自前実装、`/dashboard` はカードグリッド、ブレークポイントは `md`（768px）+ `MobileNav`。§16.2 / §17: `ci.yml` の perf / e2e ジョブ、**`NEXT_PUBLIC_*` に Vercel の Sensitive 属性を付けない**規定（2026-08-27 の本番障害の再発防止）、`DIRECT_DATABASE_URL` の Secret と CI env の区別。§16.3: `vector` 拡張の有効化は不要（ADR-0003）。§21.1 / §21.2 #1 / #2 / #8 / #11 / §21.3: 解決済みの事項を反映。あわせて更新履歴の版番号の重複・順序の乱れを解消（外部参照の無い 2 行を v0.1.16 / v0.1.17 に再採番し、表を版番号の昇順に並べ替え） |
+| v0.1.19 | 2026-08-27 | §2.2: サブドメイン設計の反映先を「アプリ内の疑似 DNS ゾーン」にした判断を `docs/adr/0004-pseudo-dns-zone.md` として残し、本文から参照を張った（要件の内容は変えていない。外部 DNS プロバイダへ反映しない理由・NS 切替だけは実レジストリに効く理由・却下案を記録）。#16 |
