@@ -2,6 +2,10 @@
 
 テスト方針の全体像は [requirements.md §19](requirements.md) を参照。ここでは実行手順をまとめる。
 
+自動テストで担保できない範囲（実レジストリへの副作用を伴う操作・他チームとの相互移管・
+実ブラウザのパスキー・本番 URL での通し）は、発表前日に
+[`specs/manual-checklist.md`](specs/manual-checklist.md) を全員で回して潰す（§19 の manual 行）。
+
 ## 1. 通常のテスト（unit / contract・CI で常時実行）
 
 ```sh

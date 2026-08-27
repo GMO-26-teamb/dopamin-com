@@ -6,6 +6,9 @@
 - `result.message` は実測に合わせている（Swagger 本文の例は `msg` だが実際は `message`）。
 - レジストリの仕様変更通知を受けたら、新しい実レスポンスで fixture を更新し、
   契約テストをグリーンにしてから該当アダプタを修正する（requirements.md §11.5）。
+  そのとき**変更の記録を先に**
+  [`../kitaqsign/CHANGELOG.md`](../kitaqsign/CHANGELOG.md) /
+  [`../kitaqnic/CHANGELOG.md`](../kitaqnic/CHANGELOG.md) へ残す（§11.5 の手順 1）。
 
 ## 一覧
 
@@ -25,7 +28,9 @@
 | `rotate-auth-info.json` | `auth_info` | `MapStringString`（`authInfo` キー） |
 | `transfer-request.kitaqsign.json` / `.kitaqnic.json` | `transfer_request` | kitaqnic だけが `reDate` / `acDate` を返す |
 | `transfer-approve.json` | `transfer_approve` | `status: clientApproved` → `approved` に正規化 |
-| `poll.kitaqsign.json` / `poll.kitaqnic.json` / `poll-empty.json` | `poll` | `msgType` の揺れ 2 パターンと未読なし |
+| `poll.kitaqnic.request.json` / `poll.kitaqnic.json` | `poll` | **kitaqnic 実機のキャプチャ**（2026-08-27）。移管 `request` / `reject` 通知の実測形 |
+| `poll.kitaqsign.json` | `poll` | 旧想定形（`payload.status` フォールバック）。kitaqsign 未実測のため回帰用に維持 |
+| `poll-empty.json` | `poll` | 未読なし（`resData.count = 0` / `message` 無し） |
 | `error-2202.json` | 移管系 | AuthCode 不一致 → `REGISTRY_REJECTED`（AC-12-2） |
 | `error-2302.json` | `create` / `host_create` | 既存 → `CONFLICT` |
 | `error-2303.json` | `info` / `host_info` | 不在 → `NOT_FOUND` |
@@ -49,20 +54,31 @@
 - `transfer-request.kitaqsign.json`: kitaqsign は両方持たない（`requestedAt` / `actByAt` は undefined）
 - 新有効期限に相当する `exDate` はどちらの transfer 応答にも無い
 
-`poll.*.json` の `message.msgType` と `payload` も暫定値。両 OpenAPI の `PollMessageDto` は
-`msgType: string` / `payload: object`（`additionalProperties`）としか宣言しておらず、enum も
-example も description も無い（requirements.md §21.2 #13）。fixture は `payload` が
-`DomainTransferResponse` と同じ形で届く想定を置いているだけなので、契約テストは
-「未知の `msgType` でも通知を落とさない」ことを確かめる側に寄せ、この暫定値には依存させないこと。
+`poll` の `message.msgType` と `payload` は、両 OpenAPI が `msgType: string` /
+`payload: object`（`additionalProperties`）としか宣言しておらず enum も example も無いため、
+長らく暫定値だった。**2026-08-27 の kitaqnic 実機の移管 E2E で実測が取れた**（#175 / #176。
+requirements.md §21.2 #13 と [`../spec-notes.md`](../spec-notes.md) §3 #12 は解決済み。
+経緯は [`../kitaqnic/CHANGELOG.md`](../kitaqnic/CHANGELOG.md)）。
 
-- `poll.kitaqsign.json`: `msgType` から動詞が読めない例（`domain:transfer`）。
-  移管通知だと分かった上で `payload.status` にフォールバックし `transfer_request` に正規化される
-  （移管と判断できない通知では `status` を見ない。`docs/specs/registry-api.md` §3-12）
-- `poll.kitaqnic.json`: `msgType` だけで決まる例（`transferApproved`）。kitaqnic なので
-  `payload` に `reDate` / `acDate` がある
+- `poll.kitaqnic.request.json` / `poll.kitaqnic.json`: **実測形**。同じ移管 E2E で連続して
+  キャプチャした `request`（id 521）と `reject`（id 522）の 2 通。`msgType` は
+  `"domain:transfer"` 固定で、動詞は `payload.op`（`request` / `approve` / `reject`。
+  `cancel` は op の enum から推定・未実測）。`payload` は
+  `{ op, domain, counterpartyRegistrar }` の 3 フィールドだけで、`counterpartyRegistrar` は
+  受信者から見た相手 1 個（`status` / `gainingRegistrar` / `losingRegistrar` / `reDate` /
+  `acDate` は**来ない**）。`qdate` はタイムゾーン無しのマイクロ秒精度。
+  アダプタの正規化はこの形を正とする。
+- `poll.kitaqsign.json`: **旧想定形**（`msgType` から動詞が読めず `payload.status` に
+  フォールバックする例）。**kitaqsign はメンテナンス中で未実測**のため、アダプタが旧形も
+  読める状態を維持していることの回帰として残す（`docs/specs/registry-api.md` §3-12）。
+  疎通できるようになったら実測形に差し替えること。
 - `poll-empty.json`: 未読なし（`resData.count = 0` / `message` 無し）。アダプタは `null` を返す
 
-**Poll の応答の形は両レジストリで完全に同一**で、違うのはエンドポイントだけ
-（kitaqsign は `GET /messages/poll` + `POST /messages/{id}/ack`、kitaqnic は
-`GET /messages` + `DELETE /messages/{id}`）。fixture をレジストリ別に分けているのは
-`msgType` の揺れの両パターンを残すためで、スキーマの差ではない。
+契約テストは引き続き「未知の `msgType` でも通知を落とさない（`unknown` に倒す）」ことも確かめる。
+
+**Poll のエンベロープ（`PollResponse` / `PollMessageDto`）は両レジストリで同一**で、違うのは
+エンドポイント（kitaqsign は `GET /messages/poll` + `POST /messages/{id}/ack`、kitaqnic は
+`GET /messages` + `DELETE /messages/{id}`）と `payload` の中身だけ。fixture をレジストリ別に
+分けているのは、kitaqnic の実測形（`op` / `counterpartyRegistrar`）と kitaqsign の未実測の
+想定形（`status` / `gainingRegistrar` / `losingRegistrar`）を両方残すためで、エンベロープの
+スキーマの差ではない。
