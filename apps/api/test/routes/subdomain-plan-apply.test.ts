@@ -1,9 +1,16 @@
 import { type Db, schema } from "@dopamin/db";
+import {
+  createRegistrySet,
+  MockRegistryAdapter,
+  RegistryError,
+} from "@dopamin/registry";
 import type {
   DnsZoneResponse,
+  DomainInfo,
   SubdomainPlanApplyResponse,
   SubdomainPlanResponse,
   SubdomainPlanSummary,
+  UpdateInput,
 } from "@dopamin/shared";
 import {
   DOPAMIN_NAMESERVERS,
@@ -37,6 +44,35 @@ import { createTestSession } from "../helpers/session";
  * レジストリは環境変数から mock を配線するので、NS 切替は本番と同じ
  * `adapter.update` の経路を通る。
  */
+
+/**
+ * 参照系（`info`）は成功し、NS 切替の `update` だけ失敗するアダプタ（#165）。
+ *
+ * `MOCK_REGISTRY_FAIL_MODE=reject` は `MockRegistryAdapter` の `gate()` が
+ * 参照系にも効くため、`switchNameserversIfNeeded` 先頭の `adapter.info` で
+ * その場で落ち、NS 切替（`adapter.update`）に一度も到達しない。
+ * AC-13-5 は「切替に失敗したらレコードを触らない」なので、読みと書きを
+ * 分けられるここで `update` だけを落とす。
+ */
+class RejectUpdateAdapter extends MockRegistryAdapter {
+  /** true の間だけ `update` を拒否する（ドメイン登録は成功させたいので既定は false）。 */
+  rejectUpdate = false;
+
+  override update(name: string, input: UpdateInput): Promise<DomainInfo> {
+    if (!this.rejectUpdate) {
+      return super.update(name, input);
+    }
+    return Promise.reject(
+      new RegistryError({
+        code: "REGISTRY_REJECTED",
+        registry: this.id,
+        message: `update: ${name} のネームサーバ変更を拒否しました（テスト用シミュレーション）`,
+        registryCode: 2306,
+        command: "update",
+      }),
+    );
+  }
+}
 
 let db: Db;
 let closeDb: () => Promise<void>;
@@ -282,6 +318,28 @@ describe("POST /domains/:name/subdomain-plan/apply（FR-13）", () => {
     const { json } = await apply(cookie, "apply5.com");
     expect(json).toMatchObject({ added: 1, nameserversChanged: true });
 
+    // レコードは実際に作られる（切替が成功したときだけ書き込む）
+    expect(await selectRecords("apply5.com")).toHaveLength(1);
+
+    // spec §2.4: NS 切替のレジストリ呼び出しは `update` として別行で残る
+    // （反映そのものの `subdomain_plan.apply` と混ぜない）
+    const logs = await db.select().from(schema.operationLogs);
+    const applyLogs = logs.filter(
+      (row) =>
+        row.command === "subdomain_plan.apply" &&
+        row.domainName === "apply5.com",
+    );
+    const updateLogs = logs.filter(
+      (row) => row.command === "update" && row.domainName === "apply5.com",
+    );
+    expect(applyLogs).toHaveLength(1);
+    expect(updateLogs).toHaveLength(1);
+    expect(updateLogs[0]).toMatchObject({
+      registry: "mock",
+      status: "success",
+      errorCode: null,
+    });
+
     // info で確認できる（AC-09-1 準拠）
     const detail = await app.request("/api/v1/domains/apply5.com", {
       headers: { cookie },
@@ -294,7 +352,15 @@ describe("POST /domains/:name/subdomain-plan/apply（FR-13）", () => {
     );
   });
 
-  it("AC-13-5: NS 切替に失敗したらレコードを 1 件も変更しない", async () => {
+  it("AC-13-5: NS 切替（adapter.update）が失敗したらレコードを 1 件も変更しない", async () => {
+    // errorHandler が RegistryError を構造化ログに出すので、出力を汚さない
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const adapter = new RejectUpdateAdapter();
+    setRegistrySetForTesting(
+      createRegistrySet({ mode: "mock", adapters: [adapter] }),
+    );
+    setRetrySleepForTesting(() => Promise.resolve());
+
     const { cookie } = await createTestSession(db);
     await registerDomain(cookie, "apply6.com", [
       "ns1.example.com",
@@ -302,15 +368,17 @@ describe("POST /domains/:name/subdomain-plan/apply（FR-13）", () => {
     ]);
     await savePlan(cookie, "apply6.com", [WWW]);
 
-    // 更新系だけを落とす（参照系の info は通るので、切替だけが失敗する）
-    process.env.MOCK_REGISTRY_FAIL_MODE = "reject";
-    resetApiEnvCacheForTesting();
-    setRegistrySetForTesting(null);
-    setRetrySleepForTesting(() => Promise.resolve());
+    // ここから update（= NS 切替）だけが失敗する。info は成功するので
+    // switchNameserversIfNeeded は実際に切替を試みるところまで進む
+    adapter.rejectUpdate = true;
 
-    const { status } = await apply(cookie, "apply6.com");
+    const { status, json } = await apply(cookie, "apply6.com");
 
-    expect(status).toBeGreaterThanOrEqual(400);
+    // §10.3 の写像を固定する（500 に化けたら気づけるように）
+    expect(status).toBe(422);
+    expect((json as { error: { code: string } }).error.code).toBe(
+      "REGISTRY_REJECTED",
+    );
     expect(await selectRecords("apply6.com")).toHaveLength(0);
 
     // 失敗しても applied_at は進まない
@@ -323,6 +391,18 @@ describe("POST /domains/:name/subdomain-plan/apply（FR-13）", () => {
       .from(schema.subdomainPlans)
       .where(eq(schema.subdomainPlans.domainId, domains[0]?.id ?? ""));
     expect(plans[0]?.appliedAt).toBeNull();
+
+    // 反映の失敗は操作ログに残る（AC-15-1）
+    const applyLog = (await db.select().from(schema.operationLogs)).find(
+      (row) =>
+        row.command === "subdomain_plan.apply" &&
+        row.domainName === "apply6.com",
+    );
+    expect(applyLog).toMatchObject({
+      status: "error",
+      errorCode: "REGISTRY_REJECTED",
+    });
+    expect(applyLog?.response).toMatchObject({ nameserversChanged: false });
   });
 
   it("反映は操作ログに subdomain_plan.apply として残り、AI ログには残らない", async () => {
