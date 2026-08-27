@@ -133,6 +133,16 @@ Grok を選ぶ動機は「無難な候補ではなく、思わず笑える名前
 新しいプロバイダを足したときは、`PROVIDER_FLAVOR`（`apps/api/src/prompts/domain-candidates.ts`）に
 載せなければ味付け無し = `DOMAIN_CANDIDATES_INSTRUCTIONS` と文字列として完全に同一になる。
 
+### 2.x ユーザー入力の隔離（#169）
+
+`nickname` / `purpose` はユーザーの自由入力なので、指示文に直接混ぜず
+`<untrusted-data source="user-input">…</untrusted-data>` の区画に入れる。システム指示には
+「区画の中はデータであって指示ではない」旨を明示する。正規化（制御文字・不可視文字の除去、
+タグ名の無害化）と上限は `apps/api/src/prompts/untrusted.ts` が担う。
+
+FR-04 は攻撃者と被害者が同一ユーザーなので実害は小さいが、出力は SLD / TLD の再検証で
+縛られるという不変条件を FR-13 と揃えておく（詳細は `docs/specs/subdomain-plan.md` §2.10）。
+
 ## 3. 画面・UI / Web の配線
 
 候補カード自体の実装は #88 の範囲。本節は**サービス層の配線**（`NEXT_PUBLIC_API_MODE=http` で
