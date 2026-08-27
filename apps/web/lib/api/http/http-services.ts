@@ -2,7 +2,7 @@
  * HTTP 実装（fe-ui 設計 §4.6）。`NEXT_PUBLIC_API_MODE=http` のときに使う。
  *
  * 各メソッドの上に docs/requirements.md §10.1 のルートを書く。
- * まだ API が無いルート（AI・サブドメイン設計・ログ・デモリセット・移管一覧）は
+ * まだ API が無いルート（AI・サブドメイン設計・ログ・デモリセット）は
  * `NOT_IMPLEMENTED` を投げ、画面側は `toErrorCopy` の文言でその旨を出す。
  */
 
@@ -14,7 +14,7 @@ import {
   meResponseSchema,
   registryIdForDomain,
   splitDomainName,
-  type TransferStatus,
+  type TransferSummary,
 } from "@dopamin/shared";
 import {
   addPasskey,
@@ -48,6 +48,8 @@ import {
   domainSyncSchema,
   nullableDomainEnvelopeSchema,
   transferEnvelopeSchema,
+  transferSummaryEnvelopeSchema,
+  transfersListSchema,
   unwrap,
 } from "./client";
 
@@ -105,21 +107,44 @@ function toSyncFailure(
 }
 
 /**
- * 正規化された移管ステータス（`packages/shared` の `TransferStatus`）を画面用の状態に寄せる。
+ * `transfers` 行の要約（`packages/shared` の `TransferSummary`）を画面用 `Transfer` に写す。
  *
- * `none`（移管中でない）は画面用 `Transfer` に対応する値が無い。`POST /transfers` の応答が
- * `none` になることは無いので申請直後の `pending` に倒す。取り込み待ち（`import_pending`）
- * との出し分けは移管一覧 API（#56）が来てから決める。
+ * `import_pending`（承認済み・取り込み待ち）は API に無い画面専用の状態で、「IN の承認は
+ * 検知したが `domains` への取り込みが未完了 = `domainId` が無い」を指す（§6.5）。
+ * S-50 の「再試行」は `GET /transfers` の再照会で、サーバ側が取り込みを再試行する。
  */
-function toTransferStatus(status: TransferStatus): Transfer["status"] {
-  switch (status) {
-    case "approved":
-    case "rejected":
-    case "cancelled":
-      return status;
-    default:
-      return "pending";
-  }
+function toTransferVm(summary: TransferSummary): Transfer {
+  const importPending =
+    summary.direction === "in" &&
+    summary.status === "approved" &&
+    summary.domainId === null;
+  return {
+    id: summary.id,
+    domainName: summary.domainName,
+    registry: summary.registry,
+    direction: summary.direction,
+    status: importPending ? "import_pending" : summary.status,
+    // API は受理時刻で埋めるため実質必ず入る。欠けたら履歴の日付表示用に確定時刻で代替する
+    requestedAt:
+      summary.requestedAt ?? summary.completedAt ?? summary.actByAt ?? "",
+    actByAt: summary.actByAt,
+    completedAt: summary.completedAt,
+  };
+}
+
+/**
+ * `GET /transfers`（FR-12）。Poll 消化と `transferQuery` による最新化はサーバ側で走る
+ * （§10.1「表示時に Poll を消化」）ので、クライアントは取得して平坦化するだけ。
+ * 区画（IN / OUT / 履歴）への振り分けは `groupTransfers`（画面側）がやり直す。
+ */
+async function fetchTransfers(): Promise<Transfer[]> {
+  const groups = await unwrap(
+    apiClient.api.v1.transfers.$get(),
+    transfersListSchema,
+  );
+  return [...groups.outbound, ...groups.inbound, ...groups.history].map(
+    toTransferVm,
+  );
 }
 
 export function createHttpServices(): Services {
@@ -387,48 +412,49 @@ export function createHttpServices(): Services {
     },
 
     transfers: {
-      /** GET /transfers（FR-12、未実装） */
+      /** GET /transfers（FR-12 / AC-12-1 / AC-12-3） */
       list() {
-        return Promise.reject(notImplemented("GET /transfers"));
+        return fetchTransfers();
       },
-      /** GET /transfers（Poll 消化、未実装） */
+      /** S-50「状態を更新」。GET /transfers 自体が Poll 消化 + 再照会を伴う（§10.1） */
       refresh() {
-        return Promise.reject(notImplemented("GET /transfers"));
+        return fetchTransfers();
       },
 
       /** POST /transfers（FR-12 移管 IN 申請） */
       async request(input) {
-        const { transfer } = await unwrap(
+        // `transfer`（レジストリ応答の DTO）もスキーマで検証するが、画面に返すのは
+        // 永続化された `record`。id が uuid になり、取消（POST /transfers/:id/cancel）に使える
+        const { record } = await unwrap(
           apiClient.api.v1.transfers.$post({ json: input }),
           transferEnvelopeSchema,
         );
-        const now = new Date().toISOString();
-        const result: Transfer = {
-          // 移管一覧 API（`GET /transfers`）が来るまで ID はドメイン名を使う
-          id: transfer.name,
-          domainName: transfer.name,
-          // レジストリ応答に registry が無い（一覧 API で埋まる想定）
-          registry: "mock",
-          direction: "in",
-          status: toTransferStatus(transfer.status),
-          requestedAt: now,
-          actByAt: null,
-          completedAt: null,
-        };
-        return result;
+        return toTransferVm(record);
       },
 
-      /** POST /transfers/:id/approve（FR-12、未実装） */
-      approve() {
-        return Promise.reject(notImplemented("POST /transfers/:id/approve"));
+      /** POST /transfers/:id/approve（FR-12 / AC-12-4。受信した OUT 申請の承認） */
+      async approve(id) {
+        const { transfer } = await unwrap(
+          apiClient.api.v1.transfers[":id"].approve.$post({ param: { id } }),
+          transferSummaryEnvelopeSchema,
+        );
+        return toTransferVm(transfer);
       },
-      /** POST /transfers/:id/reject（FR-12、未実装） */
-      reject() {
-        return Promise.reject(notImplemented("POST /transfers/:id/reject"));
+      /** POST /transfers/:id/reject（FR-12 / AC-12-4。受信した OUT 申請の拒否） */
+      async reject(id) {
+        const { transfer } = await unwrap(
+          apiClient.api.v1.transfers[":id"].reject.$post({ param: { id } }),
+          transferSummaryEnvelopeSchema,
+        );
+        return toTransferVm(transfer);
       },
-      /** POST /transfers/:id/cancel（FR-12、未実装） */
-      cancel() {
-        return Promise.reject(notImplemented("POST /transfers/:id/cancel"));
+      /** POST /transfers/:id/cancel（FR-12。自分の IN 申請の取消） */
+      async cancel(id) {
+        const { transfer } = await unwrap(
+          apiClient.api.v1.transfers[":id"].cancel.$post({ param: { id } }),
+          transferSummaryEnvelopeSchema,
+        );
+        return toTransferVm(transfer);
       },
     },
 
