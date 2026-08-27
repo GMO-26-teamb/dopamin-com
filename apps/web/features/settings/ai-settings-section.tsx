@@ -21,6 +21,7 @@ type Provider = AiSettings["provider"];
 const PROVIDER_LABEL: Record<Provider, string> = {
   google: "Google",
   anthropic: "Anthropic",
+  xai: "Grok",
 };
 
 interface Draft {

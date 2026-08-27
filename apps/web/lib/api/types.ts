@@ -7,6 +7,7 @@
  */
 
 import type {
+  AiProvider,
   ApiError,
   AuthUser,
   DisplayStatus,
@@ -206,9 +207,9 @@ export interface AiLog {
 }
 
 export interface AiSettings {
-  provider: "google" | "anthropic";
+  provider: AiProvider;
   model: string;
-  providers: { id: "google" | "anthropic"; models: string[] }[];
+  providers: { id: AiProvider; models: string[] }[];
 }
 
 export interface Me {
