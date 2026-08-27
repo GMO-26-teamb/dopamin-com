@@ -3,13 +3,16 @@
 import { isDopaminNameservers } from "@dopamin/shared";
 import { Pencil } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { IconButton } from "@/components/ui/icon-button";
 import type { DomainDetail } from "@/lib/api/types";
 
 /**
  * Figma: S-30 ネームサーバーカード（`83:2456`）
- * 各行は等幅 + 右端に鉛筆アイコン（D-02 を開く）。未設定は「—（未設定）」（S-38）。
+ * 各行は等幅。未設定は「—（未設定）」（S-38）。
+ *
+ * 編集はカードに 1 つ。NS は全量を差し替える操作（D-02 は行単位で開かない）なので、
+ * 行ごとに同じダイアログを開くボタンを並べても選択肢が増えたようにしか見えない。
  */
 export interface NameserverCardProps {
   domain: DomainDetail;
@@ -31,30 +34,34 @@ export function NameserverCard({
         <p className="w-full text-body-sm text-muted">—（未設定）</p>
       ) : (
         domain.nameservers.map((nameserver) => (
-          <div
-            className="flex w-full items-center justify-between gap-2"
+          <p
+            className="w-full truncate text-code-input text-ink"
             key={nameserver}
           >
-            <span className="min-w-0 truncate text-code-input text-ink">
-              {nameserver}
-            </span>
-            {editable ? (
-              <IconButton
-                aria-label={`${nameserver} を変更`}
-                icon={<Pencil />}
-                onClick={onEdit}
-                size="sm"
-                variant="subtle"
-              />
-            ) : null}
-          </div>
+            {nameserver}
+          </p>
         ))
       )}
-      {usesDopamin ? (
-        <div className="flex w-full items-center pt-0.5">
-          <Badge tone="brand">ドパ民 DNS</Badge>
+      {!usesDopamin && !editable ? null : (
+        <div className="flex w-full items-center justify-between gap-2 pt-0.5">
+          {usesDopamin ? (
+            <Badge tone="brand">ドパ民 DNS</Badge>
+          ) : (
+            <span aria-hidden="true" />
+          )}
+          {editable ? (
+            <Button
+              aria-label="ネームサーバーを変更"
+              leadingIcon={<Pencil />}
+              onClick={onEdit}
+              size="sm"
+              variant="subtle"
+            >
+              変更
+            </Button>
+          ) : null}
         </div>
-      ) : null}
+      )}
     </Card>
   );
 }

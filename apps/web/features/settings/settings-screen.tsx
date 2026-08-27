@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useMe } from "@/lib/api/hooks";
 import { AiSettingsSection } from "./ai-settings-section";
 import { DemoResetSection } from "./demo-reset-section";
+import { DeveloperSection } from "./developer-section";
 import type { SettingsNotice } from "./notice";
 import { PasskeySection } from "./passkey-section";
 import { ThemeSection } from "./theme-section";
@@ -16,8 +17,9 @@ import { ThemeSection } from "./theme-section";
 /**
  * S-70 設定（Figma `85:6709`）/ S-71 リセット完了（`85:6884`）。
  *
- * テーマ（FR-01）・パスキー管理（FR-01）・AI 設定（FR-17）・デモデータリセット（FR-16）。
- * 結果の帯（S-70b / S-71）はメイン先頭に 1 本だけ出す（ui-screens §4）。
+ * テーマ（FR-01）・パスキー管理（FR-01）・AI 設定（FR-17）・開発者向け（ログ / FR-16 のデモリセット）。
+ * 操作の結果はメイン先頭に 1 本だけ出す（ui-screens §4）。成功と軽い失敗は Banner、
+ * 更新系の失敗は Error Card で、どちらか一方しか出さないので警告の面が積み重ならない。
  */
 export function SettingsScreen() {
   const me = useMe();
@@ -25,7 +27,9 @@ export function SettingsScreen() {
 
   return (
     <>
-      {notice === null ? null : (
+      {notice === null ? null : notice.kind === "error" ? (
+        <ErrorCard error={notice.error} />
+      ) : (
         <Banner
           onClose={() => setNotice(null)}
           title={notice.title}
@@ -44,7 +48,7 @@ export function SettingsScreen() {
       <PasskeySection onNotify={setNotice} />
 
       {me.isPending ? (
-        <SettingsSkeleton />
+        <AiSettingsSkeleton />
       ) : me.error ? (
         <ErrorCard
           error={me.error}
@@ -54,17 +58,21 @@ export function SettingsScreen() {
           showLogsLink
         />
       ) : (
-        <div className="flex w-full flex-col items-start gap-3 md:flex-row">
-          <AiSettingsSection
-            ai={me.data.ai}
-            className="min-w-0 flex-1"
-            onNotify={setNotice}
-          />
-          {me.data.features.demoReset ? (
-            <DemoResetSection className="min-w-0 flex-1" onNotify={setNotice} />
-          ) : null}
-        </div>
+        <AiSettingsSection ai={me.data.ai} onNotify={setNotice} />
       )}
+
+      {/*
+        開発者向け（ログ・デモデータ）は画面末尾にまとめる。ログの導線は `me` に依存しないので、
+        取得に失敗しても残る。デモリセットは `features.demoReset` が true のときだけ横に並べる。
+      */}
+      <div className="flex w-full flex-col items-start gap-3 md:flex-row">
+        <DeveloperSection className="min-w-0 flex-1" />
+        {me.isPending ? (
+          <DemoResetSkeleton />
+        ) : me.data?.features.demoReset ? (
+          <DemoResetSection className="min-w-0 flex-1" onNotify={setNotice} />
+        ) : null}
+      </div>
     </>
   );
 }
@@ -74,16 +82,20 @@ export function SettingsScreen() {
  * 対象は `me` に依存する AI 設定とデモリセットの 2 枚だけで、
  * パスキーカードは `PasskeySection` が自前の骨組みを出す。
  */
-function SettingsSkeleton() {
+function AiSettingsSkeleton() {
   return (
-    <div
-      aria-busy="true"
-      className="flex w-full flex-col items-start gap-3 md:flex-row"
-    >
-      <Card className="min-w-0 flex-1" kicker="AI 設定">
+    <div aria-busy="true" className="w-full">
+      <Card kicker="AI 設定">
         <Skeleton shape="block" />
       </Card>
-      <Card className="min-w-0 flex-1" emphasis="warn">
+    </div>
+  );
+}
+
+function DemoResetSkeleton() {
+  return (
+    <div aria-busy="true" className="w-full min-w-0 flex-1">
+      <Card emphasis="warn">
         <Skeleton shape="block" />
       </Card>
     </div>

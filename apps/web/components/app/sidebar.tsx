@@ -1,18 +1,16 @@
 "use client";
 
-import { Plus, Sparkles } from "lucide-react";
+import { Plus } from "lucide-react";
 import Link from "next/link";
 import { Logo } from "@/components/ui/brand";
 import { Button } from "@/components/ui/button";
-import { IconButton } from "@/components/ui/icon-button";
-import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { NavItem } from "./nav-item";
 import { ThemeToggle } from "./theme-toggle";
 
 /**
  * Figma: Sidebar `51:348`
- * `--size-sidebar` 固定。Logo → 主要 CTA → ナビ 5 項目 → 下部にテーマトグル + ユーザー行
+ * `--size-sidebar` 固定。Logo → 主要 CTA → ナビ → 下部にテーマトグル + ユーザー行
  * （docs/specs/ui-screens.md §1）。
  */
 
@@ -32,11 +30,10 @@ interface NavDef {
 }
 
 /**
- * ナビの並びは Figma の nav-0〜nav-4 と同じ。
+ * ナビに出す項目。
  *
  * 保有ドメインの画面（`/domains/<name>` / `.../subdomains`）はダッシュボードの
- * 続きなので「ダッシュボード」を光らせる。「ドメイン取得」が Active になるのは
- * 取得フロー（`/domains/new`）だけ（Figma S-30 / S-40）。
+ * 続きなので「ダッシュボード」を光らせる（Figma S-30 / S-40）。
  */
 export const SIDEBAR_NAV: readonly NavDef[] = [
   {
@@ -46,29 +43,39 @@ export const SIDEBAR_NAV: readonly NavDef[] = [
     match: ["/dashboard", "/domains"],
   },
   {
-    key: "domains",
-    href: "/domains/new",
-    label: "ドメイン取得",
-    match: ["/domains/new"],
-  },
-  {
     key: "transfers",
     href: "/transfers",
     label: "移管",
     match: ["/transfers"],
   },
   { key: "settings", href: "/settings", label: "設定", match: ["/settings"] },
+];
+
+/**
+ * ナビには並べないが現在地は持つ画面。
+ *
+ * - `domains`: 取得フローの入口は上の主要 CTA 1 つに寄せた。CTA 側を Active にする
+ *   （ここに `/domains/new` を残さないと「ダッシュボード」が光ってしまう）
+ * - `logs`: 設定の「開発者向け」からだけ開く
+ */
+const HIDDEN_NAV: readonly NavDef[] = [
+  {
+    key: "domains",
+    href: "/domains/new",
+    label: "ドメインを取得",
+    match: ["/domains/new"],
+  },
   { key: "logs", href: "/logs", label: "ログ", match: ["/logs"] },
 ];
 
 /**
  * pathname からナビの Active を決める。より長い（＝具体的な）前方一致が勝つので、
- * `/domains/new` は「ドメイン取得」、`/domains/<name>` は「ダッシュボード」になる。
+ * `/domains/new` は「ドメインを取得」、`/domains/<name>` は「ダッシュボード」になる。
  * どれにも当たらないパス（`/` など）は `undefined` を返し、どの項目も光らせない。
  */
 export function activeNavKey(pathname: string): SidebarNavKey | undefined {
   let best: { key: SidebarNavKey; length: number } | undefined;
-  for (const { key, match } of SIDEBAR_NAV) {
+  for (const { key, match } of [...SIDEBAR_NAV, ...HIDDEN_NAV]) {
     for (const prefix of match) {
       if (pathname !== prefix && !pathname.startsWith(`${prefix}/`)) {
         continue;
@@ -86,8 +93,6 @@ export interface SidebarProps {
   active?: SidebarNavKey;
   userName: string;
   onLogout: () => void;
-  /** AI ログパネルを開く。省略時はボタンを出さない */
-  onOpenAiLogs?: () => void;
   className?: string;
 }
 
@@ -95,9 +100,12 @@ export function Sidebar({
   active,
   userName,
   onLogout,
-  onOpenAiLogs,
   className,
 }: SidebarProps) {
+  // 取得フローにいるあいだは CTA が現在地を示す。Nav Item の Active と同じく
+  // 左端のブランド線 + panel 地（= Outline）にして、光る列を 1 本に揃える。
+  const atDomainsNew = active === "domains";
+
   return (
     <div
       className={cn(
@@ -105,30 +113,27 @@ export function Sidebar({
         className,
       )}
     >
-      <div className="flex w-full items-center justify-between gap-2">
-        <Logo />
-        {onOpenAiLogs ? (
-          // ui-screens §1「AI ログパネルは全画面から開ける（sparkles アイコン）」
-          <Tooltip content="AI ログ">
-            <IconButton
-              aria-label="AI ログを開く"
-              icon={<Sparkles />}
-              onClick={onOpenAiLogs}
-              size="sm"
-              variant="subtle"
-            />
-          </Tooltip>
-        ) : null}
-      </div>
+      <Logo />
 
       <Button
         asChild
-        className="mt-2 w-full"
+        className="relative mt-2 w-full"
         leadingIcon={<Plus />}
         size="sm"
-        variant="primary"
+        variant={atDomainsNew ? "outline" : "primary"}
       >
-        <Link href="/domains/new">ドメインを取得</Link>
+        <Link
+          aria-current={atDomainsNew ? "page" : undefined}
+          href="/domains/new"
+        >
+          ドメインを取得
+          {atDomainsNew ? (
+            <span
+              aria-hidden="true"
+              className="brand-gradient absolute inset-y-0 left-0 w-[length:var(--stroke-accent)]"
+            />
+          ) : null}
+        </Link>
       </Button>
 
       <nav

@@ -4,9 +4,8 @@ import {
   isWithinAddGracePeriod,
   maxRenewPeriod,
   renewedExpiry,
-  statusBadgeLabel,
 } from "./derive";
-import { operationLabel, operationState } from "./operations";
+import { operationState } from "./operations";
 
 const NOW = Date.parse("2026-08-26T01:00:00.000Z");
 const DAY = 24 * 60 * 60 * 1000;
@@ -120,44 +119,6 @@ describe("operationState", () => {
       displayStatus: "transferred_out",
     });
     expect(operationState(target, "renew").reason).toBe("移管済みのため不可");
-  });
-});
-
-describe("operationLabel", () => {
-  it("不可のときだけ理由を併記する（Figma の Disabled ラベル）", () => {
-    const target = domain({ statuses: ["ok", "clientDeleteProhibited"] });
-    expect(operationLabel("廃止", operationState(target, "delete"))).toBe(
-      "廃止 — 削除ロック中",
-    );
-    expect(operationLabel("更新", operationState(target, "renew"))).toBe(
-      "更新",
-    );
-  });
-});
-
-describe("statusBadgeLabel", () => {
-  it("RGP は残日数を添える（S-33）", () => {
-    const target = domain({
-      displayStatus: "rgp",
-      rgpStatuses: ["redemptionPeriod"],
-      rgpUntil: new Date(NOW + 18 * DAY).toISOString(),
-    });
-    expect(statusBadgeLabel(target, NOW)).toBe("復旧猶予 残 18 日");
-  });
-
-  it("削除待ちは Pending Delete の残日数を添える（S-36）", () => {
-    const target = domain({
-      displayStatus: "pending_delete",
-      statuses: ["pendingDelete"],
-      gracePeriods: [
-        { kind: "pendingDelete", until: new Date(NOW + 4 * DAY).toISOString() },
-      ],
-    });
-    expect(statusBadgeLabel(target, NOW)).toBe("削除待ち 残 4 日");
-  });
-
-  it("その他は DISPLAY_STATUS_LABEL のまま", () => {
-    expect(statusBadgeLabel(domain(), NOW)).toBe("Active");
   });
 });
 

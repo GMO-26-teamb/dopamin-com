@@ -101,6 +101,34 @@ export const domainCheckResponseSchema = z.object({
 });
 export type DomainCheckResponse = z.infer<typeof domainCheckResponseSchema>;
 
+/**
+ * `POST /uniqueness/preview` の入力（FR-05 / ランディング S-00 の「お試しスコア」）。
+ *
+ * 認証なしで叩ける口なので 1 件だけ受け取る。SLD（`takutaku`）でも
+ * FQDN（`takutaku.com`）でもよい。どちらもスコアは SLD 部分だけで決まる
+ * （`POST /domains/check` の `uniqueness` と同じ計算）。
+ */
+export const uniquenessPreviewRequestSchema = z.union([
+  z.object({ sld: sldSchema }),
+  z.object({ name: domainNameSchema }),
+]);
+export type UniquenessPreviewRequest = z.infer<
+  typeof uniquenessPreviewRequestSchema
+>;
+
+/**
+ * `POST /uniqueness/preview` の応答。
+ * 空き確認（FR-03）はしないので、スコアだけを `POST /domains/check` と同じ形で返す。
+ */
+export const uniquenessPreviewResponseSchema = z.object({
+  /** スコアの対象になった SLD（FQDN で聞いても TLD は判定に使わない）。 */
+  sld: z.string(),
+  uniqueness: domainUniquenessSchema,
+});
+export type UniquenessPreviewResponse = z.infer<
+  typeof uniquenessPreviewResponseSchema
+>;
+
 /** `POST /domains` の入力（FR-06）。 */
 export const domainCreateRequestSchema = z.object({
   name: domainNameSchema,

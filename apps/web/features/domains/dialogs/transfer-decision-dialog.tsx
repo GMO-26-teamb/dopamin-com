@@ -5,7 +5,7 @@ import { DangerDialog, FormDialog } from "@/components/ui/dialog";
 /**
  * Figma: D-06 `83:4036`
  *
- * 承認は Dialog / Danger（ドメイン名の再入力で解錠、要件 §15.2）。
+ * 承認は Dialog / Danger（ドメイン名の再入力で解錠）。
  * 拒否は汎用 Dialog（再入力なし）。どちらも本文に自動承認までの残り時間を出す。
  */
 export type TransferDecision = "approve" | "reject";
@@ -42,11 +42,10 @@ export function TransferDecisionDialog({
         title={`${domainName} の移管を拒否しますか？`}
       >
         <p className="w-full text-body-sm text-muted">
-          拒否すると申請は取り消され、ドメインは手元に残ります。相手レジストラは再度申請できます。何もしない場合は{" "}
-          {countdownLabel} 後に自動承認されます。
+          拒否するとドメインは手元に残ります。相手レジストラは再度申請できます。
         </p>
         <p className="w-full text-caption text-muted">
-          承認・拒否のどちらも操作ログに記録されます。
+          何もしない場合は {countdownLabel} 後に自動承認されます。
         </p>
       </FormDialog>
     );
@@ -57,12 +56,12 @@ export function TransferDecisionDialog({
       busy={busy}
       confirmLabel="確認のためドメイン名を入力"
       confirmText={domainName}
-      note="拒否する場合は「拒否」から。承認・拒否のどちらも操作ログに記録されます（§15.2: 移管 OUT はドメイン名の再入力で確認）。"
+      note={`何もしない場合は ${countdownLabel} 後に自動承認されます。手元に残すなら「拒否」を選んでください。`}
       onOpenChange={onOpenChange}
       onPrimary={onSubmit}
       open={open}
       primaryLabel={busy ? "承認中…" : "承認する"}
-      subtitle={`承認すると相手レジストラへ所有権が移り、保有一覧から消えます。この操作は取り消せません（何もしない場合は ${countdownLabel} 後に自動承認されます）。`}
+      subtitle="承認すると所有権が相手レジストラへ移り、保有一覧から消えます。取り消せません。"
       title={`${domainName} の移管を承認しますか？`}
     />
   );

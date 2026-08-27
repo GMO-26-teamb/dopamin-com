@@ -64,7 +64,7 @@ describe("syncNotice", () => {
       "Kitaqnic が応答しません — 一覧はキャッシュを表示しています",
     );
     expect(result?.body).toBe(
-      "1 件が最新化できませんでした。参照系は自動で 2 回再試行しました。しばらくして「最新化」を押してください。",
+      "1 件が最新化できませんでした。自動で 2 回試し直しました。しばらくして「最新化」を押してください。",
     );
   });
 
@@ -131,7 +131,7 @@ describe("syncNotice", () => {
       "Kitaqsign が応答しません — 一覧はキャッシュを表示しています",
     );
     expect(result?.body).toBe(
-      "参照系は自動で 2 回再試行しました。しばらくして「最新化」を押してください。",
+      "自動で 2 回試し直しました。しばらくして「最新化」を押してください。",
     );
   });
 
@@ -161,7 +161,7 @@ describe("syncNotice", () => {
     expect(result?.title).not.toContain("応答しません");
   });
 
-  it("NOT_FOUND は再試行の対象外なので「2 回再試行しました」を出さない", () => {
+  it("NOT_FOUND は再試行の対象外なので「2 回試し直しました」を出さない", () => {
     const result = notice({
       failures: [
         failure({
@@ -176,7 +176,7 @@ describe("syncNotice", () => {
     expect(result?.body).toBe(
       "1 件が最新化できませんでした。レジストリ側に登録がありません。操作ログで詳細を確認してください。",
     );
-    expect(result?.body).not.toContain("再試行");
+    expect(result?.body).not.toContain("試し直し");
   });
 
   it("REGISTRY_REJECTED は registryCode 由来の理由を本文に出す", () => {
@@ -225,7 +225,7 @@ describe("syncNotice", () => {
     );
   });
 
-  it("REGISTRY_SPEC_MISMATCH は仕様変更の可能性と操作ログ導線を出す", () => {
+  it("REGISTRY_SPEC_MISMATCH は見出しを事実だけにし、仕様変更の可能性は本文に出す", () => {
     const result = notice({
       failures: [
         failure({
@@ -237,12 +237,9 @@ describe("syncNotice", () => {
       ],
     });
 
-    expect(result?.title).toBe(
-      "Kitaqsign の応答が想定と異なります — レジストリの仕様変更の可能性があります",
-    );
-    // 本文は lib/error-messages.ts の REGISTRY_SPEC_MISMATCH と同じ言い回しに揃える
+    expect(result?.title).toBe("Kitaqsign の応答が想定と異なります");
     expect(result?.body).toBe(
-      "1 件が最新化できませんでした。応答の形式が想定と異なりました。操作ログを確認してください。",
+      "1 件が最新化できませんでした。レジストリの仕様が変わった可能性があります。操作ログを確認してください。",
     );
   });
 
@@ -306,7 +303,7 @@ describe("syncNotice", () => {
       "Kitaqnic が応答しません — 一覧はキャッシュを表示しています",
     );
     expect(result?.body).toBe(
-      "3 件が最新化できませんでした（応答なし 1 件・レジストリに未登録 2 件）。参照系は自動で 2 回再試行しました。しばらくして「最新化」を押してください。",
+      "3 件が最新化できませんでした（応答なし 1 件・レジストリに未登録 2 件）。自動で 2 回試し直しました。しばらくして「最新化」を押してください。",
     );
   });
 });

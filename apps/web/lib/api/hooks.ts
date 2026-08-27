@@ -8,7 +8,11 @@
  * invalidate して一覧・詳細へ即時反映する（AC-06-1）。
  */
 
-import type { DomainCheckRequest, PasskeySummary } from "@dopamin/shared";
+import type {
+  DomainCheckRequest,
+  PasskeySummary,
+  UniquenessPreviewRequest,
+} from "@dopamin/shared";
 import {
   type UseMutationResult,
   type UseQueryResult,
@@ -36,6 +40,7 @@ import type {
   SubdomainPlan,
   SyncResult,
   Transfer,
+  UniquenessPreview,
 } from "./types";
 
 type CandidateInput = Parameters<CandidateService["generate"]>[0];
@@ -230,6 +235,21 @@ export function useCheckDomains(): Mutation<
   });
 }
 
+/**
+ * 独自性スコアのプレビュー（FR-05 / ランディング S-00）。
+ *
+ * ログイン前に叩くので、`useCheckDomains` と違って AI ログ（要ログイン）は触らない。
+ */
+export function usePreviewUniqueness(): Mutation<
+  UniquenessPreview,
+  UniquenessPreviewRequest
+> {
+  const services = useServices();
+  return useMutation({
+    mutationFn: (input) => services.uniqueness.preview(input),
+  });
+}
+
 export function useRegisterDomain(): Mutation<
   DomainDetail,
   { name: string; period: number }
@@ -361,6 +381,11 @@ export function useSaveSubdomainPlan(
       queryClient.setQueryData(keys.subdomainPlan(domain), plan);
       void queryClient.invalidateQueries({
         queryKey: keys.dnsDiff(domain),
+      });
+      // 詳細のサブドメイン設計カードはホスト数・反映済み数を持つので、保存で変わる（#217）。
+      // 一覧（keys.domains）は設計を持たないので触らない（NS が変わる apply とはそこが違う）
+      void queryClient.invalidateQueries({
+        queryKey: keys.domain(domain),
       });
     },
   });

@@ -1,15 +1,24 @@
 "use client";
 
+import { Pencil } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, KeyValueRow } from "@/components/ui/card";
 import type { DomainDetail } from "@/lib/api/types";
 
 /**
  * Figma: S-30 コンタクトカード（`83:2476`）
  * 登録者（ダミー PII）。移管 IN 後に差し替えできていない場合は「未移行」バッジ（S-39）。
+ *
+ * 未移行はここと状態バナーの 2 か所に出る。バナーは「いま何が起きているか」、
+ * ここは「どの値が古いか」を示すので役割が違う。カード枠まで警告色にすると
+ * 3 つ目の同じ合図になるだけなので、枠は既定のままにする。
+ * 直し方（D-02）はバナーを探しに戻らなくていいよう、このカードにも置く。
  */
 export interface ContactCardProps {
   domain: DomainDetail;
+  /** D-02 を開く。表示のみの状態（S-31 / S-34 / S-36）では渡さない。 */
+  onEdit?: () => void;
 }
 
 /**
@@ -21,12 +30,9 @@ function contactValue(value: string): string {
   return value.length === 0 ? "未取得" : value;
 }
 
-export function ContactCard({ domain }: ContactCardProps) {
+export function ContactCard({ domain, onEdit }: ContactCardProps) {
   return (
-    <Card
-      emphasis={domain.registrant.migrated ? "default" : "warn"}
-      kicker="コンタクト"
-    >
+    <Card kicker="コンタクト">
       <KeyValueRow
         label="登録者"
         value={contactValue(domain.registrant.name)}
@@ -35,9 +41,24 @@ export function ContactCard({ domain }: ContactCardProps) {
         label="メール"
         value={contactValue(domain.registrant.email)}
       />
-      {domain.registrant.migrated ? null : (
-        <div className="flex w-full items-center pt-0.5">
-          <Badge tone="warn">未移行</Badge>
+      {domain.registrant.migrated && onEdit === undefined ? null : (
+        <div className="flex w-full items-center justify-between gap-2 pt-0.5">
+          {domain.registrant.migrated ? (
+            <span aria-hidden="true" />
+          ) : (
+            <Badge tone="warn">未移行</Badge>
+          )}
+          {onEdit === undefined ? null : (
+            <Button
+              aria-label="登録者情報を変更"
+              leadingIcon={<Pencil />}
+              onClick={onEdit}
+              size="sm"
+              variant="subtle"
+            >
+              変更
+            </Button>
+          )}
         </div>
       )}
     </Card>

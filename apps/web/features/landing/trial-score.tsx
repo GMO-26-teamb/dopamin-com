@@ -4,18 +4,16 @@
  * Figma: S-00 `80:2` の右カラム（`docs/ui-design/10-landing-standard.png`）。
  * ランディングの「お試しスコア」。
  *
- * ui-screens §7-1（要確認）: 独自性スコアの API（`POST /domains/check`）は認証必須で、
- * 未認証で呼べる口がまだ決まっていない。仮置きとして
- * - 入力欄の横に「ログイン後に利用可」と注記する
- * - 実 API を叩く http モードでは入力欄と実行ボタンを Disabled にする
- * とし、モックモードでは動かして体験を確認できるようにしている
- * （fe-ui 設計 §1「モックで全画面」）。§7-1 が決まったらここだけ直す。
+ * 独自性スコアだけを返す口（`POST /uniqueness/preview`）はログイン不要なので、
+ * モック / 実 API のどちらのモードでもそのまま動く。空き確認（FR-03）はしないため、
+ * ここに出るのは「既存の名前とどれくらい紛らわしいか」だけで、登録できるかは分からない。
  */
 
 import {
   domainNameSchema,
   rarityTier,
   sldSchema,
+  type UniquenessPreviewRequest,
   uniquenessLabel,
 } from "@dopamin/shared";
 import { Search } from "lucide-react";
@@ -30,72 +28,77 @@ import { ScoreGauge } from "@/components/ui/score-gauge";
 import { SimilarityRow } from "@/components/ui/similarity-row";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ApiClientError } from "@/lib/api/errors";
-import { useCheckDomains } from "@/lib/api/hooks";
-import { API_MODE } from "@/lib/api/mode";
-import type { SearchResult } from "@/lib/api/types";
-
-/** 直接 FQDN を書かなかったときに試す TLD。 */
-const DEFAULT_TLD = "com";
+import { usePreviewUniqueness } from "@/lib/api/hooks";
+import type { UniquenessPreview } from "@/lib/api/types";
+import { ScoreField } from "./score-field";
 
 /** 類似候補は上位 3 件まで（Figma と同じ）。 */
 const NEAREST_LIMIT = 3;
 
+/** 入力前の右カラムを空にしないための例。押すとそのまま試せる。 */
+const EXAMPLES = ["gogle", "takutaku", "amazan"] as const;
+
 const INVALID_INPUT =
   "英数字とハイフンで入力してください（例: takutaku / takutaku.com）。";
 
-/** 「gogle」なら `{ sld, tlds }`、「gogle.com」なら `{ names }` に振り分ける。 */
-function toCheckRequest(raw: string) {
+/** 「gogle」なら `{ sld }`、「gogle.com」なら `{ name }` に振り分ける。 */
+function toPreviewRequest(raw: string): UniquenessPreviewRequest | null {
   const value = raw.trim().toLowerCase();
   if (value === "") {
     return null;
   }
   if (value.includes(".")) {
     const parsed = domainNameSchema.safeParse(value);
-    return parsed.success ? { names: [parsed.data] } : null;
+    return parsed.success ? { name: parsed.data } : null;
   }
   const parsed = sldSchema.safeParse(value);
-  return parsed.success ? { sld: parsed.data, tlds: [DEFAULT_TLD] } : null;
+  return parsed.success ? { sld: parsed.data } : null;
 }
 
 export function TrialScore() {
   const inputId = useId();
   const [value, setValue] = useState("");
   const [invalid, setInvalid] = useState(false);
-  const check = useCheckDomains();
+  const preview = usePreviewUniqueness();
 
-  // §7-1 が決まるまで、実 API を叩くモードでは操作させない
-  const enabled = API_MODE !== "http";
-  const result = check.data?.[0] ?? null;
-
-  const run = () => {
-    const request = toCheckRequest(value);
+  /** 例を押したときは state の反映を待たずに走らせたいので、値を引数で受け取る。 */
+  const run = (raw: string) => {
+    const request = toPreviewRequest(raw);
     if (request === null) {
       setInvalid(true);
       return;
     }
     setInvalid(false);
-    check.mutate(request);
+    preview.mutate(request);
+  };
+
+  const tryExample = (example: string) => {
+    setValue(example);
+    run(example);
   };
 
   return (
     <section className="flex flex-col justify-center gap-4 px-6 py-10 md:px-10 lg:py-14 xl:px-14">
-      <div className="flex items-baseline justify-between gap-2">
-        <label className="text-caption text-muted" htmlFor={inputId}>
+      <ScoreField placement="top" />
+
+      <div className="flex flex-col gap-1">
+        <label className="text-label text-ink" htmlFor={inputId}>
           ためしてみる
         </label>
-        <span className="text-caption text-muted">ログイン後に利用可</span>
+        <p className="text-caption text-muted">
+          ログイン不要。0〜100 で返します。
+        </p>
       </div>
 
       <form
         className="flex flex-col gap-2 sm:flex-row sm:items-start"
         onSubmit={(event) => {
           event.preventDefault();
-          run();
+          run(value);
         }}
       >
         <div className="min-w-0 flex-1">
           <Input
-            disabled={!enabled}
             error={invalid ? INVALID_INPUT : undefined}
             id={inputId}
             name="trial"
@@ -108,26 +111,24 @@ export function TrialScore() {
           />
         </div>
         <Button
-          disabled={!enabled}
           leadingIcon={<Search />}
-          loading={check.isPending}
+          loading={preview.isPending}
           type="submit"
           variant="solid"
         >
-          {check.isPending ? "確認中…" : "スコアを見る"}
+          {preview.isPending ? "確認中…" : "スコアを見る"}
         </Button>
       </form>
 
       <TrialResult
-        error={check.error}
-        isPending={check.isPending}
-        onRetry={run}
-        result={result}
+        error={preview.error}
+        isPending={preview.isPending}
+        onExample={tryExample}
+        onRetry={() => run(value)}
+        result={preview.data ?? null}
       />
 
-      <p className="text-caption text-muted">
-        ↑ 有名サービスに似た名前は正直に低スコア。あなたの候補は?
-      </p>
+      <ScoreField placement="bottom" />
     </section>
   );
 }
@@ -137,11 +138,13 @@ function TrialResult({
   error,
   result,
   onRetry,
+  onExample,
 }: {
   isPending: boolean;
   error: ApiClientError | null;
-  result: SearchResult | null;
+  result: UniquenessPreview | null;
   onRetry: () => void;
+  onExample: (example: string) => void;
 }) {
   if (isPending) {
     return (
@@ -159,49 +162,75 @@ function TrialResult({
     );
   }
 
+  // RATE_LIMITED の「あと何秒で試せるか」も含めて、文言は toErrorCopy が持つ
   if (error !== null) {
     return <ErrorCard error={error} onRetry={onRetry} />;
   }
 
   if (result === null) {
-    return null;
+    return <TrialEmpty onExample={onExample} />;
   }
 
-  const uniqueness = result.uniqueness;
-  if (uniqueness === null) {
-    return (
-      <Card emphasis="muted">
-        <p className="text-body-sm text-muted">
-          このドメインの独自性スコアは取得できませんでした。
-        </p>
-      </Card>
-    );
-  }
+  return <TrialCard result={result} />;
+}
 
+/** まだ何も試していないときの右カラム。何が返るのかと、そのまま押せる例を出す。 */
+function TrialEmpty({ onExample }: { onExample: (example: string) => void }) {
+  return (
+    <Card emphasis="muted">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-caption text-muted">例</span>
+        {EXAMPLES.map((example) => (
+          <Button
+            key={example}
+            onClick={() => onExample(example)}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            {example}
+          </Button>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function TrialCard({ result }: { result: UniquenessPreview }) {
+  const { uniqueness } = result;
   const tier = rarityTier(uniqueness.score);
   const low = uniquenessLabel(uniqueness.score) === "low";
+  const nearest = uniqueness.nearest.slice(0, NEAREST_LIMIT);
 
   return (
     <Card emphasis={low ? "warn" : "default"}>
       <div className="flex items-center gap-4">
         <ScoreGauge tone={low ? "warn" : "brand"} value={uniqueness.score} />
         <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <Badge
-            className="self-start"
-            tone={low ? "warn" : tier === "SSR" ? "brand" : "neutral"}
-          >
-            <span className="inline-flex items-center gap-1">
-              <Rarity tier={tier} />
-              {low ? "紛らわしい" : null}
+          <div className="flex min-w-0 items-center gap-2">
+            <Badge tone={low ? "warn" : tier === "SSR" ? "brand" : "neutral"}>
+              <span className="inline-flex items-center gap-1">
+                <Rarity tier={tier} />
+                {low ? "紛らわしい" : null}
+              </span>
+            </Badge>
+            <span className="min-w-0 truncate text-code text-muted">
+              {result.sld}
             </span>
-          </Badge>
-          {uniqueness.nearest.slice(0, NEAREST_LIMIT).map((near) => (
-            <SimilarityRow
-              key={near.name}
-              name={near.name}
-              similarity={near.similarity}
-            />
-          ))}
+          </div>
+          {nearest.length === 0 ? (
+            <p className="text-caption text-muted">
+              似ている名前は見つかりませんでした。
+            </p>
+          ) : (
+            nearest.map((near) => (
+              <SimilarityRow
+                key={near.name}
+                name={near.name}
+                similarity={near.similarity}
+              />
+            ))
+          )}
         </div>
       </div>
     </Card>

@@ -8,7 +8,6 @@ import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorCard } from "@/components/ui/error-card";
-import { HelpTip } from "@/components/ui/help-tip";
 import { latestSyncedAt, shouldAutoSync } from "@/features/domains/auto-sync";
 import { DomainGridSkeleton } from "@/features/domains/domain-card-skeleton";
 import { DomainGrid, visibleDomains } from "@/features/domains/domain-grid";
@@ -55,7 +54,6 @@ export default function DashboardPage() {
   const now = new Date();
   const list = visibleDomains(domains.data ?? []);
   const lastSyncedAt = latestSyncedAt(list);
-  const hasStale = list.some((domain) => domain.stale);
 
   const refreshing = sync.isPending;
   const refreshButton = (
@@ -74,27 +72,12 @@ export default function DashboardPage() {
     lastSyncedAt === null
       ? ""
       : ` · 最終同期 ${formatRelativeTime(lastSyncedAt, now)}`;
-  const metaText = domains.isPending
+  // 同期の状態は Banner とカードの「未同期」バッジが持つので、ここは件数と最終同期だけにする
+  const meta = domains.isPending
     ? "読み込み中…"
     : domains.isError
       ? undefined
-      : `${list.length}件${syncedMeta}${hasStale ? "（キャッシュ）" : ""}`;
-  const meta =
-    metaText === undefined ? undefined : (
-      <span className="inline-flex items-center gap-1">
-        {metaText}
-        {domains.isSuccess ? (
-          <HelpTip
-            content={
-              hasStale
-                ? "レジストリに繋がらなかったので、前回取り込んだ内容を表示しています。「最新化」で取り直せます。"
-                : "レジストリから最後に取り込んだ時刻です。開くたびに自動で最新化され、「最新化」でいつでも取り直せます。"
-            }
-            label="最終同期とは"
-          />
-        ) : null}
-      </span>
-    );
+      : `${list.length}件${syncedMeta}`;
 
   let content: ReactNode;
   if (domains.isPending) {
@@ -112,7 +95,7 @@ export default function DashboardPage() {
   } else if (list.length === 0) {
     content = (
       <EmptyState
-        body="AI がニックネームやアプリ名から候補を考えます。まずは 1 つ取ってみましょう。他社のドメインを持ち込むこともできます。"
+        body="AI が名前の候補を考えます。まずは 1 つ取ってみましょう。"
         className="mx-auto mt-10 max-w-120"
         primary={
           <Button asChild leadingIcon={<Plus />}>

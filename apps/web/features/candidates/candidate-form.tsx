@@ -5,7 +5,7 @@ import { type FormEvent, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TldMultiSelect } from "./tld-select";
-import { DEFAULT_TLDS, isAllTlds } from "./tlds";
+import { isAllTlds } from "./tlds";
 
 /**
  * Figma: S-20 `81:741` / S-21 `81:921`
@@ -22,21 +22,28 @@ export interface CandidateFormValues {
 
 export interface CandidateFormProps {
   busy: boolean;
+  /** 希望 TLD はページで 1 つだけ持ち、直接検索と共有する（#218） */
+  tlds: readonly string[];
+  onTldsChange: (next: string[]) => void;
   onSubmit: (values: CandidateFormValues) => void;
 }
 
 const NICKNAME_REQUIRED = "ニックネームまたはアプリ名を入力してください";
 const TLD_REQUIRED = "希望 TLD を 1 つ以上選んでください";
 
-export function CandidateForm({ busy, onSubmit }: CandidateFormProps) {
+export function CandidateForm({
+  busy,
+  tlds,
+  onTldsChange,
+  onSubmit,
+}: CandidateFormProps) {
   const [nickname, setNickname] = useState("");
   const [purpose, setPurpose] = useState("");
-  const [tlds, setTlds] = useState<readonly string[]>(DEFAULT_TLDS);
   const [error, setError] = useState<string | undefined>(undefined);
   const [tldError, setTldError] = useState<string | undefined>(undefined);
 
   const handleTldChange = (next: string[]) => {
-    setTlds(next);
+    onTldsChange(next);
     if (next.length > 0) {
       setTldError(undefined);
     }

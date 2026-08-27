@@ -15,6 +15,7 @@ import {
   type DomainCheckRequest,
   type DomainCheckResult,
   type DomainSyncResponse,
+  type DomainUniqueness,
   type DomainUpdateRequest,
   deriveDisplayStatus,
   meResponseSchema,
@@ -27,6 +28,7 @@ import {
   type SubdomainPlanResponse,
   splitDomainName,
   type TransferSummary,
+  type UniquenessPreviewRequest,
 } from "@dopamin/shared";
 import {
   addPasskey,
@@ -61,6 +63,8 @@ import type {
   SubdomainPlan,
   SyncFailure,
   Transfer,
+  UniquenessPreview,
+  UniquenessScore,
 } from "../types";
 import {
   type ApiDomainSummary,
@@ -83,6 +87,7 @@ import {
   transferEnvelopeSchema,
   transferSummaryEnvelopeSchema,
   transfersListSchema,
+  uniquenessPreviewSchema,
   unwrap,
 } from "./client";
 
@@ -106,16 +111,15 @@ function toDomainSummaryVm(summary: ApiDomainSummary): DomainSummary {
  * 詳細応答（`{ domain, summary }`）を画面用の `DomainDetail` に写像する。
  *
  * 所有権・同期時刻・stale・移管バッジは `summary`（一覧と同じ要約）から取るので、
- * 一覧と詳細で表示がずれない。登録者は `registrantProfile` から取る
- * （`info` はコンタクト ID しか返さないため API が中身を添える。#172）。
- * まだ API が返さない値は暫定のままにする:
- * - `gracePeriods`: `info` は猶予期限を返さない（§11.4 の目安計算は未実装）
- * - `subdomainPlan`: 設計 API（FR-13）未実装
+ * 一覧と詳細で表示がずれない。登録者は `registrantProfile` から取り、
+ * サブドメイン設計の件数は `subdomainPlan` をそのまま使う（#217）。
+ * `gracePeriods` だけは API がまだ返さない（`info` が猶予期限を持たない）ので空にする。
  */
 function toDomainDetail({
   domain,
   summary,
   registrantProfile,
+  subdomainPlan,
 }: DomainEnvelope): DomainDetail {
   return {
     ...toDomainSummaryVm(summary),
@@ -133,7 +137,7 @@ function toDomainDetail({
       domain.registeredAt,
       domain.lastTransferAt,
     ),
-    subdomainPlan: null,
+    subdomainPlan,
   };
 }
 
@@ -184,6 +188,21 @@ function toSyncFailure(
 }
 
 /**
+ * API の独自性スコア（§10.4 の `uniqueness`）を画面用の `UniquenessScore` に写す。
+ * `POST /domains/check` と `POST /uniqueness/preview` が同じ形を返すので写像は 1 か所。
+ */
+function toUniquenessVm(uniqueness: DomainUniqueness): UniquenessScore {
+  return {
+    score: uniqueness.score,
+    label: uniqueness.label,
+    nearest: uniqueness.topSimilar.map((t) => ({
+      name: t.name,
+      similarity: t.similarity,
+    })),
+  };
+}
+
+/**
  * `POST /domains/check` の 1 行（§10.4）を、画面用の共通フィールドに写す。
  *
  * 検索結果（`SearchResult`）と AI 候補（`Candidate`）は同じ `check` の形を共有するので、
@@ -202,16 +221,7 @@ function toCheckedFields(result: DomainCheckResult): {
     availability: result.availability,
     // FR-05: API の実スコアを ViewModel に写像する（topSimilar → nearest）
     uniqueness:
-      result.uniqueness === null
-        ? null
-        : {
-            score: result.uniqueness.score,
-            label: result.uniqueness.label,
-            nearest: result.uniqueness.topSimilar.map((t) => ({
-              name: t.name,
-              similarity: t.similarity,
-            })),
-          },
+      result.uniqueness === null ? null : toUniquenessVm(result.uniqueness),
     alternatives: [],
   };
 }
@@ -688,6 +698,22 @@ export function createHttpServices(): Services {
           authCodeSchema,
         );
         return { authCode };
+      },
+    },
+
+    uniqueness: {
+      /**
+       * POST /uniqueness/preview（FR-05）。ランディング S-00 のお試しスコア。
+       * ログイン前に叩くので `unwrap` の 401 経路には乗らない（そもそも認証を見ない）。
+       */
+      async preview(
+        input: UniquenessPreviewRequest,
+      ): Promise<UniquenessPreview> {
+        const { sld, uniqueness } = await unwrap(
+          apiClient.api.v1.uniqueness.preview.$post({ json: input }),
+          uniquenessPreviewSchema,
+        );
+        return { sld, uniqueness: toUniquenessVm(uniqueness) };
       },
     },
 

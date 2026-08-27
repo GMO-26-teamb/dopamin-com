@@ -8,6 +8,8 @@ import {
   toTransferResponse,
   transferCreateRequestSchema,
   transferResponseSchema,
+  uniquenessPreviewRequestSchema,
+  uniquenessPreviewResponseSchema,
 } from "./api";
 
 /**
@@ -375,6 +377,74 @@ describe("transferResponseSchema / toTransferResponse（FR-12 / ADR-0002）", ()
       transferResponseSchema.safeParse({
         name: "example.com",
         status: "clientApproved",
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("uniquenessPreviewRequestSchema（FR-05 / S-00 お試しスコア）", () => {
+  it("SLD 単体を受理し、小文字に正規化する", () => {
+    const parsed = uniquenessPreviewRequestSchema.safeParse({
+      sld: "TakuTaku",
+    });
+    expect(parsed.success && parsed.data).toEqual({ sld: "takutaku" });
+  });
+
+  it("FQDN を受理し、小文字に正規化する", () => {
+    const parsed = uniquenessPreviewRequestSchema.safeParse({
+      name: "TakuTaku.COM",
+    });
+    expect(parsed.success && parsed.data).toEqual({ name: "takutaku.com" });
+  });
+
+  it("空・記号入り・長すぎる SLD は拒否する", () => {
+    for (const sld of ["", "たくたく", "-takutaku", "a".repeat(64)]) {
+      expect(uniquenessPreviewRequestSchema.safeParse({ sld }).success).toBe(
+        false,
+      );
+    }
+  });
+
+  it("ドットの無い値を name には入れられない（SLD は sld で渡す）", () => {
+    expect(
+      uniquenessPreviewRequestSchema.safeParse({ name: "takutaku" }).success,
+    ).toBe(false);
+  });
+
+  it("どちらのキーも無ければ拒否する", () => {
+    expect(uniquenessPreviewRequestSchema.safeParse({}).success).toBe(false);
+  });
+
+  it("複数件はまとめて聞けない（未認証の口なので 1 件だけ）", () => {
+    expect(
+      uniquenessPreviewRequestSchema.safeParse({ names: ["takutaku.com"] })
+        .success,
+    ).toBe(false);
+  });
+});
+
+describe("uniquenessPreviewResponseSchema（FR-05）", () => {
+  const uniqueness = {
+    score: 42,
+    label: "medium",
+    topSimilar: [{ name: "google", similarity: 0.61 }],
+    confidence: "normal",
+    algorithmVersion: "v1",
+    corpusVersion: "c1",
+  };
+
+  it("SLD とスコアの組を受理する", () => {
+    expect(
+      uniquenessPreviewResponseSchema.safeParse({ sld: "takutaku", uniqueness })
+        .success,
+    ).toBe(true);
+  });
+
+  it("スコアは省略できない（空き確認と違い必ず付く）", () => {
+    expect(
+      uniquenessPreviewResponseSchema.safeParse({
+        sld: "takutaku",
+        uniqueness: null,
       }).success,
     ).toBe(false);
   });

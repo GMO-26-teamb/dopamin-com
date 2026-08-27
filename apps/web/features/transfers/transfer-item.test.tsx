@@ -57,7 +57,7 @@ describe("transferKind", () => {
 });
 
 describe("TransferItem", () => {
-  it("Out Received: OUT バッジ・残り時間・承認 / 拒否を出す", () => {
+  it("Out Received: 残り時間・承認 / 拒否を出す（方向は見出しが持つ）", () => {
     render(
       <TransferItem
         transfer={transfer({
@@ -68,7 +68,8 @@ describe("TransferItem", () => {
       />,
     );
 
-    expect(screen.getByText("OUT")).toBeInTheDocument();
+    // セクション見出し「受信した申請（移管 OUT）」が方向を言うので行では出さない
+    expect(screen.queryByText("OUT")).toBeNull();
     expect(
       screen.getByText(
         "移管申請を受信 — 承認しないと 14:32 後に自動承認されます",
@@ -82,11 +83,11 @@ describe("TransferItem", () => {
     ).toBeEnabled();
   });
 
-  it("In Pending: IN バッジ・自動承認までの残り時間・状態を確認 / 取消を出す", async () => {
+  it("In Pending: 自動承認までの残り時間・状態を確認 / 取消を出す", async () => {
     const onCancel = vi.fn();
     render(<TransferItem onCancel={onCancel} transfer={transfer()} />);
 
-    expect(screen.getByText("IN")).toBeInTheDocument();
+    expect(screen.queryByText("IN")).toBeNull();
     expect(
       screen.getByText(
         "申請中 — 相手レジストラの承認待ち（自動承認まで 14:32）",
@@ -104,20 +105,16 @@ describe("TransferItem", () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it("Import Pending: 取り込み待ちと再試行を出す", () => {
+  it("Import Pending: 取り込み待ちと「状態を確認」を出す（ラベルは他の行と揃える）", () => {
     render(
       <TransferItem
         transfer={transfer({ actByAt: null, status: "import_pending" })}
       />,
     );
 
+    expect(screen.getByText("承認済み — 取り込み待ちです")).toBeInTheDocument();
     expect(
-      screen.getByText(
-        "承認済み — 取り込み待ち。「再試行」で取り込みを実行します",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "tkt-lab.net の取り込みを再試行" }),
+      screen.getByRole("button", { name: "tkt-lab.net の状態を確認" }),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /取消/ })).toBeNull();
   });
@@ -135,14 +132,32 @@ describe("TransferItem", () => {
       />,
     );
 
-    expect(
-      screen.getByText(/^完了 — \d{2}-\d{2} に移管 OUT$/),
-    ).toBeInTheDocument();
+    // 日付は行の右端だけ（本文では繰り返さない）
+    expect(screen.getByText("完了 — 保有から外れました")).toBeInTheDocument();
+    expect(screen.getByText(/^\d{2}-\d{2}$/)).toBeInTheDocument();
+    // 履歴の見出しは方向を言わないので、行にバッジを出す
+    expect(screen.getByText("OUT")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "old-blog.xyz" })).toHaveAttribute(
       "href",
       "/domains/old-blog.xyz",
     );
     expect(screen.queryAllByRole("button")).toHaveLength(0);
+  });
+
+  it("受信した移管申請の行からドメイン詳細に行ける（#219）", () => {
+    render(<TransferItem transfer={transfer({ direction: "out" })} />);
+
+    expect(screen.getByRole("link", { name: "tkt-lab.net" })).toHaveAttribute(
+      "href",
+      "/domains/tkt-lab.net",
+    );
+  });
+
+  it("まだ保有していない移管 IN の行はリンクにしない（詳細が引けないため）", () => {
+    render(<TransferItem transfer={transfer({ direction: "in" })} />);
+
+    expect(screen.queryByRole("link", { name: "tkt-lab.net" })).toBeNull();
+    expect(screen.getByText("tkt-lab.net")).toBeInTheDocument();
   });
 
   it("自動承認の期限を過ぎたら承認 / 拒否を Disabled にする", () => {

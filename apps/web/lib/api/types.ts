@@ -112,6 +112,16 @@ export interface UniquenessScore {
   nearest: { name: string; similarity: number }[];
 }
 
+/**
+ * `POST /uniqueness/preview` の結果（FR-05 / S-00 のお試しスコア）。
+ * 空き確認をしない口なので、スコアは必ず付く（`SearchResult` と違い null にならない）。
+ */
+export interface UniquenessPreview {
+  /** スコアの対象になった SLD（`gogle.com` と入れても `gogle` で判定する）。 */
+  sld: string;
+  uniqueness: UniquenessScore;
+}
+
 export type Availability = "available" | "unavailable" | "error";
 
 export interface Candidate {

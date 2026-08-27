@@ -122,6 +122,48 @@ describe("SettingsScreen", () => {
     ).toBeEnabled();
   });
 
+  it("末尾の「開発者向け」からログを開ける（ナビから外したぶんの導線・#215）", async () => {
+    renderScreen(mockScenario("default"));
+
+    expect(await screen.findByText("開発者向け")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "ログを開く" })).toHaveAttribute(
+      "href",
+      "/logs",
+    );
+  });
+
+  it("me が落ちてもログの導線は残る", async () => {
+    renderScreen(
+      stubServices({
+        me: () =>
+          Promise.reject(
+            new ApiClientError({
+              code: "INTERNAL",
+              message: "設定を取得できませんでした。",
+            }),
+          ),
+      }),
+    );
+
+    expect(
+      await screen.findByRole("link", { name: "ログを開く" }),
+    ).toBeInTheDocument();
+  });
+
+  it("AI 設定の保存に失敗したら先頭の面 1 本にまとめる（Banner と重ねない）", async () => {
+    renderScreen(mockScenario("error"));
+
+    await user().click(await screen.findByRole("combobox", { name: "モデル" }));
+    await user().click(
+      await screen.findByRole("option", { name: "gemini-2.5-pro" }),
+    );
+
+    const alerts = await screen.findAllByRole("alert");
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toHaveTextContent("INTERNAL");
+    expect(screen.queryByText("AI 設定を保存しました")).toBeNull();
+  });
+
   it("features.demoReset が false ならリセットのカードを出さない（§7-3）", async () => {
     renderScreen(
       stubServices({
@@ -160,7 +202,7 @@ describe("SettingsScreen", () => {
     const banner = await screen.findByText("デモデータをリセットしました");
     expect(banner).toBeInTheDocument();
     expect(
-      screen.getByText(/デモ用ドメイン 4 件を投入しました/),
+      screen.getByText("ダッシュボードで確認できます。"),
     ).toBeInTheDocument();
   });
 

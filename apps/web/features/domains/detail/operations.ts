@@ -3,7 +3,9 @@
  *
  * 可否判定は `packages/shared` の `isOperationAllowed`（復旧は `isRestorable`）が SSOT。
  * ここは「ブロックしたステータス → 画面に出す理由（1 語）」の対応だけを持つ。
- * Figma の Disabled ラベルは「廃止 — 削除ロック中」のように理由を併記する。
+ * 理由はボタンのラベルには連結しない（連結すると「廃止 — 削除ロック中」のような
+ * 長いラベルになり、何のボタンか読み取れなくなる）。ラベルは操作名のままにして、
+ * 理由はボタンの下に別の 1 行として出す。
  */
 
 import type { DomainOperation } from "@dopamin/shared";
@@ -97,11 +99,4 @@ export function operationState(
     reason: reasonFrom(check.blockedBy),
     blockedBy: check.blockedBy,
   };
-}
-
-/** ボタンのラベル。不可のときは Figma どおり「廃止 — 削除ロック中」の形にする。 */
-export function operationLabel(base: string, state: OperationState): string {
-  return state.allowed || state.reason === null
-    ? base
-    : `${base} — ${state.reason}`;
 }

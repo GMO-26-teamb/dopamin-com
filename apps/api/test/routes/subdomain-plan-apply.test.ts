@@ -3,10 +3,12 @@ import type {
   DnsZoneResponse,
   SubdomainPlanApplyResponse,
   SubdomainPlanResponse,
+  SubdomainPlanSummary,
 } from "@dopamin/shared";
 import {
   DOPAMIN_NAMESERVERS,
   dnsZoneResponseSchema,
+  domainDetailResponseSchema,
   subdomainPlanApplyResponseSchema,
 } from "@dopamin/shared";
 import { eq } from "drizzle-orm";
@@ -416,5 +418,58 @@ describe("GET /domains/:name/dns（FR-13）", () => {
   it("未認証は 401", async () => {
     const res = await app.request("/api/v1/domains/demo.com/dns");
     expect(res.status).toBe(401);
+  });
+});
+
+describe("GET /domains/:name のサブドメイン設計の件数（FR-07 / #217）", () => {
+  async function detailPlan(
+    cookie: string,
+    name: string,
+  ): Promise<SubdomainPlanSummary | null> {
+    const res = await app.request(`/api/v1/domains/${name}`, {
+      headers: { cookie },
+    });
+    expect(res.status).toBe(200);
+    return domainDetailResponseSchema.parse(await res.json()).subdomainPlan;
+  }
+
+  it("設計が無ければ null（詳細カードは「未作成」を出す）", async () => {
+    const { cookie } = await createTestSession(db);
+    await registerDomain(cookie, "count1.com", [...DOPAMIN_NAMESERVERS]);
+
+    expect(await detailPlan(cookie, "count1.com")).toBeNull();
+  });
+
+  it("保存しただけならホスト数が入り、反映済みは 0", async () => {
+    const { cookie } = await createTestSession(db);
+    await registerDomain(cookie, "count2.com", [...DOPAMIN_NAMESERVERS]);
+    await savePlan(cookie, "count2.com", [WWW, API]);
+
+    expect(await detailPlan(cookie, "count2.com")).toEqual({
+      hosts: 2,
+      applied: 0,
+    });
+  });
+
+  it("反映すると applied が増え、編集したホストは applied から外れる（AC-13-6）", async () => {
+    const { cookie } = await createTestSession(db);
+    await registerDomain(cookie, "count3.com", [...DOPAMIN_NAMESERVERS]);
+    await savePlan(cookie, "count3.com", [WWW, API]);
+    await apply(cookie, "count3.com");
+
+    expect(await detailPlan(cookie, "count3.com")).toEqual({
+      hosts: 2,
+      applied: 2,
+    });
+
+    // 反映後に www の向き先だけ変えると、そのホストは changed に倒れる
+    await savePlan(cookie, "count3.com", [
+      { ...WWW, target: "moved.vercel-dns.com" },
+      API,
+    ]);
+    expect(await detailPlan(cookie, "count3.com")).toEqual({
+      hosts: 2,
+      applied: 1,
+    });
   });
 });

@@ -10,7 +10,8 @@ const EMPHASIS = {
   default: "border-line",
   brand: "border-brand-1",
   warn: "border-warn",
-  muted: "border-soft opacity-[var(--opacity-muted)]",
+  // 不透明度で落とすと本文が 4.5:1 を割るので、枠だけで控えめさを出す（#95）
+  muted: "border-soft",
 } as const;
 
 export interface CardProps {

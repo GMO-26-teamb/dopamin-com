@@ -14,6 +14,7 @@ import {
   type PasskeySummary,
   passkeyNameSchema,
   splitDomainName,
+  type UniquenessPreviewRequest,
   uniquenessLabel,
 } from "@dopamin/shared";
 import { ApiClientError, type ErrorOrigin } from "../errors";
@@ -30,6 +31,7 @@ import type {
   SubdomainPlan,
   SyncResult,
   Transfer,
+  UniquenessPreview,
   UniquenessScore,
 } from "../types";
 import { at, days, minutes, mockRegistryForName } from "./fixtures";
@@ -87,23 +89,24 @@ function similarityFromPercent(percent: number): number {
   return percent / 100;
 }
 
+/**
+ * 独自性スコアは SLD だけで決まる（API は 1 回の check の中で SLD ごとにメモ化し、
+ * 近い既存名も SLD の corpus から選ぶ）。TLD 違いの行は同じ値になる。
+ */
 function uniquenessFor(name: string): UniquenessScore {
-  const { sld, tld } = splitDomainName(name);
-  const value = pseudoScore(name);
+  const { sld } = splitDomainName(name);
+  const value = pseudoScore(sld);
   return {
     score: value,
     label: uniquenessLabel(value),
     nearest: [
+      { name: `${sld}s`, similarity: similarityFromPercent(90 - (value % 12)) },
       {
-        name: `${sld}s.${tld}`,
-        similarity: similarityFromPercent(90 - (value % 12)),
-      },
-      {
-        name: `${sld}-app.${tld}`,
+        name: `${sld}-app`,
         similarity: similarityFromPercent(78 - (value % 15)),
       },
       {
-        name: `the${sld}.${tld}`,
+        name: `the${sld}`,
         similarity: similarityFromPercent(63 - (value % 18)),
       },
     ],
@@ -505,8 +508,11 @@ export function createMockServices(
         }
         const store = getMockStore();
         const domain = requireDomain(store, name);
+        // API の詳細は `subdomain_plans` にある = 保存済みの設計だけを数える（#217）。
+        // モックは提案（未保存）も plans に置くので、savedAt で同じ集合に絞る
         const plan = store.plans.get(name);
-        const hydrated = plan ? hydratePlan(store, plan) : null;
+        const hydrated =
+          plan && plan.savedAt !== null ? hydratePlan(store, plan) : null;
         const detail: DomainDetail = {
           ...domain,
           subdomainPlan: hydrated
@@ -692,6 +698,25 @@ export function createMockServices(
         return {
           authCode: `MOCK-${splitDomainName(name).sld.toUpperCase()}-${store.sequence}`,
         };
+      },
+    },
+
+    /**
+     * 独自性スコアのプレビュー（FR-05 / S-00 のお試しスコア）。
+     * 認証もレジストリも通らない口なので、失敗するとしたら計算側だけ。
+     */
+    uniqueness: {
+      /** POST /uniqueness/preview */
+      async preview(
+        input: UniquenessPreviewRequest,
+      ): Promise<UniquenessPreview> {
+        await wait();
+        if (isError) {
+          fail("INTERNAL", "スコアを計算できませんでした。");
+        }
+        const sld =
+          "sld" in input ? input.sld : splitDomainName(input.name).sld;
+        return { sld, uniqueness: uniquenessFor(sld) };
       },
     },
 

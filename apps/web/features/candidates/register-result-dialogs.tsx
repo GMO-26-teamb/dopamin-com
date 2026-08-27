@@ -68,9 +68,22 @@ export function RegisterSuccessDialog({
       ? "ネームサーバーは未設定（あとから設定できます）"
       : `ネームサーバー ${domain.nameservers.join(" / ")}`;
 
+  // 1 文に連ねると読めないので、まとめの 1 文 + 控えの行に分ける（#218）
   return (
     <SuccessDialog
-      body={`${status} になりました。有効期限 ${expires}・${nameservers}。お支払い ${formatJpy(receipt.amount)}（${receipt.brand} •••• ${receipt.last4}・受付 ${receipt.id}・モック）。次はサブドメインの構成を決めましょう。`}
+      body={
+        <>
+          <span className="block">
+            {status} になりました。次はサブドメインの構成を決めましょう。
+          </span>
+          <span className="mt-2 block text-caption">有効期限 {expires}</span>
+          <span className="block text-caption">{nameservers}</span>
+          <span className="block text-caption">
+            お支払い {formatJpy(receipt.amount)}（{receipt.brand} ••••{" "}
+            {receipt.last4}）・受付 {receipt.id}
+          </span>
+        </>
+      }
       domain={domain.name}
       onOpenChange={onOpenChange}
       onPrimary={() => onGoToSubdomains(domain.name)}
@@ -109,8 +122,7 @@ export function RegisterConflictDialog({
           <DialogTitle>{conflict.name} は取得できませんでした</DialogTitle>
         </DialogHeader>
         <DialogDescription>
-          直前の再確認で取得済みになっていました（CONFLICT /{" "}
-          {ERROR_STATUS.CONFLICT}）。別の TLD
+          直前の再確認で、ほかの人が取得済みでした。別の TLD
           や綴り違いの代替候補を確認してください。
         </DialogDescription>
         {alternatives.length === 0 ? null : (
@@ -137,7 +149,7 @@ export function RegisterConflictDialog({
 
 // ---- S-28 create タイムアウト（AC-06-2） ----
 
-/** 照合の結果。再送はせず `info` → `check` の順に確認する（ui-screens S-28）。 */
+/** 照合の結果。再送はせず info → check の順に確認する（ui-screens S-28）。 */
 export type ReconcileOutcome =
   | { kind: "registered"; domain: DomainDetail }
   | { kind: "available" }
@@ -213,8 +225,8 @@ export function RegisterTimeoutDialog({
           <DialogTitle>{copy.title}</DialogTitle>
         </DialogHeader>
         <DialogDescription>
-          登録リクエストがタイムアウトしました。二重登録を避けるため再送はせず、info
-          で結果を確認します。{copy.body}
+          登録の要求がタイムアウトしました。二重登録を避けるため再送はせず、結果だけを確認します。
+          {copy.body}
         </DialogDescription>
         <p className="w-full text-code text-muted">{meta.join("・")}</p>
         {reconcile.error === null ? null : (

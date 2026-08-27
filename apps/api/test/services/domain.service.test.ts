@@ -25,6 +25,7 @@ function record(overrides: Partial<DomainRecord> = {}): DomainRecord {
       sponsoringRegistrarId: null,
       rgpStatuses: [],
     },
+    rgpUntil: null,
     syncedAt: new Date("2026-08-26T01:02:03.000Z"),
     ...overrides,
   };
@@ -57,13 +58,26 @@ describe("toDomainSummary", () => {
     expect(summary.tld).toBe("com");
   });
 
-  it("rgpUntil は常に null（両レジストリの info が猶予期限を返さないため）", () => {
+  it("猶予期限が行に入っていれば rgpUntil に出す（#211）", () => {
+    const base = record();
+    const summary = toDomainSummary(
+      {
+        ...base,
+        info: { ...base.info, rgpStatuses: ["redemptionPeriod"] },
+        rgpUntil: new Date("2026-09-25T00:00:00.000Z"),
+      },
+      false,
+    );
+    expect(summary.rgpStatuses).toEqual(["redemptionPeriod"]);
+    expect(summary.rgpUntil).toBe("2026-09-25T00:00:00.000Z");
+  });
+
+  it("猶予期限が分からない行は rgpUntil を null にする（0 日と偽らない・#211）", () => {
     const base = record();
     const summary = toDomainSummary(
       { ...base, info: { ...base.info, rgpStatuses: ["redemptionPeriod"] } },
       false,
     );
-    expect(summary.rgpStatuses).toEqual(["redemptionPeriod"]);
     expect(summary.rgpUntil).toBeNull();
   });
 

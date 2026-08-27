@@ -13,6 +13,7 @@ import { registry } from "./routes/registry";
 import { settings } from "./routes/settings";
 import { subdomainPlan } from "./routes/subdomain-plan";
 import { transfers } from "./routes/transfers";
+import { uniqueness } from "./routes/uniqueness";
 import type { AppEnv } from "./types";
 
 // ルートはメソッドチェーンで登録する（Hono RPC の型推論に必要）
@@ -26,6 +27,8 @@ const app = new Hono<AppEnv>()
   .route("/domains", domains)
   // FR-13 は関心が違うので別ファイルにし、同じ /domains に重ねてマウントする
   .route("/domains", subdomainPlan)
+  // FR-05 の未認証プレビュー（S-00 のお試しスコア）。認証・レジストリを通らない
+  .route("/uniqueness", uniqueness)
   .route("/settings", settings)
   .route("/transfers", transfers)
   .route("/registry", registry)

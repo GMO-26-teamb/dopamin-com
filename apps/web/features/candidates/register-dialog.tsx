@@ -166,9 +166,7 @@ export function RegisterDialog({
           : "お支払いへ"
       }
       secondaryLabel={isPayment ? "戻る" : "キャンセル"}
-      subtitle={
-        isPayment ? "お支払い（モック決済・実際の請求はありません）" : undefined
-      }
+      subtitle={isPayment ? "お支払い" : undefined}
       title={`${name} を登録`}
     >
       {notice === null ? null : (
@@ -200,7 +198,7 @@ export function RegisterDialog({
             helper={
               quote === null
                 ? undefined
-                : `お支払い合計 ${formatJpy(quote.total)}（税込・固定ダミー価格）`
+                : `お支払い合計 ${formatJpy(quote.total)}（税込）`
             }
             label="期間 *"
             onValueChange={setPeriod}
@@ -210,9 +208,9 @@ export function RegisterDialog({
           />
           <Input
             disabled
-            helper="登録時は未設定。あとから「情報修正」で設定できます"
+            helper="あとから「情報修正」で設定できます"
             label="ネームサーバー"
-            placeholder="未設定のまま登録します"
+            placeholder="未設定"
             readOnly
             surface="panel"
             value=""
@@ -230,11 +228,11 @@ export function RegisterDialog({
 
       {otherError === null ? null : <ErrorCard error={otherError} />}
 
-      <p className="w-full text-caption text-muted">
-        {isPayment
-          ? "成功後:「サブドメイン設計に進む」/「詳細を見る」"
-          : "次のステップでお支払い（モック）に進みます"}
-      </p>
+      {isPayment ? null : (
+        <p className="w-full text-caption text-muted">
+          次のステップでお支払いに進みます
+        </p>
+      )}
     </FormDialog>
   );
 }

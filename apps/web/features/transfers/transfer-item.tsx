@@ -6,7 +6,7 @@
  * 移管一覧の 1 件（FR-12）。Kind は `Transfer` の direction × status から決まる:
  * - `out-received`  受信した OUT 申請。拒否 / 承認 + 自動承認までの残り時間（warn 枠）
  * - `in-pending`    自分の IN 申請。状態を確認 / 取消
- * - `import-pending` 承認済み・取り込み待ち。再試行
+ * - `import-pending` 承認済み・取り込み待ち。状態を確認
  * - `history`       approved / rejected / cancelled。muted 枠 + 日付
  */
 
@@ -39,7 +39,8 @@ const KIND_BORDER: Record<TransferKind, string> = {
   "out-received": "border-warn",
   "in-pending": "border-line",
   "import-pending": "border-line",
-  history: "border-soft opacity-[var(--opacity-muted)]",
+  // 不透明度で落とすと本文が 4.5:1 を割る（#95）
+  history: "border-soft",
 };
 
 /** 履歴行の日付（`MM-DD`）。ローカルタイムで出す。 */
@@ -55,17 +56,20 @@ const DIRECTION_LABEL: Record<Transfer["direction"], string> = {
   out: "OUT",
 };
 
+/**
+ * 履歴行の本文。日付は行の右端が、方向（IN / OUT）は Badge が持つので、
+ * ここでは結果だけを言う（同じ事実を 1 行に 2 度出さない。#219）。
+ */
 function historyStatusText(transfer: Transfer): string {
-  const day = formatMonthDay(transfer.completedAt ?? transfer.requestedAt);
   switch (transfer.status) {
     case "approved":
       return transfer.direction === "out"
-        ? `完了 — ${day} に移管 OUT`
-        : `完了 — ${day} に移管 IN（取り込み済み）`;
+        ? "完了 — 保有から外れました"
+        : "完了 — 取り込みました";
     case "rejected":
-      return `拒否 — ${day} に移管を拒否しました`;
+      return "拒否しました";
     default:
-      return `取消 — ${day} に申請を取り消しました`;
+      return "取り消しました";
   }
 }
 
@@ -93,7 +97,7 @@ function statusText(
         ? "申請中 — 相手レジストラの承認待ち"
         : `申請中 — 相手レジストラの承認待ち（自動承認まで ${countdown}）`;
     case "import-pending":
-      return "承認済み — 取り込み待ち。「再試行」で取り込みを実行します";
+      return "承認済み — 取り込み待ちです";
     default:
       return historyStatusText(transfer);
   }
@@ -105,10 +109,10 @@ export interface TransferItemProps {
   busy?: boolean;
   /**
    * S-53（更新エラー）。仕様で Disabled にするのは承認 / 拒否 / 取消 / 申請だけなので、
-   * 「状態を確認」/「再試行」＝再照会の導線は残す（ui-screens S-53）。
+   * 「状態を確認」＝再照会の導線は残す（ui-screens S-53）。
    */
   updateFailed?: boolean;
-  /** 「状態を確認」/「再試行」が実行中 */
+  /** 「状態を確認」が実行中 */
   recheckPending?: boolean;
   onApprove?: (transfer: Transfer) => void;
   onReject?: (transfer: Transfer) => void;
@@ -136,7 +140,9 @@ export function TransferItem({
   const actionsDisabled = busy || updateFailed || expired;
   const recheckDisabled = busy || recheckPending;
   const isHistory = kind === "history";
-  const linkable = isHistory && transfer.status === "approved";
+  // 保有しているドメインだけ詳細へ送る。in-pending（相手の承認待ち）と
+  // import-pending（承認済み・取り込み前）は自分の行がまだ無い
+  const linkable = kind === "out-received" || isHistory;
   // 同じラベルのボタンが行ごとに並ぶので、読み上げ名はドメイン名で一意にする
   const name = transfer.domainName;
 
@@ -150,21 +156,26 @@ export function TransferItem({
     >
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex items-center gap-2">
+          {/* 行の中に承認 / 拒否ボタンがあるので、リンクにするのはドメイン名だけ。
+              まだ自分の保有になっていない移管 IN は詳細が引けない（S-80 に落ちる）ので
+              リンクにしない */}
           {linkable ? (
             <Link
               className="min-w-0 truncate text-domain-card text-ink underline-offset-2 hover:underline"
-              href={`/domains/${transfer.domainName}`}
+              href={`/domains/${encodeURIComponent(transfer.domainName)}`}
             >
               {transfer.domainName}
             </Link>
           ) : (
-            <span className="min-w-0 truncate text-domain-card text-ink">
+            <p className="min-w-0 truncate text-domain-card text-ink">
               {transfer.domainName}
-            </span>
+            </p>
           )}
-          <Badge tone={isHistory ? "muted" : "neutral"}>
-            {DIRECTION_LABEL[transfer.direction]}
-          </Badge>
+          {/* 方向はセクション見出し（受信した申請（移管 OUT）/ 申請中（移管 IN））が
+              言うので、見出しに方向が無い履歴だけバッジを出す（#219） */}
+          {isHistory ? (
+            <Badge tone="muted">{DIRECTION_LABEL[transfer.direction]}</Badge>
+          ) : null}
         </div>
         <p
           className={cn(
@@ -241,8 +252,9 @@ export function TransferItem({
         ) : null}
 
         {kind === "import-pending" ? (
+          // 呼ぶ処理は他の行と同じ再照会なので、ラベルも「状態を確認」で揃える（#219）
           <Button
-            aria-label={`${name} の取り込みを再試行`}
+            aria-label={`${name} の状態を確認`}
             disabled={recheckDisabled}
             leadingIcon={<RefreshCw />}
             loading={recheckPending}
@@ -250,7 +262,7 @@ export function TransferItem({
             size="sm"
             variant="outline"
           >
-            {recheckPending ? "取り込み中…" : "再試行"}
+            {recheckPending ? "確認中…" : "状態を確認"}
           </Button>
         ) : null}
 

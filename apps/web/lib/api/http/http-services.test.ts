@@ -137,6 +137,7 @@ function apiDetail(overrides: Record<string, unknown> = {}) {
       city: "N/A",
       countryCode: "JP",
     },
+    subdomainPlan: null,
     stale: false,
     syncedAt: "2026-08-26T00:00:00.000Z",
     ...overrides,
@@ -363,6 +364,40 @@ describe("domains.get（GET /domains/:name）", () => {
     });
     // 移管可能日は登録日 + 60 日（参考表示）
     expect(detail.transferableFrom).toBe("2026-09-30T00:00:00.000Z");
+  });
+
+  it("サブドメイン設計の件数をそのまま画面用に渡す（#217）", async () => {
+    stubFetch(200, apiDetail({ subdomainPlan: { hosts: 4, applied: 2 } }));
+
+    const detail = await services().domains.get("example.com");
+
+    expect(detail.subdomainPlan).toEqual({ hosts: 4, applied: 2 });
+  });
+
+  it("設計が未保存なら subdomainPlan は null（カードは「未作成」）", async () => {
+    stubFetch(200, apiDetail());
+
+    expect(
+      (await services().domains.get("example.com")).subdomainPlan,
+    ).toBeNull();
+  });
+
+  it("RGP の猶予期限を summary から取り、無ければ null のまま渡す（#211）", async () => {
+    stubFetch(
+      200,
+      apiDetail({
+        summary: apiSummary({
+          statuses: ["pendingDelete"],
+          rgpStatuses: ["redemptionPeriod"],
+          rgpUntil: "2026-09-25T00:00:00.000Z",
+        }),
+      }),
+    );
+
+    const detail = await services().domains.get("example.com");
+
+    expect(detail.displayStatus).toBe("rgp");
+    expect(detail.rgpUntil).toBe("2026-09-25T00:00:00.000Z");
   });
 });
 
@@ -908,6 +943,64 @@ describe("domains.check（FR-03 / FR-05）", () => {
       nearest: [{ name: "google", similarity: 0.95 }],
     });
     expect(results[1]?.uniqueness).toBeNull();
+  });
+});
+
+describe("uniqueness.preview（POST /uniqueness/preview。FR-05）", () => {
+  const body = {
+    sld: "googel",
+    uniqueness: {
+      score: 12,
+      label: "low",
+      topSimilar: [{ name: "google", similarity: 0.95 }],
+      confidence: "normal",
+      algorithmVersion: "v3.4-r2-ts.1",
+      corpusVersion: "tranco-74V4X-2026-08-26-top10k+curated-v1",
+    },
+  };
+
+  it("同一オリジンの /api/v1/uniqueness/preview に JSON を POST する", async () => {
+    stubFetch(200, body);
+    await services().uniqueness.preview({ sld: "googel" });
+
+    const call = calls.at(-1);
+    expect(call?.method).toBe("POST");
+    expect(call?.url).toContain("/api/v1/uniqueness/preview");
+    expect(call?.contentType).toBe("application/json");
+    expect(JSON.parse(call?.body ?? "null")).toEqual({ sld: "googel" });
+  });
+
+  it("topSimilar を nearest へ写像し、判定に使った SLD を添える", async () => {
+    stubFetch(200, body);
+    expect(await services().uniqueness.preview({ name: "googel.com" })).toEqual(
+      {
+        sld: "googel",
+        uniqueness: {
+          score: 12,
+          label: "low",
+          nearest: [{ name: "google", similarity: 0.95 }],
+        },
+      },
+    );
+  });
+
+  it("回数の上限は RATE_LIMITED として、あと何秒かを details に載せたまま渡す", async () => {
+    stubFetch(429, {
+      error: {
+        code: "RATE_LIMITED",
+        message: "アクセスが集中しています。",
+        retryable: true,
+        details: { retryAfter: 6 },
+      },
+    });
+
+    const error = await services()
+      .uniqueness.preview({ sld: "googel" })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiClientError);
+    expect((error as ApiClientError).code).toBe("RATE_LIMITED");
+    expect((error as ApiClientError).retryable).toBe(true);
+    expect((error as ApiClientError).details).toEqual({ retryAfter: 6 });
   });
 });
 

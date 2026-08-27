@@ -11,9 +11,11 @@ import {
   isRestorable,
   REGISTRY_CONTACT_KEY,
   type RegistrantProfile,
+  type SubdomainPlanSummary,
   type UpdateInput,
 } from "@dopamin/shared";
 import { Hono } from "hono";
+import { getDb } from "../lib/db";
 import { ApiException } from "../lib/errors";
 import { parseDomainNameParam } from "../lib/params";
 import { reconcileOnTimeout } from "../lib/reconcile";
@@ -37,6 +39,7 @@ import {
 } from "../services/domain.service";
 import type { DomainRecord } from "../services/domain-store";
 import { syncDomainsAndConsumePoll } from "../services/poll.service";
+import { getSubdomainPlanSummary } from "../services/subdomain-plan.service";
 import type { TransferRecord } from "../services/transfer-store";
 import type { AuthedEnv } from "../types";
 
@@ -139,7 +142,8 @@ function isTransportFailure(err: RegistryError): boolean {
 /**
  * 詳細レスポンス（FR-07。契約は `domainDetailResponseSchema`）。
  * `domain` は正規化済み `info`、`summary` は一覧と同じ要約、
- * `registrantProfile` は登録者コンタクトの中身（{@link registrantProfileFor}）。
+ * `registrantProfile` は登録者コンタクトの中身（{@link registrantProfileFor}）、
+ * `subdomainPlan` は保存済み設計の件数（{@link subdomainPlanSummaryFor}）。
  * `stale = true` はレジストリに繋がらず DB キャッシュを返したことを示し（AC-07-2）、
  * `error` にその理由が入る。
  */
@@ -151,14 +155,36 @@ async function detailResponse(
     error?: DomainDetailResponse["error"];
   } = {},
 ): Promise<DomainDetailResponse> {
+  // 互いに独立した 2 つの引き当て（コンタクト / 設計）なので直列に待たない
+  const [registrantProfile, subdomainPlan] = await Promise.all([
+    registrantProfileFor(record),
+    subdomainPlanSummaryFor(record),
+  ]);
   return {
     domain: record.info,
     summary: toDomainSummary(record, stale, options.transfer),
-    registrantProfile: await registrantProfileFor(record),
+    registrantProfile,
+    subdomainPlan,
     stale,
     syncedAt: record.syncedAt.toISOString(),
     ...(options.error ? { error: options.error } : {}),
   };
+}
+
+/**
+ * 保存済みサブドメイン設計の件数（FR-13 → 詳細のカード。#217）。
+ *
+ * `subdomain_plans` は `domains.id` を FK に持つので、行 ID が無いレコード
+ * （まだ DB に書いていない = レジストリ応答から組み立てただけの値）では引けない。
+ * その場合は「設計が無い」ではなく「まだ引けない」なので、単に null を返す
+ * （`requireOwnedDomainId` のように 500 にはしない: 詳細表示は ID が無くても成立する）。
+ */
+async function subdomainPlanSummaryFor(
+  record: DomainRecord,
+): Promise<SubdomainPlanSummary | null> {
+  return record.id === null
+    ? null
+    : await getSubdomainPlanSummary(getDb(), record.id);
 }
 
 /**

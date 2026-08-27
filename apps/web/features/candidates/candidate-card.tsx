@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, RefreshCw } from "lucide-react";
+import { ArrowRight, ChevronDown, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { useId, useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -20,8 +20,11 @@ import {
 
 /**
  * Figma: Candidate Card `58:249`（SSR / R / N / Taken / Unknown の 5 バリアント）
- * ui-screens S-22。ドメイン名 / Rarity / Score Gauge（クリックで類似候補 3 件を開閉）/
+ * ui-screens S-22。ドメイン名 / Rarity / Score Gauge / 似ている名前 3 件 /
  * 理由 / 空きバッジ / 操作。
+ *
+ * カードの主操作は「登録へ」。ゲージ自体は押せる要素にせず、開閉は隣の小さな
+ * トグルに持たせて、いちばん大きい当たり判定を主操作に残す（#218）。
  */
 
 export interface CandidateCardProps {
@@ -30,7 +33,7 @@ export interface CandidateCardProps {
   registered?: boolean;
   /** 「登録へ」→ S-25 */
   onRegister: (candidate: Candidate) => void;
-  /** 「代替を確認」→ S-24 に代替候補を出す */
+  /** 「代替を見る」→ S-24 に代替候補を出す */
   onShowAlternatives: (names: string[]) => void;
   /** 「再試行」→ 当該候補のみ再 check（AC-05-2） */
   onRetry: (name: string) => void;
@@ -62,7 +65,7 @@ export function CandidateCard({
   className,
 }: CandidateCardProps) {
   const name = `${candidate.sld}.${candidate.tld}`;
-  // Figma の候補カードは類似候補を開いた状態。ゲージで折りたためる（ui-screens S-22）
+  // Figma の候補カードは似ている名前を開いた状態。トグルで折りたためる（ui-screens S-22）
   const [open, setOpen] = useState(true);
   const similarityId = useId();
   const { uniqueness } = candidate;
@@ -78,33 +81,39 @@ export function CandidateCard({
         <span className="inline-flex items-center gap-1">
           <RarityMark availability={availability} uniqueness={uniqueness} />
           <HelpTip
-            content="独自性スコア（0〜100）: 既存のドメインとどれだけ紛らわしくないかの目安です。70 以上が SSR、40 未満は似た名前があるので注意。ゲージを押すと似ている候補が見られます。"
+            content="独自性スコアは、既存のドメインと紛らわしくないほど高くなります（0〜100）。"
             label="独自性スコアとは"
           />
         </span>
       </div>
 
       {uniqueness === null ? null : (
-        <div className="flex w-full items-center gap-2">
-          <button
-            aria-controls={similarityId}
-            aria-expanded={open}
-            aria-label={open ? "類似候補を閉じる" : "類似候補を開く"}
-            className="shrink-0"
-            onClick={() => setOpen((prev) => !prev)}
-            type="button"
-          >
+        <div className="flex w-full flex-col gap-1">
+          <div className="flex w-full items-center gap-2">
             <ScoreGauge
               size="sm"
               tone={gaugeTone(uniqueness)}
               value={uniqueness.score}
             />
-          </button>
-          {open ? (
-            <ul
-              className="flex min-w-0 flex-1 flex-col gap-0.5"
-              id={similarityId}
+            <button
+              aria-controls={similarityId}
+              aria-expanded={open}
+              className="flex shrink-0 items-center gap-1 text-caption text-muted transition-colors hover:text-ink"
+              onClick={() => setOpen((prev) => !prev)}
+              type="button"
             >
+              似ている名前
+              <ChevronDown
+                aria-hidden="true"
+                className={cn(
+                  "size-4 shrink-0 transition-transform motion-reduce:transition-none",
+                  open && "rotate-180",
+                )}
+              />
+            </button>
+          </div>
+          {open ? (
+            <ul className="flex w-full flex-col gap-0.5" id={similarityId}>
               {uniqueness.nearest.map((near) => (
                 <li key={near.name}>
                   <SimilarityRow
@@ -166,7 +175,7 @@ function CandidateAction({
 }: CandidateActionProps) {
   if (registered) {
     return (
-      <Button asChild size="sm" trailingIcon={<ArrowRight />} variant="outline">
+      <Button asChild trailingIcon={<ArrowRight />} variant="outline">
         <Link href={`/domains/${name}`}>詳細</Link>
       </Button>
     );
@@ -178,7 +187,6 @@ function CandidateAction({
         leadingIcon={<RefreshCw />}
         loading={retrying}
         onClick={() => onRetry(name)}
-        size="sm"
         variant="outline"
       >
         再試行
@@ -190,10 +198,9 @@ function CandidateAction({
     return (
       <Button
         onClick={() => onShowAlternatives(candidate.alternatives)}
-        size="sm"
         variant="subtle"
       >
-        代替を確認
+        代替を見る
       </Button>
     );
   }
@@ -201,7 +208,7 @@ function CandidateAction({
   // 独自性 low は「それでも登録」（Subtle）に落とす（ui-screens §2.3 の N）
   if (candidate.uniqueness?.label === "low") {
     return (
-      <Button onClick={() => onRegister(candidate)} size="sm" variant="subtle">
+      <Button onClick={() => onRegister(candidate)} variant="subtle">
         それでも登録
       </Button>
     );
@@ -210,7 +217,6 @@ function CandidateAction({
   return (
     <Button
       onClick={() => onRegister(candidate)}
-      size="sm"
       trailingIcon={<ArrowRight />}
       variant={candidate.uniqueness?.label === "high" ? "solid" : "outline"}
     >

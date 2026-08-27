@@ -11,6 +11,7 @@ import type {
   ClientStatus,
   DomainCheckRequest,
   PasskeySummary,
+  UniquenessPreviewRequest,
 } from "@dopamin/shared";
 import type {
   AiLog,
@@ -28,6 +29,7 @@ import type {
   SubdomainPlan,
   SyncResult,
   Transfer,
+  UniquenessPreview,
 } from "./types";
 
 /**
@@ -74,6 +76,17 @@ export interface DomainService {
   remove(name: string): Promise<{ outcome: "rgp" | "deleted" }>;
   restore(name: string): Promise<DomainDetail>;
   authCode(name: string): Promise<{ authCode: string }>;
+}
+
+/**
+ * 独自性スコアのプレビュー（FR-05 / ランディング S-00 の「お試しスコア」）。
+ *
+ * `DomainService.check` と違って**ログイン不要**で、空き確認もしない
+ * （レジストリを叩かないぶん、未認証でも公開できる）。
+ */
+export interface UniquenessService {
+  /** POST /uniqueness/preview */
+  preview(input: UniquenessPreviewRequest): Promise<UniquenessPreview>;
 }
 
 export interface CandidateService {
@@ -136,6 +149,7 @@ export interface PaymentService {
 export interface Services {
   auth: AuthService;
   domains: DomainService;
+  uniqueness: UniquenessService;
   candidates: CandidateService;
   subdomains: SubdomainService;
   transfers: TransferService;
