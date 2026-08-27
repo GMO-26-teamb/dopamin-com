@@ -351,7 +351,8 @@ export interface SuccessDialogProps {
   onOpenChange: (open: boolean) => void;
   title: string;
   domain?: string;
-  body: string;
+  /** 1 文で収まらないときは行に分けて渡す（p の中なので inline / block span で組む） */
+  body: ReactNode;
   primaryLabel: string;
   onPrimary: () => void | Promise<void>;
   secondaryLabel?: string;

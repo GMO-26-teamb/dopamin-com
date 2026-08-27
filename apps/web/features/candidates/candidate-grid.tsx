@@ -43,9 +43,7 @@ export function CandidateGridSkeleton() {
         ))}
       </ul>
       <p className="w-full text-caption text-muted" role="status">
-        考え中…
-        候補ごとに空き確認（check）と独自性スコアを並行で計算します（最大 10
-        秒）
+        考え中… 空き状況と独自性スコアも一緒に調べます（最大 10 秒）
       </p>
     </div>
   );

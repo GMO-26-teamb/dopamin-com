@@ -75,7 +75,7 @@ export function PaymentStep({
         autoComplete="cc-number"
         disabled={busy}
         error={errors.number}
-        helper={`デモ: ${DEMO_CARD.number} は成功、${DECLINED_CARD_NUMBER} は失敗を再現します`}
+        helper={`${DEMO_CARD.number} は成功、${DECLINED_CARD_NUMBER} は失敗します`}
         inputMode="numeric"
         label="カード番号"
         monospace

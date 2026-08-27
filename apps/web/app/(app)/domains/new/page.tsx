@@ -32,6 +32,7 @@ import {
   RegisterSuccessDialog,
   RegisterTimeoutDialog,
 } from "@/features/candidates/register-result-dialogs";
+import { DEFAULT_TLDS } from "@/features/candidates/tlds";
 import type { ApiClientError } from "@/lib/api/errors";
 import { useCheckDomains, useGenerateCandidates } from "@/lib/api/hooks";
 import type {
@@ -62,7 +63,10 @@ export default function DomainsNewPage() {
 
   const [lastInput, setLastInput] = useState<CandidateFormValues | null>(null);
   const [excluded, setExcluded] = useState<readonly string[]>([]);
-  const [searchOpen, setSearchOpen] = useState(true);
+  // 希望 TLD は 1 つだけ持ち、AI 候補と直接検索で共有する（#218）
+  const [tlds, setTlds] = useState<readonly string[]>(DEFAULT_TLDS);
+  // 主導線は AI 候補。直接検索は畳んだ二次導線として置く（#218）
+  const [searchOpen, setSearchOpen] = useState(false);
   const [summary, setSummary] = useState<SearchSummary | null>(null);
   // 直前に投げた check。Error Card の「再試行」で同じ条件をそのまま送り直す（S-24）
   const [lastSearch, setLastSearch] = useState<DomainCheckRequest | null>(null);
@@ -272,6 +276,8 @@ export default function DomainsNewPage() {
       <CandidateForm
         busy={generate.isPending}
         onSubmit={(values) => runGenerate(values, [])}
+        onTldsChange={setTlds}
+        tlds={tlds}
       />
 
       <CandidateArea
@@ -315,11 +321,13 @@ export default function DomainsNewPage() {
         onRetrySearch={handleRetrySearch}
         onSearch={handleSearch}
         onShowAlternatives={handleShowAlternatives}
+        onTldsChange={setTlds}
         open={searchOpen}
         registeredNames={registeredNames}
         results={results}
         retryingName={retryingName}
         summary={summary}
+        tlds={tlds}
       />
 
       <RegisterDialog
@@ -404,7 +412,7 @@ function CandidateArea({
   if (idle) {
     return (
       <EmptyState
-        body="ニックネームやアプリ名から 6 件の候補を、空き状況と独自性スコア付きで並べます（20 秒以内）。"
+        body="ニックネームから空いている名前を 6 件そろえます。"
         title="AI に候補を考えてもらう"
       />
     );

@@ -80,7 +80,7 @@ describe("CandidateCard", () => {
     expect(onRegister).toHaveBeenCalledTimes(1);
   });
 
-  it("Taken: 取得済みは Rarity を出さず「代替を確認」で代替候補を渡す", async () => {
+  it("Taken: 取得済みは Rarity を出さず「代替を見る」で代替候補を渡す", async () => {
     const { onShowAlternatives } = setup(
       candidate({
         availability: "unavailable",
@@ -91,7 +91,7 @@ describe("CandidateCard", () => {
 
     expect(screen.getByText("取得済み")).toBeInTheDocument();
     expect(screen.queryByText("SSR")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "代替を確認" }));
+    await userEvent.click(screen.getByRole("button", { name: "代替を見る" }));
     expect(onShowAlternatives).toHaveBeenCalledWith([
       "takutaku.xyz",
       "taku-taku.com",
@@ -116,11 +116,11 @@ describe("CandidateCard", () => {
 
     expect(screen.queryByText("SSR")).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: /類似候補/ }),
+      screen.queryByRole("button", { name: /似ている名前/ }),
     ).not.toBeInTheDocument();
   });
 
-  it("ゲージのボタンで類似候補 3 件を開閉できる", async () => {
+  it("「似ている名前」のトグルで 3 件を開閉できる", async () => {
     setup(candidate());
 
     // 既定は開いた状態（Figma S-22）
@@ -128,14 +128,23 @@ describe("CandidateCard", () => {
     expect(screen.getByText("takoyaki.com")).toBeInTheDocument();
     expect(screen.getByText("tacos.com")).toBeInTheDocument();
 
-    const toggle = screen.getByRole("button", { name: "類似候補を閉じる" });
+    const toggle = screen.getByRole("button", { name: "似ている名前" });
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     await userEvent.click(toggle);
 
     expect(screen.queryByText("takaku.com")).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "類似候補を開く" }),
-    ).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("ゲージは押せる要素にせず、主操作を当たり判定でも主役にする（#218）", () => {
+    setup(candidate());
+
+    // ゲージ自体はボタンの中に入っていない
+    expect(screen.getByText(/独自性スコア/).closest("button")).toBeNull();
+    // 主操作は Medium（h-control-md）で、開閉トグルより大きい
+    expect(screen.getByRole("button", { name: /登録へ/ })).toHaveClass(
+      "h-control-md",
+    );
   });
 
   it("登録直後は「取得しました」と詳細リンクに差し替わる（S-26 を閉じたあと）", () => {

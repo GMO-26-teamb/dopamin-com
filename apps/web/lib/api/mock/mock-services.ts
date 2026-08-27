@@ -87,23 +87,24 @@ function similarityFromPercent(percent: number): number {
   return percent / 100;
 }
 
+/**
+ * 独自性スコアは SLD だけで決まる（API は 1 回の check の中で SLD ごとにメモ化し、
+ * 近い既存名も SLD の corpus から選ぶ）。TLD 違いの行は同じ値になる。
+ */
 function uniquenessFor(name: string): UniquenessScore {
-  const { sld, tld } = splitDomainName(name);
-  const value = pseudoScore(name);
+  const { sld } = splitDomainName(name);
+  const value = pseudoScore(sld);
   return {
     score: value,
     label: uniquenessLabel(value),
     nearest: [
+      { name: `${sld}s`, similarity: similarityFromPercent(90 - (value % 12)) },
       {
-        name: `${sld}s.${tld}`,
-        similarity: similarityFromPercent(90 - (value % 12)),
-      },
-      {
-        name: `${sld}-app.${tld}`,
+        name: `${sld}-app`,
         similarity: similarityFromPercent(78 - (value % 15)),
       },
       {
-        name: `the${sld}.${tld}`,
+        name: `the${sld}`,
         similarity: similarityFromPercent(63 - (value % 18)),
       },
     ],

@@ -4,21 +4,18 @@ import { ArrowRight, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ScoreGauge } from "@/components/ui/score-gauge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { REGISTRY_LABEL } from "@/features/domains/registry-label";
 import type { SearchResult } from "@/lib/api/types";
-import {
-  AvailabilityBadge,
-  DomainLabel,
-  gaugeTone,
-  RarityMark,
-} from "./labels";
+import { AvailabilityBadge, DomainLabel } from "./labels";
 
 /**
  * Figma: Search Result Row `78:398` / S-24 `81:1156`
- * 直接検索の 1 行（Available / Taken / Error）。部分失敗（AC-03-2）の行は
- * 「確認不可」+ 当該レジストリのみ再 check する「再試行」を出す。
+ * 直接検索の 1 行（ドメイン名 / レジストリ / 空き状況 / 操作）。一部のレジストリが
+ * 応答しない行は「確認不可」+ そのレジストリだけ確認し直す「再試行」を出す。
+ *
+ * 独自性スコアは SLD で決まり、TLD 違いの行はすべて同じ値になるので行には出さない。
+ * 結果カードの見出しに 1 つだけ出す（#218）。
  */
 
 export interface SearchResultRowProps {
@@ -59,7 +56,6 @@ export function SearchResultRow({
   retrying = false,
 }: SearchResultRowProps) {
   const taken = registered || result.availability === "unavailable";
-  const { uniqueness } = result;
 
   return (
     <li className="flex w-full items-center gap-3 border-soft border-b py-3 last:border-b-0">
@@ -76,7 +72,7 @@ export function SearchResultRow({
       ) : (
         <AvailabilityBadge
           availability={result.availability}
-          uniqueness={uniqueness}
+          uniqueness={result.uniqueness}
         />
       )}
       {result.availability === "error" ? (
@@ -89,19 +85,6 @@ export function SearchResultRow({
           代替: {result.alternatives.join(" / ")}
         </span>
       ) : null}
-      {taken || uniqueness === null ? null : (
-        <span className="flex shrink-0 items-center gap-1.5">
-          <ScoreGauge
-            size="sm"
-            tone={gaugeTone(uniqueness)}
-            value={uniqueness.score}
-          />
-          <RarityMark
-            availability={result.availability}
-            uniqueness={uniqueness}
-          />
-        </span>
-      )}
       <RowAction
         onRegister={onRegister}
         onRetry={onRetry}
@@ -161,14 +144,23 @@ function RowAction({
     );
   }
 
+  // 独自性 low は「それでも登録」（Subtle）に落とす。候補カードと同じ規則にそろえる
+  if (result.uniqueness?.label === "low") {
+    return (
+      <Button onClick={() => onRegister(result)} size="sm" variant="subtle">
+        それでも登録
+      </Button>
+    );
+  }
+
   return (
     <Button
       onClick={() => onRegister(result)}
       size="sm"
       trailingIcon={<ArrowRight />}
-      variant={result.uniqueness?.label === "low" ? "subtle" : "solid"}
+      variant={result.uniqueness?.label === "high" ? "solid" : "outline"}
     >
-      {result.uniqueness?.label === "low" ? "それでも登録" : "登録へ"}
+      登録へ
     </Button>
   );
 }
