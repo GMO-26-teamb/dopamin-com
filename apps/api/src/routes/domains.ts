@@ -43,6 +43,7 @@ import { syncDomainsAndConsumePoll } from "../services/poll.service";
 import { getSubdomainPlanSummary } from "../services/subdomain-plan.service";
 import type { TransferRecord } from "../services/transfer-store";
 import type { AuthedEnv } from "../types";
+import { subdomainPlan } from "./subdomain-plan";
 
 /** 登録時の authInfo を自動生成する（RFC 9154: 128bit 以上のエントロピー推奨）。 */
 function generateAuthInfo(): string {
@@ -610,4 +611,12 @@ export const domains = new Hono<AuthedEnv>()
     const authCode = await adapter.authCode(name);
     // 取得のたびに authInfo が再生成される（前回表示した値は無効になる）
     return c.json({ authCode, rotated: true });
-  });
+  })
+
+  /**
+   * FR-13（サブドメイン設計）は関心が違うので別ファイルに置き、ここへネストする。
+   * `index.ts` で同じ `/domains` に 2 本重ねると `use(requireSession)` が
+   * 両方 `ALL /domains/*` として登録され、FR-13 のルートだけセッション検証が
+   * 2 回走る（#166）。ネストなら上の `.use(requireSession)` が 1 回だけ効く。
+   */
+  .route("/", subdomainPlan);

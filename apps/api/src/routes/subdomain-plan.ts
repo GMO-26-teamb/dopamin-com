@@ -7,7 +7,6 @@ import { getDb } from "../lib/db";
 import { parseDomainNameParam } from "../lib/params";
 import { adapterForDomain } from "../lib/registries";
 import { jsonValidator } from "../lib/validator";
-import { requireSession } from "../middleware/session";
 import { applySubdomainPlan, getDnsZone } from "../services/dns.service";
 import {
   requireOwnedDomain,
@@ -23,11 +22,15 @@ import type { AuthedEnv } from "../types";
 /**
  * サブドメイン設計（docs/requirements.md FR-13 / §10.1 `/domains/:name/subdomain-plan`）。
  * `/domains` に同居させるルートだが、routes/domains.ts（FR-02〜FR-12）とは
- * 関心が違うのでファイルを分け、index.ts で同じ `/domains` に重ねてマウントする。
+ * 関心が違うのでファイルを分け、**routes/domains.ts から `.route("/", subdomainPlan)` で
+ * ネストして**マウントする。
+ *
+ * 認証（`requireSession`）はネスト元の `domains` が 1 箇所で掛ける。ここで重ねて
+ * `use` すると、同じ `/domains` に 2 本マウントしていた頃と同じくセッション検証が
+ * 2 回走る（#166）。単体でマウントしてはいけないルーターなので、export 先は
+ * routes/domains.ts だけにしてある。
  */
 export const subdomainPlan = new Hono<AuthedEnv>()
-  .use(requireSession)
-
   /**
    * FR-13: リポジトリ解析 → サブドメイン提案（保存前）。
    * リポジトリを取得できないときは、概要テキストがあればそれだけで提案する（AC-13-2）。
