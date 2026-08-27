@@ -136,7 +136,8 @@ export function NameserverRows({
                   ),
                 )
               }
-              placeholder="ns1.example.com"
+              // 行ごとに番号を合わせる（全行が ns1 だと 2 行目の見本にならない）
+              placeholder={`ns${index + 1}.example.com`}
               surface="panel"
               value={row.value}
             />
