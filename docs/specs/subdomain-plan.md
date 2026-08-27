@@ -156,6 +156,9 @@ sequenceDiagram
 AI が提案していない設計をユーザーに見せることになるので、集合として成立しないものは
 従来どおり 503 で再試行させる。
 
+`purpose` / `policy` の切り詰めは、§2.6 の「注入された文章が丸ごと外に出ない」を長さで担保する側面も持つ
+（切り詰めても攻撃者の文章が 100 字だけ残ることはあるので、決定的な防御は §2.6 の 1 の方）。
+
 落とした項目は構造化ログに 1 行残す（NFR-06）: `{"level":"warn","type":"subdomain_plan_items_dropped",
 "requestId","userId","domain","kept","dropped":[{"host","reason"}]}`。AI の**素の出力**そのもの
 （落とした項目を含む）は `ai_logs.output` に残るので（AC-14-1）、後から「何が返ってきて何を落としたか」を
