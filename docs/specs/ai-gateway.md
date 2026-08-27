@@ -107,10 +107,62 @@ FR-04 は 6 件に満たなければ 1 回だけ再生成するため、**残り
 本番のネットワーク次第では 10 秒を超えて `AI_UNAVAILABLE` になり得る。
 予算やモデル（より高速な系）の見直しが要るかはチーム判断。
 
+### 2.6 xAI（Grok）の追加 — Gateway 専用プロバイダ
+
+FR-17 の選択肢に `xai`（Grok）を足す。**Gateway 経由専用**とし、`XAI_API_KEY` による
+直叩きには対応しない。理由は 2 つ。
+
+1. 新規依存がゼロで済む（`@ai-sdk/xai` を入れずに、既にある gateway 経路に相乗りする）
+2. `AI_GATEWAY_API_KEY` が無い環境では**選択肢に出したくない**。直叩きの口を作らなければ
+   `aiProviderApiKey("xai")` が常に `undefined` を返し、§2.2 の `hasApiKey` が
+   「gateway キーがあるときだけ真」になる——既存ロジックのまま自然に達成される
+
+### 2.7 Gateway の ID 変換表
+
+Gateway のカタログ（`@ai-sdk/gateway` の `GatewayModelId`）と、内部で持つ語彙が
+**2 か所ずれている**ことが分かったため、`gatewayModelId` に変換表を持たせる。
+
+| ずれ | 内部 | Gateway カタログ |
+|---|---|---|
+| プロバイダ接頭辞 | `xai` | **`spacexai`** |
+| Anthropic のモデル ID | `claude-sonnet-4-5`（ハイフン） | **`claude-sonnet-4.5`**（ドット） |
+
+- 接頭辞: 内部・DB（`users.ai_provider`）・UI の語彙は `xai` のままにする。Gateway の
+  都合を要件書やデータに持ち込まないため、変換は境界（`gatewayModelId`）だけで行う。
+- Anthropic: **直接叩くときはハイフンが正**（Anthropic API のモデル ID）。ドットになるのは
+  Gateway のカタログだけなので、変換も gateway 経路にだけ効かせる。
+  これを直さないと gateway 経由の anthropic フォールバックが必ず失敗する
+  （`google` が本命として失敗したときに救われない）。
+- `GatewayModelId` は `(string & {})` を含む**開いたユニオン**なので、誤った ID は
+  型では捕まらず実行時に失敗する。突き合わせは目視 + 疎通で担保するしかない。
+
+### 2.8 既定モデルと 10 秒予算
+
+`xai` の候補は速度優先で並べる（§2.5 のとおり予算に余裕が無いため）。
+
+| 順 | モデル | 備考 |
+|---|---|---|
+| 1（既定） | `grok-4.1-fast-non-reasoning` | 推論なしの fast 系。structured output 用途で最速 |
+| 2 | `grok-4.1-fast-reasoning` | 同じ fast 系だが推論あり |
+| 3 | `grok-4.6` | 新しい世代。速度は未検証 |
+
+指示のあった `grok-4-fast` はカタログに存在しなかったため採用していない。
+
+### 2.9 3 プロバイダでのフォールバック
+
+`attemptOrder`（§13.1「失敗したら 1 回だけ別プロバイダ」）は
+`settings.providers` から**本命以外の先頭 1 件**を取る。プロバイダが 3 つになっても
+試行は最大 2 回のままで、要件どおり。`AI_PROVIDERS` の順（`google` → `anthropic` → `xai`）が
+そのままフォールバック先の優先順になる。
+
 ## 3. 画面・UI
 
-なし。画面の変更を伴わない（FR-17 の設定画面に並ぶ選択肢が増えるのは §2.2 の結果で、
-UI 側の実装変更は無い）。
+gateway 対応そのものは画面の変更を伴わない（FR-17 の設定画面に並ぶ選択肢が増えるのは
+§2.2 の結果で、UI 側の実装変更は無い）。
+
+xai の追加（§2.6）では、設定画面の表示名マッピング
+（`apps/web/features/settings/ai-settings-section.tsx` の `PROVIDER_LABEL`）に
+`xai: "Grok"` を足す。`Record<AiProvider, string>` なので、足さないと型エラーになる。
 
 ## 4. API 契約
 
@@ -159,6 +211,8 @@ UI 側の実装変更は無い）。
 | 1 | `docs/requirements.md` §17 の環境変数表への `AI_GATEWAY_API_KEY` 追加 | **本 PR では追記しない**（別 PR で人間が提案） | 本 PR に含める / 別 PR で追随 |
 | 2 | Gateway のモデル ID 命名が `KNOWN_MODELS` と一致するか | **解消**（2026-08-27）。`google/gemini-2.5-flash` で実証。anthropic 側は未実証 | 一致しなければ `gatewayModelId` に対応表を持たせる |
 | 3 | 固有キーと gateway の優先順位 | 固有キー優先（既存環境の挙動を変えない） | gateway 優先 / 環境変数で切替 |
+| 4 | `xai` の直叩き（`XAI_API_KEY`）対応 | **しない**（Gateway 専用。新規依存ゼロ） | `@ai-sdk/xai` を入れて直叩きも許す |
+| 5 | Gateway カタログの ID 変更に追随する仕組み | 変換表を手で持つ（§2.7） | カタログ型から自動生成する |
 
 ---
 
@@ -167,4 +221,5 @@ UI 側の実装変更は無い）。
 | 版 | 日付 | 内容 |
 |---|---|---|
 | v0.1 | 2026-08-27 | 初版（#179 / PR #186 の実装に合わせて起票） |
+| v0.2 | 2026-08-27 | §2.6〜2.9 を追加。xai（Grok）を Gateway 専用プロバイダとして足す方針、Gateway の ID 変換表（`xai` → `spacexai`、anthropic のハイフン → ドット）、既定モデル `grok-4.1-fast-non-reasoning`、3 プロバイダでのフォールバック。§3 に表示名マッピング、§6 に AC-G-7〜10、§8 に未決事項 #4 / #5 を追加。#187 |
 | v0.1.1 | 2026-08-27 | 実キーでの疎通確認を反映。AC-G-6 を満たし、未決事項 #2（モデル ID 命名）を解消。§7 の手動テストを実施済みに更新。レイテンシ約 8 秒（10 秒予算に対し余裕が小さい）を注記 |
