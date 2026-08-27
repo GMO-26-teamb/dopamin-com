@@ -18,6 +18,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm turbo run typecheck test build
+      # 性能テスト（FR-05 / AC-05-3）は上の turbo と同居させると測れない。
+      # turbo は api / web / shared のテストと next build を同時に走らせるため、
+      # 2 コアの runner では 1 件あたりの実測が十数倍に膨らむ（#181 / #178）。
+      # 予算を甘くする代わりに、計測だけランナーを独占した状態で走らせる。
+      - name: Perf (FR-05 AC-05-3)
+        run: pnpm --filter @dopamin/shared test:perf
 
   # FR-01 の e2e（Playwright + CDP Virtual Authenticator。docs/testing.md §3）。
   # check とは独立に走らせ、必須にはしない（Playwright の step だけ continue-on-error）。

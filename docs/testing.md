@@ -59,6 +59,30 @@ pnpm --filter @dopamin/shared test
 pnpm --filter @dopamin/api test
 ```
 
+### 性能テスト（`*.perf.test.ts`）は既定のテストから外してある
+
+FR-05 の AC-05-3（独自性スコアの算出が 1 件あたり 1.5 秒以内）のように**時間を測るテスト**は、
+`packages/shared/src/uniqueness/latency.perf.test.ts` に置き、`pnpm test` からは除外している
+（`packages/shared/vitest.config.ts` の `exclude`）。単独実行はこちら:
+
+```sh
+pnpm --filter @dopamin/shared test:perf   # 設定は packages/shared/vitest.perf.config.ts
+```
+
+理由（#181 / #178）: CI の `check` ジョブは `turbo run typecheck test build` で api / web / shared の
+テストと `next build` を**同時に**走らせる。GitHub Actions の runner は 2 コアなので、この状態で
+計測すると 1 件あたりの実測がローカルの十数倍（実測 0.1 秒 → 2 秒）に膨らみ、AC を満たしていても
+CI が落ちる。予算を甘くすると本当の退行を検出できなくなるため、**予算ではなく計測条件のほうを直した**。
+CI では `check` ジョブの最後に、他の処理が終わってから単独ステップとして走らせている。
+
+それでも共有ランナーには多少のゆらぎがあるので、テスト側も
+ウォームアップぶんを捨てて複数回計測した**中央値**で判定し、取れる環境では壁時計ではなく
+**CPU 時間**（`process.cpuUsage`）を使う。FR-05 は外部 I/O を持たない純 CPU 処理なので、
+本番（Vercel Functions）では壁時計 ≒ CPU 時間になり AC の意味は保たれる。
+
+時間を測らない AC（AC-05-1 の「有名名は low」など）は
+`packages/shared/src/uniqueness/ac.test.ts` に置き、通常のテストで常時検証する。
+
 ## 2. 実レジストリ疎通テスト（apps/api/test/connect/）
 
 Kitaqsign / Kitaqnic への接続が正常にできているかを、実レジストリに対する

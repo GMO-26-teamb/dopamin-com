@@ -4,30 +4,24 @@ import {
   getDefaultPreparedCorpus,
   prepareCorpus,
   scoreDistinctiveness,
-  uniquenessLabel,
 } from "@dopamin/shared";
 import { describe, expect, it } from "vitest";
 
 /**
- * FR-05 の AC を実コーパス（ビルド同梱の静的モジュール）で確かめる。
+ * FR-05 の AC-05-3（1 件あたり 1.5 秒以内）を実コーパスで確かめる性能テスト。
  *
- * - AC-05-1: `google` / `amazon` / `youtube` 等の有名名は `low`
- * - AC-05-3: 1 件あたり 1.5 秒以内（外部 API 呼び出しも DB アクセスも無い）
+ * このファイルは既定の `pnpm test` からは外してある（`vitest.config.ts` の exclude）。
+ * 単独実行は `pnpm --filter @dopamin/shared test:perf`。
  *
- * 判定の詳細（gold セット・攻撃回帰）は uniqueness.test.ts / default-corpus.test.ts が担う。
- * ここは「requirements の AC がそのまま守られているか」だけを見る。
+ * なぜ分けるか（#181 / #178）:
+ * CI の `check` ジョブは `turbo run typecheck test build` で api / web / shared のテストと
+ * next build を同時に走らせる。GitHub Actions の runner は 2 コアなので、この状態で計測すると
+ * 1 件あたりの実測がローカルの十数倍（実測 0.1 秒 → 2 秒）に膨らみ、AC を満たしていても落ちる。
+ * 予算を甘くして誤魔化すと退行を検出できなくなるので、代わりに計測を他の負荷と
+ * 同居させないようにした。CI では `check` ジョブの最後に単独ステップとして走らせる。
  *
- * 計測方法について（#181 / #178）:
- * GitHub Actions の共有ランナーは 2 コアで、vitest が複数のテストファイルを並列に走らせる。
- * このため壁時計の単発計測は CPU steal と GC で数倍に跳ね、AC を満たしていても CI が落ちる
- * （実測: ローカル約 0.1 秒 / CI で 1.7 秒。同じ run の中で cold 計測より warm 計測の方が
- * 遅いという逆転も観測された = 実処理コストではなくスケジューリング由来）。ここでは
- *   1. ウォームアップぶんを捨て、
- *   2. 複数回計測して中央値を取り、
- *   3. 取れる環境では壁時計ではなくプロセスの CPU 時間で判定する
- * ことで、スケジューリング由来のゆらぎを外しつつアルゴリズムの退行は検出できるようにする。
- * FR-05 は外部 I/O を持たない純 CPU 処理なので、本番（Vercel Functions）では
- * 壁時計 ≒ CPU 時間になり、CPU 時間で見ても AC の意味は保たれる。
+ * それでも共有ランナーには多少のゆらぎがあるため、ウォームアップぶんを捨てて
+ * 複数回計測した中央値で判定し、取れる環境では壁時計ではなく CPU 時間を使う。
  */
 
 /** AC-05-3 の上限（§14.2。実測 p95 は約 0.22 秒）。 */
@@ -40,10 +34,16 @@ const AC_05_3_BUDGET_MS = 1_500;
  */
 const CORPUS_PREPARE_BUDGET_MS = 5_000;
 
-/** 計測回数。単発だと共有 CI ランナーの 1 回のストールで落ちるので中央値で判定する。奇数。 */
+/** 1 件でもストールしたサンプルに引きずられないよう複数回測る。奇数。 */
 const SAMPLES = 9;
 /** 捨てる先頭の計測回数（V8 の JIT ウォームアップぶん）。 */
 const WARMUP = 2;
+
+/**
+ * 計測が予算を超えても vitest の既定タイムアウト（5 秒）で先に落ちないようにする。
+ * ここで落ちるべきは「遅い」ことであって「タイムアウトした」ことではない。
+ */
+const TEST_TIMEOUT_MS = 120_000;
 
 /**
  * `process.cpuUsage`（Node）への参照。
@@ -87,16 +87,10 @@ function median(values: readonly number[]): number {
   return ((sorted[mid - 1] ?? hi) + hi) / 2;
 }
 
-describe("FR-05 の AC（実コーパス）", () => {
-  it("AC-05-1: 有名サービス名は low になる", () => {
-    const corpus = getDefaultPreparedCorpus();
-    for (const name of ["google", "amazon", "youtube"]) {
-      const result = scoreDistinctiveness(name, corpus);
-      expect(uniquenessLabel(result.score), name).toBe("low");
-    }
-  });
-
-  it("AC-05-3: 1 件あたり 1.5 秒以内で算出できる", () => {
+describe("FR-05 の性能（実コーパス）", () => {
+  it("AC-05-3: 1 件あたり 1.5 秒以内で算出できる", {
+    timeout: TEST_TIMEOUT_MS,
+  }, () => {
     // 準備済みコーパスでの 1 件あたり（画面が並べる候補 6 件ぶんも予算内に収まる想定）
     const corpus = getDefaultPreparedCorpus();
     const samples: number[] = [];
@@ -112,7 +106,9 @@ describe("FR-05 の AC（実コーパス）", () => {
     expect(median(samples), detail).toBeLessThan(AC_05_3_BUDGET_MS);
   });
 
-  it("コーパスの準備が破滅的に遅くなっていない", () => {
+  it("コーパスの準備が破滅的に遅くなっていない", {
+    timeout: TEST_TIMEOUT_MS,
+  }, () => {
     // getDefaultPreparedCorpus() はモジュール単位でメモ化されるので、
     // 準備そのものを測るには prepareCorpus を直接呼ぶ。
     const entries = buildDefaultCorpusEntries();
