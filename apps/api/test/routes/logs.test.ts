@@ -1,5 +1,6 @@
 import { type Db, schema } from "@dopamin/db";
 import type { AiLogsResponse, OperationLogsResponse } from "@dopamin/shared";
+import { sql } from "drizzle-orm";
 import {
   afterAll,
   beforeAll,
@@ -218,6 +219,60 @@ describe("GET /logs/operations（FR-15）", () => {
       },
     );
     expect(res.status).toBe(400);
+  });
+
+  it.each([
+    // 日時は妥当だが id が UUID でない（uuid 列との比較が 22P02 → 500 になっていた）
+    "2026-08-27T00:00:00.000Z|xyz",
+    // id は UUID だが日時が timestamptz に読めない
+    "not-a-date|11111111-2222-4333-8444-555555555555",
+  ])("復元できない cursor（%s）は 500 ではなく 400", async (raw) => {
+    const { cookie } = await createTestSession(db);
+    const cursor = Buffer.from(raw, "utf8").toString("base64url");
+    const res = await app.request(
+      `/api/v1/logs/operations?cursor=${encodeURIComponent(cursor)}`,
+      { headers: { cookie } },
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("created_at にマイクロ秒の端数があってもページ境界で行を取りこぼさない", async () => {
+    const { user, cookie } = await createTestSession(db);
+    // now() はマイクロ秒精度で入る。JS Date（ミリ秒）を経由するカーソルだと
+    // 同一ミリ秒内の行が次ページの条件から漏れていた（回帰）
+    for (const [i, micros] of ["123456", "123400", "123000"].entries()) {
+      await db.insert(schema.operationLogs).values({
+        userId: user.id,
+        registry: "mock",
+        command: "info",
+        domainName: `micro${i}.com`,
+        status: "success",
+        latencyMs: 1,
+        createdAt: sql`${`2026-08-27T00:00:00.${micros}Z`}::timestamptz`,
+      });
+    }
+
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < 4; page++) {
+      const query: string =
+        cursor === null ? "" : `&cursor=${encodeURIComponent(cursor)}`;
+      const body: OperationLogsResponse = await getJson<OperationLogsResponse>(
+        `/api/v1/logs/operations?limit=1${query}`,
+        cookie,
+      );
+      seen.push(...body.items.map((item) => item.domainName ?? ""));
+      cursor = body.nextCursor;
+      if (cursor === null) {
+        break;
+      }
+    }
+
+    // 3 行すべてが一度ずつ、マイクロ秒の降順で返る
+    expect(seen).toEqual(["micro0.com", "micro1.com", "micro2.com"]);
+    expect(cursor).toBeNull();
   });
 
   it("契約スキーマに通らない行は落として残りを返す", async () => {

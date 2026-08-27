@@ -8,9 +8,18 @@ import {
   type PaginationQuery,
   summarizeForAiLog,
 } from "@dopamin/shared";
-import { and, desc, eq, lt, or, type SQL } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  getTableColumns,
+  lt,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
-import type { ZodType } from "zod";
+import { type ZodType, z } from "zod";
 import { ApiException } from "../lib/errors";
 
 /**
@@ -21,19 +30,40 @@ import { ApiException } from "../lib/errors";
  * 複合カーソル `(created_at, id)` で辿る（§10.1「created_at + id」）。
  */
 
-/** カーソルの内部表現。クライアントには base64url 文字列としてだけ見せる。 */
+/**
+ * カーソルの内部表現。クライアントには base64url 文字列としてだけ見せる。
+ *
+ * `at` は `created_at::text`（Postgres の text 表現）をそのまま持つ。JS の `Date` は
+ * ミリ秒までしか持てず、列はマイクロ秒精度（`timestamptz` の既定）なので、`Date` を
+ * 経由すると下位マイクロ秒が欠けて同着タイブレークの `eq` が成立しなくなり、
+ * ページ境界の行が恒久的に取りこぼされる。
+ */
 interface LogCursor {
-  at: Date;
+  at: string;
   id: string;
 }
 
-/** カーソル文字列の区切り（ISO 8601 にも UUID にも現れない文字）。 */
+/** カーソル文字列の区切り（timestamptz の text 表現にも UUID にも現れない文字）。 */
 const CURSOR_SEPARATOR = "|";
 
-/** `(created_at, id)` を不透明な文字列に畳む。 */
+/**
+ * `at` に許す形式: Postgres の text 出力（`2026-08-27 09:00:00.123456+00`）と、
+ * 旧カーソルとの互換のための ISO 8601（`2026-08-27T09:00:00.123Z`）。
+ * `::timestamptz` キャストが確実に通る形だけを通す（通らない値が SQL に届くと
+ * 22007 で 500 になり、§2.1 の「復元できなければ VALIDATION_ERROR」を破るため）。
+ */
+const cursorAtSchema = z
+  .string()
+  .regex(
+    /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}(:?\d{2})?)$/,
+  );
+
+const cursorIdSchema = z.uuid();
+
+/** `(created_at, id)` を不透明な文字列に畳む。`at` は `created_at::text` を渡す。 */
 export function encodeLogCursor(cursor: LogCursor): string {
   return Buffer.from(
-    `${cursor.at.toISOString()}${CURSOR_SEPARATOR}${cursor.id}`,
+    `${cursor.at}${CURSOR_SEPARATOR}${cursor.id}`,
     "utf8",
   ).toString("base64url");
 }
@@ -41,32 +71,35 @@ export function encodeLogCursor(cursor: LogCursor): string {
 /**
  * カーソル文字列を `(created_at, id)` に戻す。
  * 壊れた値を握りつぶして先頭ページを返すと「同じページが無限に返る」ため、
- * 復元できなければ VALIDATION_ERROR で明示的に弾く。
+ * 復元できなければ VALIDATION_ERROR で明示的に弾く。id の UUID 検証もここで行う
+ * （検証せず SQL に渡すと uuid 列との比較が 22P02 で落ち、400 ではなく 500 になる）。
  */
 export function decodeLogCursor(cursor: string): LogCursor {
   const raw = Buffer.from(cursor, "base64url").toString("utf8");
   const separator = raw.indexOf(CURSOR_SEPARATOR);
-  const parsedAt = new Date(separator === -1 ? "" : raw.slice(0, separator));
+  const at = separator === -1 ? "" : raw.slice(0, separator);
   const id = separator === -1 ? "" : raw.slice(separator + 1);
-  if (id === "" || Number.isNaN(parsedAt.getTime())) {
+  if (
+    !cursorAtSchema.safeParse(at).success ||
+    !cursorIdSchema.safeParse(id).success
+  ) {
     throw new ApiException("VALIDATION_ERROR", "cursor の形式が不正です。");
   }
-  return { at: parsedAt, id };
+  return { at, id };
 }
 
 /**
  * `(created_at, id) < (cursor.at, cursor.id)` の行だけに絞る条件。
  * drizzle は行値比較（row constructor）を組めないので、同着時のタイブレークを OR で展開する。
+ * `cursor.at` は text で持っているため timestamptz へキャストして比較する（精度の欠けない側で比べる）。
  */
 function beforeCursor(
   createdAt: PgColumn,
   id: PgColumn,
   cursor: LogCursor,
 ): SQL | undefined {
-  return or(
-    lt(createdAt, cursor.at),
-    and(eq(createdAt, cursor.at), lt(id, cursor.id)),
-  );
+  const at = sql`${cursor.at}::timestamptz`;
+  return or(lt(createdAt, at), and(eq(createdAt, at), lt(id, cursor.id)));
 }
 
 /**
@@ -92,7 +125,7 @@ function parseRow<T>(
  * 次のカーソルは「読んだ最後の行」から作るので、`parseRow` が落とした行があっても
  * ページの継ぎ目はずれない。
  */
-function toPage<Row extends { id: string; createdAt: Date }, Item>(
+function toPage<Row extends { id: string; createdAtText: string }, Item>(
   rows: Row[],
   limit: number,
   toItem: (row: Row) => Item | null,
@@ -107,7 +140,7 @@ function toPage<Row extends { id: string; createdAt: Date }, Item>(
     }),
     nextCursor:
       hasNext && last !== undefined
-        ? encodeLogCursor({ at: last.createdAt, id: last.id })
+        ? encodeLogCursor({ at: last.createdAtText, id: last.id })
         : null,
   };
 }
@@ -172,7 +205,11 @@ export async function listOperationLogs(
   const cursor =
     query.cursor === undefined ? null : decodeLogCursor(query.cursor);
   const rows = await db
-    .select()
+    .select({
+      ...getTableColumns(operationLogs),
+      // カーソル用。JS Date に落とすとマイクロ秒が欠けるので text のまま取り出す
+      createdAtText: sql<string>`${operationLogs.createdAt}::text`,
+    })
     .from(operationLogs)
     .where(
       and(
@@ -198,7 +235,11 @@ export async function listAiLogs(
   const cursor =
     query.cursor === undefined ? null : decodeLogCursor(query.cursor);
   const rows = await db
-    .select()
+    .select({
+      ...getTableColumns(aiLogs),
+      // カーソル用。JS Date に落とすとマイクロ秒が欠けるので text のまま取り出す
+      createdAtText: sql<string>`${aiLogs.createdAt}::text`,
+    })
     .from(aiLogs)
     .where(
       and(
