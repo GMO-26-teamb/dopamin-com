@@ -102,7 +102,7 @@ export function createQueryClient(
     mutationCache: new MutationCache({ onError }),
     defaultOptions: {
       queries: {
-        // 画面遷移のたびに叩き直さない。最新化は「再同期」ボタン（refetch）で行う
+        // 画面遷移のたびに叩き直さない。取り直しは「最新化」ボタン（refetch）で行う
         staleTime: 30_000,
         refetchOnWindowFocus: false,
         retry: shouldRetry,

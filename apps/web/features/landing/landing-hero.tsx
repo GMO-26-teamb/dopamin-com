@@ -10,8 +10,8 @@ import { Divider } from "@/components/ui/card";
  */
 
 const FEATURES = [
-  { title: "AIが候補を出す", body: "ニックネームから6案" },
-  { title: "独自性スコア", body: "紛らわしさを0-100で" },
+  { title: "AI が候補を出す", body: "ニックネームから 6 案" },
+  { title: "独自性スコア", body: "紛らわしさを 0〜100 で" },
   { title: "サブドメイン設計", body: "リポの中身から提案" },
 ] as const;
 
@@ -26,7 +26,7 @@ export function LandingHero() {
         設定は考えなくていい。
       </h1>
       <p className="max-w-140 text-body-lead text-muted">
-        その名前、紛らわしくない? —
+        その名前、紛らわしくない？ —
         登録前に「既存と似ていないか」を数値で確かめられる、はじめての人のためのドメイン屋。
       </p>
       <div className="flex flex-wrap items-center gap-4">

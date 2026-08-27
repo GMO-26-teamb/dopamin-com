@@ -137,7 +137,7 @@ describe("SubdomainsScreen", () => {
 
     await waitFor(() => {
       expect(screen.getByRole("alert")).toHaveTextContent(
-        "リポジトリを取得できません",
+        "リポジトリを読み込めません",
       );
     });
     expect(screen.getByLabelText("プロジェクト概要")).toBeInTheDocument();
@@ -156,7 +156,7 @@ describe("SubdomainsScreen", () => {
     await user.click(screen.getByRole("button", { name: "リポジトリを解析" }));
 
     expect(
-      await screen.findByText("リポジトリを取得できません"),
+      await screen.findByText("リポジトリを読み込めません"),
     ).toBeInTheDocument();
     expect(screen.getByLabelText("プロジェクト概要")).toBeInTheDocument();
   });
@@ -175,7 +175,7 @@ describe("SubdomainsScreen", () => {
     expect(banner).toHaveTextContent("AI が応答しませんでした");
     expect(screen.getByRole("button", { name: "再試行" })).toBeInTheDocument();
     // 概要入力には切り替えない（リポは取得できている）
-    expect(screen.queryByText("リポジトリを取得できません")).toBeNull();
+    expect(screen.queryByText("リポジトリを読み込めません")).toBeNull();
   });
 
   it("S-44 → S-45: 差分を確認して反映すると全ノードが反映済みになる（AC-13-4 / 7）", async () => {
@@ -195,7 +195,7 @@ describe("SubdomainsScreen", () => {
     expect(screen.getByText("追加 1")).toBeInTheDocument();
     expect(screen.getByText("変更 1")).toBeInTheDocument();
     expect(screen.getByText("削除 0")).toBeInTheDocument();
-    expect(screen.getByText("変更なし 2（www・api）")).toBeInTheDocument();
+    expect(screen.getByText("変更なし 2（www / api）")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "反映する" }));
 
@@ -203,7 +203,7 @@ describe("SubdomainsScreen", () => {
     const banner = await screen.findByRole("status");
     expect(banner).toHaveTextContent("DNS に反映しました");
     expect(banner).toHaveTextContent(
-      "4 ホストを反映（追加 1・変更 1）・ネームサーバーはドパ民 DNS",
+      "4 ホストを反映（追加 1・変更 1） · ネームサーバーはドパ民 DNS",
     );
     await waitFor(() => {
       expect(screen.getByText("反映済み 4・差分なし")).toBeInTheDocument();
@@ -306,7 +306,7 @@ describe("SubdomainsScreen", () => {
 
     expect(
       screen.getByText(
-        "A レコードの向き先は IPv4 アドレスで指定してください（例 203.0.113.10）",
+        "A レコードの向き先は IPv4 アドレスで指定してください（例: 203.0.113.10）",
       ),
     ).toBeInTheDocument();
   });

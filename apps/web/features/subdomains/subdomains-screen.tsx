@@ -1,5 +1,6 @@
 "use client";
 
+import { Save, WandSparkles } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
 import { PageHeader } from "@/components/app/page-header";
 import { Banner } from "@/components/ui/banner";
@@ -36,7 +37,7 @@ import { canAddHost, hostFieldErrors, validatePlan } from "./validate";
  * - S-40   設計なし。リポ URL を入れて「リポジトリを解析」
  * - S-40b  保存済み設計の読み込み中（Skeleton）
  * - S-41   解析中（ボタン Disabled +「解析中…」）
- * - S-42   リポ取得失敗 → 概要から提案（AC-13-2）
+ * - S-42   リポの読み込み失敗 → 概要から提案（AC-13-2）
  * - S-43   提案・編集（ツリー + 編集パネル + DNS 反映セクション + 手順テキスト）
  * - S-44   反映確認ダイアログ（AC-13-7、`ApplyDnsDialog`）
  * - S-45   反映後 Banner Ok + 全ノード「反映済み」（AC-13-4）
@@ -50,7 +51,7 @@ const S40_TITLE = "リポジトリを解析して構成を提案します";
 const S40_BODY =
   "リポジトリの構成から www / api などのホストを提案します。非公開なら概要テキストからでも提案できます。";
 const S41_NOTE = "解析中… 最大 30 秒かかります。";
-const S42_TITLE = "リポジトリを取得できません";
+const S42_TITLE = "リポジトリを読み込めません";
 const S42_BODY =
   "見つからないか、非公開です。プロジェクトの概要からでも提案できます。";
 const AI_RETRY_BODY = "もう一度お試しください。概要からでも提案できます。";
@@ -231,7 +232,7 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
         setBanner(
           result.plan.nameserversSwitched
             ? {
-                body: `${result.plan.hosts.length} ホストを反映（${appliedSummary(result)}）・ネームサーバーはドパ民 DNS`,
+                body: `${result.plan.hosts.length} ホストを反映（${appliedSummary(result)}） · ネームサーバーはドパ民 DNS`,
                 onClose: () => setBanner(null),
                 title: "DNS に反映しました",
                 tone: "ok",
@@ -343,7 +344,7 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
     // S-40: 設計なし
     body = (
       <>
-        <EmptyState body={S40_BODY} title={S40_TITLE} />
+        <EmptyState body={S40_BODY} icon={<WandSparkles />} title={S40_TITLE} />
         {descriptionOpen ? (
           <DescriptionForm
             analyzing={false}
@@ -431,6 +432,7 @@ export function SubdomainsScreen({ domain }: SubdomainsScreenProps) {
         action={
           <Button
             disabled={!dirty || save.isPending || apply.isPending}
+            leadingIcon={<Save />}
             loading={save.isPending}
             onClick={onSave}
             variant="outline"

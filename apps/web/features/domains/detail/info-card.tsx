@@ -81,7 +81,7 @@ export function InfoCard({ domain, now }: InfoCardProps) {
             >
               {domain.transferableFrom === null
                 ? "—"
-                : `${formatDate(domain.transferableFrom)} 以降（60日ルール）`}
+                : `${formatDate(domain.transferableFrom)} 以降（60 日ルール）`}
             </button>
           </Tooltip>
         }

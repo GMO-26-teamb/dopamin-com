@@ -39,7 +39,7 @@ const NEAREST_LIMIT = 3;
 const EXAMPLES = ["gogle", "takutaku", "amazan"] as const;
 
 const INVALID_INPUT =
-  "英数字とハイフンで入力してください（例: takutaku / takutaku.com）。";
+  "英数字とハイフンで入力してください（例: takutaku / takutaku.com）";
 
 /** 「gogle」なら `{ sld }`、「gogle.com」なら `{ name }` に振り分ける。 */
 function toPreviewRequest(raw: string): UniquenessPreviewRequest | null {

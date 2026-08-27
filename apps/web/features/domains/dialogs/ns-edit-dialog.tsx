@@ -240,8 +240,8 @@ export function NsEditDialog({
       onOpenChange={onOpenChange}
       onPrimary={submit}
       open={open}
-      primaryLabel={busy ? "変更中…" : "変更する"}
-      subtitle={`${domain.name}・${MIN_NAMESERVERS}〜${MAX_NAMESERVERS} 件。ホストオブジェクトは自動作成します`}
+      primaryLabel={busy ? "修正中…" : "情報を修正する"}
+      subtitle={`${domain.name} · ${MIN_NAMESERVERS}〜${MAX_NAMESERVERS} 件。ホストオブジェクトは自動作成します`}
       title="情報修正（NS・コンタクト）"
     >
       {rows.map((row, index) => (
@@ -332,7 +332,7 @@ export function NsEditDialog({
       </div>
       <p className="w-full text-caption-sm text-muted">
         {lockBlockedBy === null
-          ? "ON のあいだは他社への移管を受け付けません。「変更する」で反映します。"
+          ? "ON のあいだは他社への移管を受け付けません。「情報を修正する」で反映します。"
           : `レジストリ側の ${lockBlockedBy} が付いているため変更できません（Server ステータスが優先されます・AC-09-2）。`}
       </p>
     </FormDialog>

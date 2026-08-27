@@ -318,9 +318,9 @@ function SearchResults({
       {failed.length === 0 ? null : (
         <p className="w-full text-caption text-muted">
           {[...new Set(failed.map((r) => REGISTRY_LABEL[r.registry]))].join(
-            "・",
+            " / ",
           )}{" "}
-          が応答しないため {failed.map((r) => `.${r.tld}`).join("・")}{" "}
+          が応答しないため {failed.map((r) => `.${r.tld}`).join(" / ")}{" "}
           は確認できませんでした。他の結果はそのまま表示しています
         </p>
       )}

@@ -5,12 +5,12 @@
  *
  * 移管一覧の 1 件（FR-12）。Kind は `Transfer` の direction × status から決まる:
  * - `out-received`  受信した OUT 申請。拒否 / 承認 + 自動承認までの残り時間（warn 枠）
- * - `in-pending`    自分の IN 申請。状態を確認 / 取消
- * - `import-pending` 承認済み・取り込み待ち。状態を確認
+ * - `in-pending`    自分の IN 申請。最新化 / 取消
+ * - `import-pending` 承認済み・取り込み待ち。最新化
  * - `history`       approved / rejected / cancelled。muted 枠 + 日付
  */
 
-import { Check, RefreshCw } from "lucide-react";
+import { Check, RefreshCw, X } from "lucide-react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -84,14 +84,14 @@ function statusText(
   switch (kind) {
     case "out-received":
       if (expired) {
-        return "自動承認の期限を過ぎました — 状態を確認してください";
+        return "自動承認の期限を過ぎました — 「最新化」を押してください";
       }
       return countdown === null
         ? "移管申請を受信 — 承認または拒否してください"
         : `移管申請を受信 — 承認しないと ${countdown} 後に自動承認されます`;
     case "in-pending":
       if (expired) {
-        return "申請中 — 自動承認の期限を過ぎました。状態を確認してください";
+        return "申請中 — 自動承認の期限を過ぎました。「最新化」を押してください";
       }
       return countdown === null
         ? "申請中 — 相手レジストラの承認待ち"
@@ -109,10 +109,10 @@ export interface TransferItemProps {
   busy?: boolean;
   /**
    * S-53（更新エラー）。仕様で Disabled にするのは承認 / 拒否 / 取消 / 申請だけなので、
-   * 「状態を確認」＝再照会の導線は残す（ui-screens S-53）。
+   * 「最新化」＝再照会の導線は残す（ui-screens S-53）。
    */
   updateFailed?: boolean;
-  /** 「状態を確認」が実行中 */
+  /** 「最新化」が実行中 */
   recheckPending?: boolean;
   onApprove?: (transfer: Transfer) => void;
   onReject?: (transfer: Transfer) => void;
@@ -193,7 +193,7 @@ export function TransferItem({
             {/* 期限切れは承認 / 拒否を止め、再照会だけを残す（ui-screens §4） */}
             {expired ? (
               <Button
-                aria-label={`${name} の状態を確認`}
+                aria-label={`${name} を最新化`}
                 disabled={recheckDisabled}
                 leadingIcon={<RefreshCw />}
                 loading={recheckPending}
@@ -201,12 +201,13 @@ export function TransferItem({
                 size="sm"
                 variant="subtle"
               >
-                {recheckPending ? "確認中…" : "状態を確認"}
+                {recheckPending ? "最新化中…" : "最新化"}
               </Button>
             ) : null}
             <Button
               aria-label={`${name} の移管を拒否`}
               disabled={actionsDisabled}
+              leadingIcon={<X />}
               onClick={() => onReject?.(transfer)}
               size="sm"
               variant="danger"
@@ -229,7 +230,7 @@ export function TransferItem({
         {kind === "in-pending" ? (
           <>
             <Button
-              aria-label={`${name} の状態を確認`}
+              aria-label={`${name} を最新化`}
               disabled={recheckDisabled}
               leadingIcon={<RefreshCw />}
               loading={recheckPending}
@@ -237,11 +238,12 @@ export function TransferItem({
               size="sm"
               variant="subtle"
             >
-              {recheckPending ? "確認中…" : "状態を確認"}
+              {recheckPending ? "最新化中…" : "最新化"}
             </Button>
             <Button
               aria-label={`${name} の移管申請を取消`}
               disabled={actionsDisabled}
+              leadingIcon={<X />}
               onClick={() => onCancel?.(transfer)}
               size="sm"
               variant="outline"
@@ -252,9 +254,9 @@ export function TransferItem({
         ) : null}
 
         {kind === "import-pending" ? (
-          // 呼ぶ処理は他の行と同じ再照会なので、ラベルも「状態を確認」で揃える（#219）
+          // 呼ぶ処理は他の行と同じ再照会なので、ラベルも「最新化」で揃える（#219）
           <Button
-            aria-label={`${name} の状態を確認`}
+            aria-label={`${name} を最新化`}
             disabled={recheckDisabled}
             leadingIcon={<RefreshCw />}
             loading={recheckPending}
@@ -262,7 +264,7 @@ export function TransferItem({
             size="sm"
             variant="outline"
           >
-            {recheckPending ? "確認中…" : "状態を確認"}
+            {recheckPending ? "最新化中…" : "最新化"}
           </Button>
         ) : null}
 

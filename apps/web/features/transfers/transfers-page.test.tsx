@@ -66,7 +66,7 @@ describe("S-50 一覧", () => {
       "/domains/tkt-lab.net",
     );
     expect(
-      screen.getByRole("button", { name: "harupika.xyz の状態を確認" }),
+      screen.getByRole("button", { name: "harupika.xyz を最新化" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "old-blog.xyz" }),
@@ -167,7 +167,7 @@ describe("S-53 更新エラー（FR-18）", () => {
       expect(screen.getByText("tkt-lab.net")).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole("button", { name: "状態を更新" }));
+    await user.click(screen.getByRole("button", { name: "最新化" }));
 
     const banner = await screen.findByRole("alert");
     expect(
@@ -185,9 +185,9 @@ describe("S-53 更新エラー（FR-18）", () => {
       screen.getByRole("button", { name: "tkt-lab.net の移管を拒否" }),
     ).toBeDisabled();
     expect(screen.getByRole("button", { name: "申請" })).toBeDisabled();
-    // 再照会（状態を確認）は spec S-53 の Disabled 対象ではないので残す
+    // 再照会（最新化）は spec S-53 の Disabled 対象ではないので残す
     expect(
-      screen.getByRole("button", { name: "harupika.xyz の状態を確認" }),
+      screen.getByRole("button", { name: "harupika.xyz を最新化" }),
     ).toBeEnabled();
     // 更新に失敗した事実は Banner が言う。meta では繰り返さない（#219）
     expect(screen.getByText("受信 1 · 申請中 1 · 履歴 1")).toBeInTheDocument();

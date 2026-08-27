@@ -259,7 +259,7 @@ export interface PaymentReceipt {
   currency: OrderQuote["currency"];
   brand: string;
   last4: string;
-  /** 摘要（例 `takutaku.com 新規登録 2 年`） */
+  /** 摘要（例: `takutaku.com 新規登録 2 年`） */
   description: string;
 }
 
