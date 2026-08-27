@@ -5,6 +5,7 @@ import { ApiClientError } from "@/lib/api/errors";
 import { resetMockStore } from "@/lib/api/mock/mock-services";
 import { AppProviders } from "@/lib/api/query-client";
 import type { AuthService } from "@/lib/api/services";
+import { ThemeProvider } from "@/lib/theme/theme-provider";
 import { SignupScreen } from "./signup-screen";
 import { servicesWithAuth } from "./test-services";
 
@@ -19,9 +20,11 @@ function renderSignup(
   next: string | null = null,
 ) {
   render(
-    <AppProviders services={servicesWithAuth(overrides)}>
-      <SignupScreen next={next} />
-    </AppProviders>,
+    <ThemeProvider>
+      <AppProviders services={servicesWithAuth(overrides)}>
+        <SignupScreen next={next} />
+      </AppProviders>
+    </ThemeProvider>,
   );
 }
 

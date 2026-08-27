@@ -22,8 +22,17 @@ export default function LandingPage() {
           </Button>
         }
       />
-      <main className="flex flex-1 justify-center">
-        <div className="grid w-full max-w-page grid-cols-1 lg:grid-cols-2">
+      <main className="relative flex flex-1 justify-center">
+        {/*
+          右半分の地。ページの器（max-w-page）は画面中央に寄るので、
+          `right-0 w-1/2` はそのまま右カラムの始点から画面端までを覆う。
+          `lg` 未満は 1 カラムに積むので出さない（#224）。
+        */}
+        <div
+          aria-hidden="true"
+          className="brand-field brand-gradient pointer-events-none absolute inset-y-0 right-0 hidden w-1/2 lg:block"
+        />
+        <div className="relative grid w-full max-w-page grid-cols-1 lg:grid-cols-2">
           <LandingHero />
           <TrialScore />
         </div>
