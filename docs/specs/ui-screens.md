@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.6（2026-08-27） |
+| 版 | v0.9（2026-08-27） |
 | 対応要件 | `docs/requirements.md` v0.1.11 §4 FR-01〜19、§9.2、§10.3、§11.3 / 11.4、§15 |
 | Figma | `UI Design (Team B)` — ページ **Prototype / Screens**（全画面・全状態、Standard、Present で遷移可）/ **Prototype / Screens (極ドパ)** / **Prototype / Flow**（遷移図）。コンポーネントは同ファイルのデザインシステム（Getting Started 参照） |
 | アセット | `docs/ui-design/*.png`（抜粋スクリーンショット） |
@@ -51,7 +51,7 @@
 | S-10 | `/dashboard` | 通常 | Page Header（件数・最終同期・「最新化」）+ Domain Card 2 列グリッド。カードの表示項目: ドメイン名 / 状態バッジ / 進捗（残日数）/ レジストリ名 / 有効期限 or 残日数 / 最終同期（Meta 右端、キャッシュ時は「未同期」バッジ（`Badge` tone=muted）を最終同期テキストの左に置く）/ 操作。「詳細」→ S-30、「今すぐ更新」→ D-01、「復旧する」→ D-04、「状態を確認」→ S-50、「NS を設定」→ D-02 | Page Header, Domain Card |
 | S-11 | `/dashboard` | 0 件 | Empty State Neutral + CTA「ドメインを取得」→ S-20、「移管で持ち込む」→ S-50 | Empty State |
 | S-12 | `/dashboard` | 読み込み | Skeleton（ヘッダー + カード 4）。DB キャッシュを先に描画し、`POST /domains/sync` はバックグラウンド | Skeleton |
-| S-13 | `/dashboard` | 同期エラー（AC-18-1） | Banner Warn。`POST /domains/sync` は部分失敗でも 200 + `failures[]` を返すので、文言は `failures[].registry`（TLD から特定）から生成し、リクエストごとの失敗のときは `error.registry`、どちらも無ければ stale なカードのレジストリから推定する（「Kitaqsign が応答しません」「Kitaqnic が…」「両レジストリが応答しません」）。部分失敗のときは「n 件が最新化できませんでした」を本文に添える。Banner に最終同期時刻は書かない。同期に失敗したカードだけ「未同期」バッジ（`Badge` tone=muted）+「最終同期 n 分前」を Meta 右端に表示し、更新系操作は Disabled（参照系の「詳細 / 状態を確認」は塞がない） | Banner |
+| S-13 | `/dashboard` | 同期エラー（AC-18-1） | Banner Warn。`POST /domains/sync` は部分失敗でも 200 + `failures[]` を返すので、見出しと案内は `failures[].code`（+ リクエストごとの失敗なら `error.code`）で出し分ける（`REGISTRY_TIMEOUT` / `REGISTRY_UNAVAILABLE` →「〇〇が応答しません — 一覧はキャッシュを表示しています」+「参照系は自動で 2 回再試行しました」、`REGISTRY_SPEC_MISMATCH` →「〇〇の応答が想定と異なります — レジストリの仕様変更の可能性があります」+ 操作ログ導線、`REGISTRY_REJECTED` →「〇〇が最新化を拒否しました」+ 理由（API が `registry-codes.ts` の表から `message` に載せたもの。1 つに定まらなければ操作ログへ誘導）、`NOT_FOUND` →「〇〇に登録が見つかりません」（再試行の記述は出さない）、それ以外 →「一覧を最新化できませんでした」）。コードが混ざるときは最も重い区分（応答なし > 想定外の応答 > 拒否 > レジストリに未登録 > その他）の見出しを採り、本文に内訳（「応答なし 1 件・レジストリに未登録 2 件」）を添える。主語は見出しに採った区分の `failures[].registry`（TLD から特定）から生成し、リクエストごとの失敗のときは `error.registry`、どちらも無ければ stale なカードのレジストリから推定する（「Kitaqsign が…」「Kitaqnic が…」「両レジストリが…」）。部分失敗のときは「n 件が最新化できませんでした」を本文に添える。Banner に最終同期時刻は書かない。同期に失敗したカードだけ「未同期」バッジ（`Badge` tone=muted）+「最終同期 n 分前」を Meta 右端に表示し、更新系操作は Disabled（参照系の「詳細 / 状態を確認」は塞がない） | Banner |
 
 **Domain Card の Status（§9.2 `deriveDisplayStatus` と 1:1）**
 
@@ -60,7 +60,7 @@
 | Active | `active` | Active（Ok） | Brand | 更新 / 詳細 |
 | Expiring | `active` かつ残 30 日以内（AC-02-2） | ⚠ 残 n 日（Warn）、枠 Warn | Warn | 今すぐ更新 / 詳細 |
 | Redeemable | `rgp` | 復旧猶予 残 n 日（Warn）（AC-10-1） | — | 復旧する / 詳細 |
-| PendingDelete | `pending_delete` | 削除待ち（Muted Solid）、75% | — | 詳細のみ |
+| PendingDelete | `pending_delete` | 削除待ち（Muted Solid）、75% | — | 詳細のみ（`redemptionPeriod` を伴わない場合のみ。伴うなら Redeemable） |
 | Transferring | `transfer_out_pending`（受信）/ `transfer_in_pending` は `/transfers` のみ | 移管申請中（Muted）、75% | — | 状態を確認 |
 | Hold | `hold` | 停止中（Warn）、枠 Warn | — | 情報修正 / 詳細 |
 | Inactive | `inactive` | NS 未設定（Neutral） | Brand | NS を設定 / 詳細 |
@@ -77,9 +77,9 @@
 | S-22 | `/domains/new` | 候補表示 | Candidate Card ×6。各カード: ドメイン名（TLD はブランド色）/ Rarity / Score Gauge（クリックで最も近い既存名 3 件と類似度を展開 = Similarity Row ×3）/ 理由（40 字、Caption）/ 空きバッジ / 操作。「登録へ」→ S-25、「もう一回考える」→ S-21（前回候補を除外）、「自分で入力して探す」→ S-24 | Candidate Card, Score Gauge, Similarity Row |
 | S-23 | `/domains/new` | AI エラー（AC-04-2） | Banner Warn。`REGISTRY_TIMEOUT`→「AI が 20 秒以内に応答しませんでした」、`AI_UNAVAILABLE`→「AI が利用できません。手入力で探せます」、`RATE_LIMITED`→「利用上限に達しました。n 秒後に再試行」。直接検索へ誘導。AI ログに記録 | Banner |
 | S-24 | `/domains/new` | 直接検索の結果 | S-20〜S-23 と同一 URL（直接検索カードの開閉と結果表示のみが変わる）。検索条件・結果は URL に載らない（画面内 state のため、リロード・URL 共有では復元されない）。入力は `SLD + TLD 複数選択` または FQDN（`.` を含む場合は FQDN として 1 件で check）。結果は Search Result Row（Available / Taken / Error）。読み込み中は行ごとに Skeleton + レジストリ名。部分失敗は「確認不可」+ 注記（AC-03-2）。「登録へ」→ S-25、「代替を見る」→ 別 TLD・綴り違いを展開、「再試行」→ 当該レジストリのみ再 check | Search Result Row, Score Gauge, Rarity |
-| S-25 | `/domains/new`（dialog） | 登録ダイアログ | Dialog / Register：空き（再確認済み）+ スコア + レア度（ゲージクリックで内訳）→ 期間 Select（helper に税込合計）→ NS・コンタクトは既定値表示 → 「お支払いへ」→ S-29。直前に check 再実行 | Dialog / Register |
+| S-25 | `/domains/new`（dialog） | 登録ダイアログ | Dialog / Register：空き（再確認済み）+ スコア + レア度（ゲージクリックで内訳）→ 期間 Select（helper に税込合計）→ NS・コンタクトは読み取り専用の説明のみ（**NS は `create` に送らない**ので helper は「登録時は未設定。あとから「情報修正」で設定できます」。ドパ民 DNS（`DOPAMIN_NAMESERVERS`）は FR-13 の反映時に切り替える NS で、登録時の既定値ではない）→ 「お支払いへ」→ S-29。直前に check 再実行 | Dialog / Register |
 | S-29 | `/domains/new`（dialog） | お支払い（FR-19・モック） | 同じ Dialog 内でステップ切替。ご注文内容（Card + Key Value Row：品目 / 期間 / 単価 / 小計 / 消費税 10% / 税込合計 + Badge「固定ダミー価格」）→ カード入力（番号 / 有効期限 / CVC / 名義。デモ用カードが入力済み・AC-19-4）。「¥n を支払って登録する」→ 決済成立で `create` → S-26 /「戻る」→ S-25。入力エラーは欄ごとの warn helper、拒否は Banner Warn「お支払いに失敗しました」でダイアログは開いたまま（AC-19-3。`create` は呼ばない）。末尾 `0002` のカードで拒否を再現 | Dialog / Form, Card, Key Value Row, Input, Banner, Badge |
-| S-26 | `/domains/new`（dialog） | 登録成功 | Dialog / Success：状態・有効期限に加えお支払いの控え（金額・ブランド・下 4 桁・受付番号・モックである旨）。「サブドメイン設計に進む」→ S-40（登録直後は設計なし）、「詳細を見る」→ S-30。閉じた場合は元の S-22 / S-24 に戻り、当該カードは Taken（「取得しました → 詳細」）に更新。一覧は即時反映（AC-06-1） | Dialog / Success |
+| S-26 | `/domains/new`（dialog） | 登録成功 | Dialog / Success：状態・有効期限・**実際の NS**（`domain.nameservers` が空なら「ネームサーバーは未設定（あとから設定できます）」）に加えお支払いの控え（金額・ブランド・下 4 桁・受付番号・モックである旨）。「サブドメイン設計に進む」→ S-40（登録直後は設計なし）、「詳細を見る」→ S-30。閉じた場合は元の S-22 / S-24 に戻り、当該カードは Taken（「取得しました → 詳細」）に更新。一覧は即時反映（AC-06-1） | Dialog / Success |
 | S-27 | `/domains/new`（dialog） | 取得済み（CONFLICT 409） | 汎用 Dialog：直前の再確認で他者取得。代替候補 3 件を本文に列挙、「代替候補を見る」→ S-24 | Dialog |
 | S-28 | `/domains/new`（dialog） | create タイムアウト（AC-06-2） | 汎用 Dialog：再送せず `info` で照合。結果 4 分岐: 登録済み → S-30 / 空きのまま → S-25 に戻り Banner Info「登録は行われていません」（本文は「お支払いは確定していません。もう一度お支払いに進めば再送できます」・再送可）/ 他者取得 → S-27 / 照合失敗 → S-28 のまま Error Card + 「もう一度確認」 | Dialog, Error Card |
 
@@ -102,10 +102,10 @@
 | S-30 | `/domains/[name]` | Active | ヘッダー（ドメイン名 + 状態バッジ + ロックバッジ + 最終同期 / 再同期）。基本情報カード: レジストリ / EPP ステータス一覧（バッジ + 日本語説明ツールチップ）/ 登録日 / 有効期限（残日数 + 進捗）/ Grace Period（Renew / Transfer / Auto-Renew GP は種別と残日数を表示のみ）/ 移管可能日（ツールチップ「ICANN 実運用の参考。可否判定には使いません」）。ネームサーバー / コンタクト / サブドメイン設計カード（`反映済み n / m`、未作成時は「未作成 → 設計をはじめる」）。右: 操作パネル（更新 / 情報修正 / 移管 OUT / 廃止 / 復旧 + 移管ロックの ON / OFF 表示。切り替えは D-02 で行う）。コンタクトカードの登録者・メールは API の `registrantProfile` から出し、アプリのコンタクトを参照していないドメイン（移管 IN 直後など）は「未取得」と書く（コンタクト ID は出さない）。不可操作は Disabled + 理由（AC-07-1） | Card, Key Value Row, Progress Bar, Badge, Button |
 | S-31 | `/domains/[name]` | info 失敗（AC-07-2） | Banner Warn + キャッシュ表示（最終同期時刻）。操作ボタンは全て Disabled、「再同期」で S-35 → 成功なら S-30 | Banner |
 | S-32 | `/domains/[name]` | 移管申請を受信（AC-07-3） | Banner Warn + 状態バッジ「移管中（申請受信）」。操作パネル先頭に「拒否」「承認」+「自動承認まで mm:ss」（1 秒更新）。他操作は Disabled。タイマーが 0 になったらボタンを Disabled にし「状態を確認中…」→ 再照会 → S-34 | Banner, Button |
-| S-33 | `/domains/[name]` | 復旧猶予（RGP） | Banner Info「残り n 日」、バッジ「復旧猶予 残 n 日」。操作は「復旧する」のみ有効 → D-04 | Banner, Badge |
+| S-33 | `/domains/[name]` | 復旧猶予（RGP・`redemptionPeriod`） | Banner Info「残り n 日」、バッジ「復旧猶予 残 n 日」。操作は「復旧する」のみ有効 → D-04。EPP ステータス欄に `pendingDelete` が並んでいても（RGP 中は必ず共存する）S-36 ではなくこちら | Banner, Badge |
 | S-34 | `/domains/[name]` | 移管済み（AC-12-5） | バッジ「移管済み」、操作パネルなし、Banner Info「表示のみ」。自ユーザーの `transferred_out` 行のみ | Banner |
 | S-35 | `/domains/[name]` | 読み込み | Skeleton。`info` 取得後 S-30 | Skeleton |
-| S-36 | `/domains/[name]` | 削除待ち（`pendingDelete`） | バッジ「削除待ち」、Banner Warn「完全削除まで残り n 日」。操作パネルなし（復旧ボタンは表示しない・AC-11-2） | Banner, Badge |
+| S-36 | `/domains/[name]` | 削除待ち（`redemptionPeriod` を伴わない `pendingDelete`） | バッジ「削除待ち」、Banner Warn「完全削除まで残り n 日」。操作パネルなし（復旧ボタンは表示しない・AC-11-2）。`redemptionPeriod` が付いている間は S-33 | Banner, Badge |
 | S-37 | `/domains/[name]` | 停止中（`clientHold` / `serverHold`） | バッジ Warn「停止中」、Banner Warn「名前解決されません。運営の案内を確認」。更新・情報修正は可 | Banner, Badge |
 | S-38 | `/domains/[name]` | NS 未設定（`inactive`） | バッジ「NS 未設定」、Banner Info + CTA「NS を設定」→ D-02。NS カードは「—（未設定）」 | Banner, Button |
 | S-39 | `/domains/[name]` | コンタクト未移行（移管 IN 後） | Banner Warn「登録者情報が旧レジストラのままです」+ CTA「情報修正」（登録者プロファイルへ差し替えを再実行）。要確認 #14 が解決するまでの暫定表示 | Banner |
@@ -290,3 +290,6 @@ Figma **Prototype / Screens** にプロトタイプ接続を設定済み（Prese
 | v0.4 | 2026-08-26 | FR-19（requirements v0.1.11）のモック決済を反映: **S-29**（登録のお支払い）/ **D-11**（更新のお支払い）を追加、S-25 / D-01 の主ボタンを「お支払いへ」に変更、S-26 の本文に支払い控え、S-28 の Banner 本文を支払い前提に更新、D-04 に `RESTORE_FEE` 参照を明記、遷移図に決済分岐を追加。詳細は `docs/specs/payment-mock.md` |
 | v0.5 | 2026-08-27 | 実装との乖離を修正: §1 の幅 / サイドバーを実装の 1280px / 224px（rem 基準・大画面で font-size 拡大）と `MobileNav` に合わせ、S-24 のルートを `/domains/new`（検索条件は URL に載らない）に訂正、S-10 / S-13 / §4 の「Stale」を実装の「未同期」バッジ表記に統一、§7 #6 の仮置きを現状に更新 |
 | v0.6 | 2026-08-27 | AI の時間制限の緩和（requirements v0.1.22）に追随: S-21 / S-23 の「10 秒」を「20 秒」、S-41 の「15 秒」を「30 秒」に更新。画面と状態そのものは変えていない |
+| v0.7 | 2026-08-27 | S-13 の Banner を `failures[].code` で出し分ける仕様に更新（#184）。固定文言だと `NOT_FOUND` などレジストリ障害でない失敗まで「〇〇が応答しません」と出て切り分けが空振りするため。画面と状態そのものは変えていない |
+| v0.8 | 2026-08-27 | 文言と実結果の不一致を修正（#173）: S-25 の NS helper から実際には適用されない `DOPAMIN_NAMESERVERS` を外し、S-26 は実際の `nameservers` を出す（空なら「未設定」）、D-03 の AGP 分岐の注記から「即時に削除され、元に戻せません」の断定を外す（採番が衝突していたため v0.6 から採り直した）|
+| v0.9 | 2026-08-27 | RGP の状態を requirements v0.1.23 に追随（#171）。S-33 / S-36 / §2.2 の Status 表を「RGP 中は `pendingDelete` が共存する」前提に直し、S-36 の対象を「`redemptionPeriod` を伴わない `pendingDelete`」に限定した（採番が衝突していたため v0.6 から採り直した）|
