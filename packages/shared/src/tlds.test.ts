@@ -13,9 +13,9 @@ describe("対応 TLD 一覧（docs/requirements.md §11.2）", () => {
     expect(new Set(SUPPORTED_TLDS).size).toBe(22);
   });
 
-  it("kitaqsign 4 / kitaqnic 18 の内訳になっている", () => {
-    expect(REGISTRY_TLDS.kitaqsign).toHaveLength(4);
-    expect(REGISTRY_TLDS.kitaqnic).toHaveLength(18);
+  it("kitaqsign 2 / kitaqnic 20 の内訳になっている（8/27 の .org / .info 移管後）", () => {
+    expect(REGISTRY_TLDS.kitaqsign).toHaveLength(2);
+    expect(REGISTRY_TLDS.kitaqnic).toHaveLength(20);
   });
 });
 
@@ -28,8 +28,13 @@ describe("registryIdForTld", () => {
     expect(registryIdForTld("xyz")).toBe("kitaqnic");
   });
 
+  it(".org / .info は kitaqnic を引く（8/27 の移管後）", () => {
+    expect(registryIdForTld("org")).toBe("kitaqnic");
+    expect(registryIdForTld("info")).toBe("kitaqnic");
+  });
+
   it("ドット付き・大文字も正規化して引ける", () => {
-    expect(registryIdForTld(".org")).toBe("kitaqsign");
+    expect(registryIdForTld(".org")).toBe("kitaqnic");
     expect(registryIdForTld("CEO")).toBe("kitaqnic");
   });
 

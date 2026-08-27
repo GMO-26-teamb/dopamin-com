@@ -11,6 +11,22 @@
 
 ---
 
+## 2026-08-27 — `.org` / `.info` の管轄が kitaqnic へ移管（kitaqsign では非対応に）
+
+| 項目 | 内容 |
+|---|---|
+| 種別 | 運営からの事前周知（8/27 16:00〜、数分程度のメンテナンス。作業中は両レジストリとも一時停止） |
+| `specVersion` | `v2 (2026-08-27)` に更新（対応 TLD という契約レベルの変更のため） |
+| fixture 更新 | `../fixtures/hello.kitaqsign.json`（`tlds` から `org` / `info` を除外） |
+| 影響 FR | FR-04 / FR-05（候補生成・空き確認のルーティング）/ FR-06〜FR-12（`.org` / `.info` の全ドメイン操作） |
+
+- kitaqsign の管轄 TLD は **`.com` `.net` の 2 種**になった。`.org` / `.info` は kitaqnic の管轄
+  （[`../kitaqnic/CHANGELOG.md`](../kitaqnic/CHANGELOG.md) 同日エントリ）。
+- kitaqsign に `.org` / `.info` を投げると `domain:check` は **2306** を返し、`hello` の
+  `tlds` からも外れる。ルーティングの正 `packages/shared/src/tlds.ts`（`REGISTRY_TLDS`）を
+  更新したため、アプリからは到達しない。
+- メンテナンス中は kitaqsign 自体も一時停止（EPP / RDAP / コンパネ）。
+
 ## 2026-08-27 — `domain:update` の `add.statuses` / `rem.statuses` が反映されるようになった
 
 | 項目 | 内容 |

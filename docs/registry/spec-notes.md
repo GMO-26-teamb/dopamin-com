@@ -6,6 +6,7 @@
 - Kitaqsign: <https://docs.kitaqsign.com/swagger-ui/index.html> — `registry-kitaqsign EPP-over-REST API (対応 TLD: .com .net .org .info)` v1 / OAS 3.0
 - Kitaqnic: <https://docs.kitaqnic.com/swagger-ui/index.html> — `registry-kitaqnic EPP-over-REST API (18 gTLD)` v1 / OAS 3.0
 - 取得日: 2026-08-25
+- **2026-08-27 の仕様変更**: `.org` / `.info` の管轄が kitaqsign → kitaqnic へ移管（kitaqsign は `.com` `.net` の 2 種、kitaqnic は 20 種に）。上の Swagger タイトルは 8/25 取得時点のもの。詳細は [`kitaqsign/CHANGELOG.md`](kitaqsign/CHANGELOG.md) / [`kitaqnic/CHANGELOG.md`](kitaqnic/CHANGELOG.md)
 - OpenAPI 定義の実物（`/v3/api-docs`、Basic ゲート認証付きで取得）: [`kitaqsign.openapi.json`](kitaqsign.openapi.json) / [`kitaqnic.openapi.json`](kitaqnic.openapi.json)
 - 仕様変更の記録先（requirements §11.5 の手順 1）: [`kitaqsign/CHANGELOG.md`](kitaqsign/CHANGELOG.md) / [`kitaqnic/CHANGELOG.md`](kitaqnic/CHANGELOG.md)
 - 契約テストの fixture: [`fixtures/README.md`](fixtures/README.md)
@@ -175,7 +176,7 @@ exDate 超過でも廃止されず、レジストリが自動で 1 年延長（�
 
 | 項目 | kitaqsign | kitaqnic |
 |---|---|---|
-| 対応 TLD | `.com` `.net` `.org` `.info`（4） | `.xyz` `.online` `.site` `.tech` `.space` `.store` `.website` `.press` `.host` `.fun` `.icu` `.cyou` `.sbs` `.bond` `.cfd` `.art` `.build` `.ceo`（18）**重複なし** |
+| 対応 TLD | `.com` `.net`（2。8/27 に `.org` / `.info` は kitaqnic へ移管） | `.org` `.info` `.xyz` `.online` `.site` `.tech` `.space` `.store` `.website` `.press` `.host` `.fun` `.icu` `.cyou` `.sbs` `.bond` `.cfd` `.art` `.build` `.ceo`（20）**重複なし** |
 | `domain:restore` | `POST /domains/{name}/restore` **あり**（openapi.json で確認。1 段階） | `POST /domains/{name}/restore` あり（1 段階） |
 | `rotate-auth-info` | `POST /domains/{name}/rotate-auth-info` あり | あり（「kitaqnic 拡張」と表記） |
 | launch 拡張 | なし | `LaunchApplicationRequest` / `LaunchApplicationResult` スキーマあり |
