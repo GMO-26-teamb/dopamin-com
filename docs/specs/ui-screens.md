@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.5（2026-08-27） |
+| 版 | v0.6（2026-08-27） |
 | 対応要件 | `docs/requirements.md` v0.1.11 §4 FR-01〜19、§9.2、§10.3、§11.3 / 11.4、§15 |
 | Figma | `UI Design (Team B)` — ページ **Prototype / Screens**（全画面・全状態、Standard、Present で遷移可）/ **Prototype / Screens (極ドパ)** / **Prototype / Flow**（遷移図）。コンポーネントは同ファイルのデザインシステム（Getting Started 参照） |
 | アセット | `docs/ui-design/*.png`（抜粋スクリーンショット） |
@@ -73,9 +73,9 @@
 | ID | ルート | 状態 | 表示 / 振る舞い | 使用コンポーネント |
 |---|---|---|---|---|
 | S-20 | `/domains/new` | 初期 | 入力パネル（「ニックネームまたはアプリ名 *」「用途・キーワード」「希望 TLD」（複数選択、既定: 全対応 TLD）「候補を考える」）+ Empty State（案内）+ 直接検索カード | Input, Button, Empty State, Card |
-| S-21 | `/domains/new` | AI 生成中 | ボタン「考え中…」Disabled、Skeleton Card ×6、注記「最大 10 秒」。完了で S-22、10 秒超 / `AI_UNAVAILABLE` / `RATE_LIMITED` で S-23 | Skeleton |
+| S-21 | `/domains/new` | AI 生成中 | ボタン「考え中…」Disabled、Skeleton Card ×6、注記「最大 20 秒」。完了で S-22、20 秒超 / `AI_UNAVAILABLE` / `RATE_LIMITED` で S-23 | Skeleton |
 | S-22 | `/domains/new` | 候補表示 | Candidate Card ×6。各カード: ドメイン名（TLD はブランド色）/ Rarity / Score Gauge（クリックで最も近い既存名 3 件と類似度を展開 = Similarity Row ×3）/ 理由（40 字、Caption）/ 空きバッジ / 操作。「登録へ」→ S-25、「もう一回考える」→ S-21（前回候補を除外）、「自分で入力して探す」→ S-24 | Candidate Card, Score Gauge, Similarity Row |
-| S-23 | `/domains/new` | AI エラー（AC-04-2） | Banner Warn。`REGISTRY_TIMEOUT`→「AI が 10 秒以内に応答しませんでした」、`AI_UNAVAILABLE`→「AI が利用できません。手入力で探せます」、`RATE_LIMITED`→「利用上限に達しました。n 秒後に再試行」。直接検索へ誘導。AI ログに記録 | Banner |
+| S-23 | `/domains/new` | AI エラー（AC-04-2） | Banner Warn。`REGISTRY_TIMEOUT`→「AI が 20 秒以内に応答しませんでした」、`AI_UNAVAILABLE`→「AI が利用できません。手入力で探せます」、`RATE_LIMITED`→「利用上限に達しました。n 秒後に再試行」。直接検索へ誘導。AI ログに記録 | Banner |
 | S-24 | `/domains/new` | 直接検索の結果 | S-20〜S-23 と同一 URL（直接検索カードの開閉と結果表示のみが変わる）。検索条件・結果は URL に載らない（画面内 state のため、リロード・URL 共有では復元されない）。入力は `SLD + TLD 複数選択` または FQDN（`.` を含む場合は FQDN として 1 件で check）。結果は Search Result Row（Available / Taken / Error）。読み込み中は行ごとに Skeleton + レジストリ名。部分失敗は「確認不可」+ 注記（AC-03-2）。「登録へ」→ S-25、「代替を見る」→ 別 TLD・綴り違いを展開、「再試行」→ 当該レジストリのみ再 check | Search Result Row, Score Gauge, Rarity |
 | S-25 | `/domains/new`（dialog） | 登録ダイアログ | Dialog / Register：空き（再確認済み）+ スコア + レア度（ゲージクリックで内訳）→ 期間 Select（helper に税込合計）→ NS・コンタクトは既定値表示 → 「お支払いへ」→ S-29。直前に check 再実行 | Dialog / Register |
 | S-29 | `/domains/new`（dialog） | お支払い（FR-19・モック） | 同じ Dialog 内でステップ切替。ご注文内容（Card + Key Value Row：品目 / 期間 / 単価 / 小計 / 消費税 10% / 税込合計 + Badge「固定ダミー価格」）→ カード入力（番号 / 有効期限 / CVC / 名義。デモ用カードが入力済み・AC-19-4）。「¥n を支払って登録する」→ 決済成立で `create` → S-26 /「戻る」→ S-25。入力エラーは欄ごとの warn helper、拒否は Banner Warn「お支払いに失敗しました」でダイアログは開いたまま（AC-19-3。`create` は呼ばない）。末尾 `0002` のカードで拒否を再現 | Dialog / Form, Card, Key Value Row, Input, Banner, Badge |
@@ -124,7 +124,7 @@
 |---|---|---|---|---|
 | S-40 | `/domains/[name]/subdomains` | 初期（`GET …/subdomain-plan` が 404） | ヘッダー（「設計を保存」「DNS に反映」Disabled）+ リポ URL 入力 + Empty State（案内）。S-26 / S-30 からの入口で保存済み設計が無い場合 | Input, Empty State |
 | S-40b | 同上 | 読み込み | 保存済み設計の取得中 Skeleton（`GET …/subdomain-plan`）。あれば S-43。Figma フレームなし（§4 の読み込み規則で表現） | Skeleton |
-| S-41 | 同上 | 解析中 | ボタン「解析中…」Disabled、Skeleton。GitHub 404 / 非公開 → S-42、AI 失敗（`AI_UNAVAILABLE` / timeout 15 秒）→ S-40 に戻り Banner Warn + 再試行 | Skeleton |
+| S-41 | 同上 | 解析中 | ボタン「解析中…」Disabled、Skeleton。GitHub 404 / 非公開 → S-42、AI 失敗（`AI_UNAVAILABLE` / timeout 30 秒）→ S-40 に戻り Banner Warn + 再試行 | Skeleton |
 | S-42 | 同上 | リポ取得失敗（AC-13-2） | Empty State Warn + 「プロジェクト概要」入力 → 「概要から提案」。GitHub レート制限（`RATE_LIMITED`）も同画面で文言差し替え | Empty State, Input |
 | S-43 | 同上 | 提案・編集（保存済み設計あり） | ツリー（Tree Root / Node with Show Status: 反映済み / 変更あり / 未反映）+ 編集パネル + 「DNS 反映」セクション + 手動設定用 Code Block | Tree Node, Card, Input, Badge, Code Block |
 | S-44 | 同上（dialog） | 反映確認（AC-13-7） | Dialog / Apply DNS：件数チップ → DNS Diff Row → NS 状態 → 「n 件を反映する」。キャンセル / Esc で S-43 に戻る（変更なし） | Dialog / Apply DNS, DNS Diff Row |
@@ -289,3 +289,4 @@ Figma **Prototype / Screens** にプロトタイプ接続を設定済み（Prese
 | v0.3 | 2026-08-26 | S-13 を `POST /domains/sync` の部分失敗契約（200 + `failures[]`、PR #136）に合わせて更新。§7 #2 / #3 は requirements v0.1.8 で解決 |
 | v0.4 | 2026-08-26 | FR-19（requirements v0.1.11）のモック決済を反映: **S-29**（登録のお支払い）/ **D-11**（更新のお支払い）を追加、S-25 / D-01 の主ボタンを「お支払いへ」に変更、S-26 の本文に支払い控え、S-28 の Banner 本文を支払い前提に更新、D-04 に `RESTORE_FEE` 参照を明記、遷移図に決済分岐を追加。詳細は `docs/specs/payment-mock.md` |
 | v0.5 | 2026-08-27 | 実装との乖離を修正: §1 の幅 / サイドバーを実装の 1280px / 224px（rem 基準・大画面で font-size 拡大）と `MobileNav` に合わせ、S-24 のルートを `/domains/new`（検索条件は URL に載らない）に訂正、S-10 / S-13 / §4 の「Stale」を実装の「未同期」バッジ表記に統一、§7 #6 の仮置きを現状に更新 |
+| v0.6 | 2026-08-27 | AI の時間制限の緩和（requirements v0.1.22）に追随: S-21 / S-23 の「10 秒」を「20 秒」、S-41 の「15 秒」を「30 秒」に更新。画面と状態そのものは変えていない |

@@ -257,12 +257,12 @@ describe("toErrorCopy", () => {
     const copy = toErrorCopy(
       new ApiClientError({
         code: "REGISTRY_TIMEOUT",
-        message: "AI が 10 秒以内に応答しませんでした。",
+        message: "AI が 20 秒以内に応答しませんでした。",
         origin: "ai",
       }),
     );
     expect(copy.title).toBe("AI が応答しませんでした");
-    expect(copy.body).toContain("AI が 10 秒以内に応答しませんでした");
+    expect(copy.body).toContain("AI が 20 秒以内に応答しませんでした");
     // 手入力の導線は必ず残す
     expect(copy.body).toContain("手入力で探せます");
     // FR-18 のレジストリ向けの 1 文は出さない

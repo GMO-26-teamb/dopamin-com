@@ -40,9 +40,9 @@ sequenceDiagram
   participant DB as subdomain_plans / dns_records
 
   W->>R: POST /domains/:name/subdomain-plan { repoUrl? , description? }
-  R->>G: fetchRepoSummary（4 秒上限・zod 検証）
+  R->>G: fetchRepoSummary（8 秒上限・zod 検証）
   G-->>R: RepoSummary / GithubUnavailableError
-  R->>AI: runStructured(subdomain_plan, subdomainProposalSchema)（10 秒上限）
+  R->>AI: runStructured(subdomain_plan, subdomainProposalSchema)（20 秒上限）
   AI-->>W: 提案（保存しない）
   W->>R: PUT /domains/:name/subdomain-plan（編集後）
   R->>DB: upsert（UNIQUE(domain_id)）
@@ -80,7 +80,8 @@ sequenceDiagram
   `RATE_LIMITED` に寄せている）。README / マニフェストの 404 は解析を止めない。
 - README の切り出しは **UTF-8 の文字境界まで戻す**。素朴にバイトで切ると多バイト文字が分断されて
   U+FFFD に置き換わり、かえって 8KB を超える。
-- 全体の上限は 4 秒。AI の 10 秒と合わせて AC-13-1 の 15 秒に収める。
+- 全体の上限は 8 秒。AI の 20 秒と合わせて AC-13-1 の 30 秒に収める。当初は 4 秒 + 10 秒 = 15 秒だったが、
+  上限に収まらず解析を通せない公開リポジトリが実在したため、両方を 2 倍にした（requirements v0.1.22）。
 
 ### 2.3 保存と反映状態（#69）
 
@@ -176,7 +177,7 @@ Error Card で返るだけ、という割れ方をしていた（#187 で表面�
 
 ## 6. 受け入れ条件
 
-- [x] AC-13-1: 提案表示まで 15 秒以内（GitHub 4 秒 + AI 10 秒の上限で担保）
+- [x] AC-13-1: 提案表示まで 30 秒以内（GitHub 8 秒 + AI 20 秒の上限で担保）
 - [x] AC-13-2: 取得できないリポジトリは「取得できません」。概要テキストがあれば提案できる
 - [x] AC-13-3: 保存 → 再取得 → 再編集できる
 - [x] AC-13-4: 反映後の `GET /dns` が設計と一致し、バッジが `applied` になる
@@ -211,3 +212,4 @@ Error Card で返るだけ、という割れ方をしていた（#187 で表面�
 | v0.1 | 2026-08-27 | 初版（#36 / #68 / #69 / #70 の実装に合わせて起票） |
 | v0.2 | 2026-08-27 | §3 を「Web の配線」に広げ、`NEXT_PUBLIC_API_MODE=http` での ViewModel 写像（ホスト名 = ID / `applyState` → `applyStatus` / `nameserversSwitched` を `appliedAt` から導く / 差分の用途・重要度の補完 / apply 後の取り直し / 未保存の 404 → null）と提案の失敗の相手分けを追記。§7 に web の契約テスト行。#187 |
 | v0.3 | 2026-08-27 | §3.1 に保存前の入力検証を追加（契約を満たさない設計はサーバーに投げず欄で直させる）。判定に使う上限を `packages/shared` の定数として切り出し、画面が数値を二重に持たないようにした。#187 |
+| v0.4 | 2026-08-27 | リポジトリ解析の時間制限を 2 倍に緩和。`GITHUB_FETCH_TIMEOUT_MS` 4 → 8 秒、`AI_CALL_TIMEOUT_MS` 10 → 20 秒とし、§2.2 / §2 の図・AC-13-1 の内訳を「GitHub 8 秒 + AI 20 秒 = 30 秒以内」に更新（requirements v0.1.22）。上限が厳しく解析を通せない公開リポジトリが実在したため。#199（thinking を絞って 10 秒予算を守る案）とは別方針で、上限そのものを引き上げている |

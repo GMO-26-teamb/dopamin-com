@@ -62,13 +62,13 @@ sequenceDiagram
 - **プロバイダの生成**: `createGoogleGenerativeAI({ apiKey })` / `createAnthropic({ apiKey })` に
   `aiProviderApiKey()` で取った値を渡す。SDK 既定のシングルトン（環境変数を自分で読む）は使わない
   ——キーの出所を zod 検証済みの `getApiEnv()` 1 か所に固定するため（NFR-03 / NFR-05）。
-- **タイムアウトはプロバイダを待つ合計 10 秒**（§13.1）。予算に積むのは AI 呼び出しの実時間だけで、
+- **タイムアウトはプロバイダを待つ合計 20 秒**（§13.1）。予算に積むのは AI 呼び出しの実時間だけで、
   `ai_logs` の書き込み待ち（最大 3 秒）は含めない——含めると DB が遅いだけで残り予算が尽き、
   AI とは無関係の理由でフォールバックが消えてしまうため。`AbortSignal.timeout()` ではなく
   `Promise.race` + `AbortController` で実装する。理由: (a) 偽タイマーで検証できる
   （リポの `recordOperationLog` と同じ流儀）、(b) 打ち切りと同時に HTTP も中断できる。
   `maxRetries: 0` を明示し、再試行は SDK 内部ではなく本モジュールのフォールバック 1 回に寄せる
-  （SDK 既定の 2 回はバックオフで 10 秒の予算をプロバイダ 1 つで使い切る）。
+  （SDK 既定の 2 回はバックオフで 20 秒の予算をプロバイダ 1 つで使い切る）。
 - **フォールバックは 1 回だけ**。発火条件をすべて満たすとき: (a) 本命が失敗した、
   (b) `settings.providers` が 2 件（= 両プロバイダのキーがある。§13.1「両方有効な場合」）、
   (c) 残り予算が `AI_FALLBACK_MIN_BUDGET_MS`（1 秒）以上。
@@ -127,7 +127,7 @@ sequenceDiagram
 - [x] AC-14-1: すべての AI 呼び出しが成功・失敗を問わず記録される（試行 1 回 = 1 行）
 - [x] AC-14-2: プロンプト全文ではなく要約 + 構造化出力を保存する
 - [x] §13.1: 生成は `generateObject`（zod スキーマ必須）のみ。自由文生成をしない
-- [x] §13.1: 上限 10 秒、失敗時は 1 回だけ別プロバイダにフォールバック（両方有効な場合）
+- [x] §13.1: 上限 20 秒、失敗時は 1 回だけ別プロバイダにフォールバック（両方有効な場合）
 - [x] §13.1: 出力を zod で再検証してから返す
 - [x] `AI_UNAVAILABLE`（503）/ `RATE_LIMITED`（429）に変換される
 - [x] 記録の失敗が AI 呼び出し・API 応答を壊さない
@@ -138,7 +138,7 @@ sequenceDiagram
 | 種別 | 内容 |
 |---|---|
 | unit | `apps/api/test/services/ai-log.test.ts`（行マッピング・要約 200 字・error_message 300 字・console 行・INSERT の上限時間） |
-| 契約 / 統合 | `apps/api/test/lib/ai-provider.test.ts`（実効設定、成功・失敗の記録、フォールバックの発火条件と 1 回制限、合計 10 秒、429 → RATE_LIMITED、出力不正 → AI_UNAVAILABLE、生文言の非漏洩、記録失敗の握りつぶし）。プロバイダは `setAiModelFactoryForTesting` + `ai/test` の `MockLanguageModelV4` で差し替え、`ai_logs` は pglite の実 DB で確認する |
+| 契約 / 統合 | `apps/api/test/lib/ai-provider.test.ts`（実効設定、成功・失敗の記録、フォールバックの発火条件と 1 回制限、合計 20 秒、429 → RATE_LIMITED、出力不正 → AI_UNAVAILABLE、生文言の非漏洩、記録失敗の握りつぶし）。プロバイダは `setAiModelFactoryForTesting` + `ai/test` の `MockLanguageModelV4` で差し替え、`ai_logs` は pglite の実 DB で確認する |
 | 手動 | `GOOGLE_GENERATIVE_AI_API_KEY` を入れて #66 の候補生成を叩き、`SELECT * FROM ai_logs` に行が入ること。キーを外して 503 になること |
 
 ## 8. 未決事項・要確認
@@ -146,7 +146,7 @@ sequenceDiagram
 | # | 事項 | 本書の仮置き | 選択肢 |
 |---|---|---|---|
 | 1 | `resolveEmbeddingModel()`（issue #65 と §13.1 のコード例に記載） | **実装しない**。§13.3 で埋め込みは不採用（ADR-0003）で、他に埋め込みを要する機能が無い | §13.1 のコード例と `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` env の削除は別 issue に切る |
-| 2 | 「タイムアウト 10 秒」の適用範囲（1 試行あたりか合計か）が §13.1 で未定義 | **プロバイダを待つ合計で 10 秒**。API の応答が 20 秒になるのを避け、#66 の「10 秒超で AI_UNAVAILABLE」とも揃う。記録の書き込み待ちは予算外なので、呼び出し側の実待ち時間は最大 10 秒 + INSERT 上限 3 秒 | 1 試行あたり 10 秒（タイムアウト時もフォールバックできるが最悪 20 秒） |
+| 2 | 「タイムアウト」の適用範囲（1 試行あたりか合計か）が §13.1 で未定義 | **プロバイダを待つ合計**（当初 10 秒。requirements v0.1.22 で 20 秒に緩和）。API の応答が上限の 2 倍になるのを避け、#66 の「上限超で AI_UNAVAILABLE」とも揃う。記録の書き込み待ちは予算外なので、呼び出し側の実待ち時間は最大 20 秒 + INSERT 上限 3 秒 | 1 試行あたり上限（タイムアウト時もフォールバックできるが最悪 2 倍） |
 | 3 | `generateObject` は AI SDK v7 で deprecated（後継は `generateText` + `Output.object`） | §13.1 の文言どおり `generateObject` を使う。lint も通る | 後継 API へ移行する（`callProvider` 1 か所の差し替えで済む） |
 | 4 | `ai_logs.user_id` が NOT NULL（#35） | `runStructured` は `user` を必須の明示引数にする。`operation_logs` と違い ALS からは `requestId` しか読まない | システム起点の AI 呼び出しが必要になったら NULL 可に変更する |
 | 5 | ログの保持期間・容量制御 | 無期限（削除しない）。`operation_logs` と同じ扱い | TTL / アーカイブは運用が固まってから要件化 |
@@ -159,3 +159,4 @@ sequenceDiagram
 |---|---|---|
 | v0.1 | 2026-08-26 | 初版（#65）。プロバイダ抽象化・合計 10 秒・1 回フォールバック・再検証・`ai_logs` 記録を確定 |
 | v0.1.1 | 2026-08-27 | 実装との乖離を修正。`ai_logs` のマイグレーションを採番し直し後の `0007_blue_living_lightning.sql`（#35 / 2775731）に合わせた |
+| v0.1.2 | 2026-08-27 | `AI_CALL_TIMEOUT_MS` を 10 → 20 秒に緩和（requirements v0.1.22 / §13.1）。合計で測る・記録の書き込み待ちは予算外、という設計は不変で、値だけが 2 倍になった。§8 #2 の決定も値を追記して現状に揃えた |

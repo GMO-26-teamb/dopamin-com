@@ -535,7 +535,7 @@ describe("runStructured（§13.1 呼び出し / AC-14-1・AC-14-2 記録）", ()
   });
 });
 
-describe("runStructured のタイムアウト（§13.1 10 秒）", () => {
+describe("runStructured のタイムアウト（§13.1 20 秒）", () => {
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -557,19 +557,19 @@ describe("runStructured のタイムアウト（§13.1 10 秒）", () => {
     const assertion = expect(pending).rejects.toMatchObject({
       code: "AI_UNAVAILABLE",
     });
-    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.advanceTimersByTimeAsync(20_000);
     await assertion;
 
     expect(values).toHaveBeenCalledWith(
       expect.objectContaining({
         status: "error",
-        errorMessage: "AI が 10000ms 以内に応答しませんでした",
-        latencyMs: 10_000,
+        errorMessage: "AI が 20000ms 以内に応答しませんでした",
+        latencyMs: 20_000,
       }),
     );
   });
 
-  it("本命が予算を使い切ったらフォールバックしない（合計 10 秒を守る）", async () => {
+  it("本命が予算を使い切ったらフォールバックしない（合計 20 秒を守る）", async () => {
     const env = envWithBothKeys();
     const factory = useModels(() => hangingModel());
     const values = vi.fn().mockResolvedValue(undefined);
@@ -585,7 +585,7 @@ describe("runStructured のタイムアウト（§13.1 10 秒）", () => {
     const assertion = expect(pending).rejects.toMatchObject({
       code: "AI_UNAVAILABLE",
     });
-    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.advanceTimersByTimeAsync(20_000);
     await assertion;
 
     // 両プロバイダ有効でも 2 回目は始めない（始めても即打ち切りになるだけ）
@@ -597,7 +597,7 @@ describe("runStructured のタイムアウト（§13.1 10 秒）", () => {
     const env = envWithBothKeys();
     const factory = useModels((attempt) =>
       attempt.provider === "google"
-        ? failingModel(new Error("google down"), 6_200)
+        ? failingModel(new Error("google down"), 16_200)
         : respondingModel({ names: ["dopamin.dev"] }),
     );
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -613,9 +613,9 @@ describe("runStructured のタイムアウト（§13.1 10 秒）", () => {
       settings: defaultSettings(env),
       db: stuckDb,
     });
-    // google 失敗まで 6.2 秒 + 記録待ち 3 秒 = 9.2 秒。予算に記録待ちを含めると
+    // google 失敗まで 16.2 秒 + 記録待ち 3 秒 = 19.2 秒。予算に記録待ちを含めると
     // 残り 0.8 秒となってフォールバックが打ち切られてしまう
-    await vi.advanceTimersByTimeAsync(20_000);
+    await vi.advanceTimersByTimeAsync(40_000);
 
     await expect(pending).resolves.toEqual({ names: ["dopamin.dev"] });
     expect(factory).toHaveBeenCalledTimes(2);
