@@ -21,6 +21,7 @@ import { upsertDomainFromInfo } from "./domain.service";
 import { getDomainStore } from "./domain-store";
 import {
   getTransferStore,
+  type TransferPatch,
   type TransferRecord,
   type TransferStore,
 } from "./transfer-store";
@@ -160,7 +161,16 @@ export async function recordInboundTransferRequest(
 
   const existing = await store.findPending(result.name, "in");
   if (existing && existing.userId === userId) {
-    const updated = await store.update(existing.id, values);
+    // 申請起点の行なので registryMessageId は常に null（§9.1）。patch には含めない
+    const patch: TransferPatch = {
+      status: values.status,
+      registryStatus: values.registryStatus,
+      counterpartRegistrarId: values.counterpartRegistrarId,
+      requestedAt: values.requestedAt,
+      actByAt: values.actByAt,
+      raw: values.raw,
+    };
+    const updated = await store.update(existing.id, patch);
     return updated ?? existing;
   }
   return store.create(values);
@@ -191,8 +201,37 @@ export async function recordOutboundTransferRequest(
     }
   }
 
+  const existing = await store.findPending(result.name, "out");
+  if (existing && existing.userId === userId) {
+    // 既存行は「応答に載っている値」だけの差分更新にする。`transferQuery` 由来の
+    // 再検知（kitaq は requestedAt / actByAt を返さない）が、Poll 由来の正しい
+    // 期限や冪等キーを now 基準のフォールバックや null で潰さないため（#58）。
+    const counterpart = counterpartRegistrarId(result, adapter.registrarId);
+    const patch: TransferPatch = {
+      ...(result.registryStatus !== undefined
+        ? { registryStatus: result.registryStatus }
+        : {}),
+      ...(counterpart !== null ? { counterpartRegistrarId: counterpart } : {}),
+      ...(options.domainId !== undefined && options.domainId !== null
+        ? { domainId: options.domainId }
+        : {}),
+      ...(registryMessageId !== null ? { registryMessageId } : {}),
+      ...(result.requestedAt !== undefined
+        ? { requestedAt: new Date(result.requestedAt) }
+        : {}),
+      ...(result.actByAt !== undefined
+        ? { actByAt: new Date(result.actByAt) }
+        : result.requestedAt !== undefined
+          ? { actByAt: transferAutoApproveAt(result.requestedAt, null) }
+          : {}),
+      raw: result.raw,
+    };
+    const updated = await store.update(existing.id, patch);
+    return updated ?? existing;
+  }
+
   const requestedAt = result.requestedAt ? new Date(result.requestedAt) : now;
-  const values = {
+  return store.create({
     userId,
     domainId: options.domainId ?? null,
     domainName: result.name,
@@ -206,14 +245,7 @@ export async function recordOutboundTransferRequest(
     actByAt: transferAutoApproveAt(requestedAt, result.actByAt ?? null),
     completedAt: null,
     raw: result.raw,
-  };
-
-  const existing = await store.findPending(result.name, "out");
-  if (existing && existing.userId === userId) {
-    const updated = await store.update(existing.id, values);
-    return updated ?? existing;
-  }
-  return store.create(values);
+  });
 }
 
 /**

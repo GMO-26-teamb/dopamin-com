@@ -1,13 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { MockRegistryAdapter } from "@dopamin/registry";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   counterpartRegistrarId,
   isApprovedByInfo,
+  recordOutboundTransferRequest,
   toTransferSummary,
   transferDirectionOf,
 } from "../../src/services/transfer.service";
-import type { TransferRecord } from "../../src/services/transfer-store";
+import {
+  createInMemoryTransferStore,
+  setTransferStoreForTesting,
+  type TransferRecord,
+} from "../../src/services/transfer-store";
 
-/** 移管サービスの純粋関数（FR-12 / §6.5 / §9.1 / ADR-0002）。 */
+/** 移管サービスの純粋関数と行の記録（FR-12 / §6.5 / §9.1 / ADR-0002）。 */
 
 const SELF = "MOCK-REGISTRAR";
 const FOREIGN = "MOCK-FOREIGN";
@@ -170,5 +176,113 @@ describe("isApprovedByInfo（§6.5 の承認検知）", () => {
         { requestedAt: null, actByAt: WINDOW.actByAt },
       ),
     ).toBe(false);
+  });
+});
+
+describe("recordOutboundTransferRequest の既存 pending 行の更新（#58 / §9.1）", () => {
+  afterEach(() => {
+    setTransferStoreForTesting(null);
+  });
+
+  it("日時を持たない transferQuery 由来の更新では requestedAt / actByAt / registryMessageId を保持する", async () => {
+    setTransferStoreForTesting(createInMemoryTransferStore());
+    const adapter = new MockRegistryAdapter();
+
+    // Poll の transfer_request 由来（正しい期限・メッセージ ID 付き）で行を作る
+    const created = await recordOutboundTransferRequest(
+      "user-1",
+      adapter,
+      {
+        name: "move.example",
+        status: "pending",
+        requestedAt: "2026-08-26T00:00:00.000Z",
+        actByAt: "2026-08-26T00:20:00.000Z",
+        raw: { source: "poll" },
+      },
+      { domainId: "domain-1", registryMessageId: "101" },
+      new Date("2026-08-26T00:00:05.000Z"),
+    );
+
+    // `POST /domains/sync` の transferQuery 由来（kitaq は日時を返さない）で同じ行を再検知
+    const updated = await recordOutboundTransferRequest(
+      "user-1",
+      adapter,
+      { name: "move.example", status: "pending", raw: { source: "query" } },
+      { domainId: "domain-1" },
+      new Date("2026-08-26T00:10:00.000Z"),
+    );
+
+    expect(updated.id).toBe(created.id);
+    // 期限が sync 時刻基準に化けると、実際のサーバ自動承認より遅い期限を表示してしまう
+    expect(updated.requestedAt?.toISOString()).toBe("2026-08-26T00:00:00.000Z");
+    expect(updated.actByAt?.toISOString()).toBe("2026-08-26T00:20:00.000Z");
+    // 冪等キー（§9.1）は patch の対象外。null で消してはいけない
+    expect(updated.registryMessageId).toBe("101");
+    // 最新の応答での上書き自体は行われている
+    expect(updated.raw).toEqual({ source: "query" });
+  });
+
+  it("日時を持つ Poll 由来の更新は既存行に反映される", async () => {
+    setTransferStoreForTesting(createInMemoryTransferStore());
+    const adapter = new MockRegistryAdapter();
+
+    // sync 検知が先行したケース: 日時が取れず now 基準のフォールバックで行ができている
+    const created = await recordOutboundTransferRequest(
+      "user-1",
+      adapter,
+      { name: "move.example", status: "pending", raw: { source: "query" } },
+      { domainId: "domain-1" },
+      new Date("2026-08-26T00:10:00.000Z"),
+    );
+
+    // 後から届いた Poll の transfer_request は正しい期限とメッセージ ID を持つ
+    const updated = await recordOutboundTransferRequest(
+      "user-1",
+      adapter,
+      {
+        name: "move.example",
+        status: "pending",
+        requestedAt: "2026-08-26T00:00:00.000Z",
+        actByAt: "2026-08-26T00:20:00.000Z",
+        raw: { source: "poll" },
+      },
+      { domainId: "domain-1", registryMessageId: "101" },
+      new Date("2026-08-26T00:11:00.000Z"),
+    );
+
+    expect(updated.id).toBe(created.id);
+    expect(updated.requestedAt?.toISOString()).toBe("2026-08-26T00:00:00.000Z");
+    expect(updated.actByAt?.toISOString()).toBe("2026-08-26T00:20:00.000Z");
+    expect(updated.registryMessageId).toBe("101");
+  });
+
+  it("requestedAt だけ持つ更新では actByAt を申請 + 20 分で導出する（§9.2）", async () => {
+    setTransferStoreForTesting(createInMemoryTransferStore());
+    const adapter = new MockRegistryAdapter();
+
+    await recordOutboundTransferRequest(
+      "user-1",
+      adapter,
+      { name: "move.example", status: "pending", raw: { source: "query" } },
+      { domainId: "domain-1" },
+      new Date("2026-08-26T00:10:00.000Z"),
+    );
+
+    // kitaqsign は acDate を返さない: reDate（requestedAt）だけの Poll 応答
+    const updated = await recordOutboundTransferRequest(
+      "user-1",
+      adapter,
+      {
+        name: "move.example",
+        status: "pending",
+        requestedAt: "2026-08-26T00:00:00.000Z",
+        raw: { source: "poll" },
+      },
+      { domainId: "domain-1", registryMessageId: "102" },
+      new Date("2026-08-26T00:11:00.000Z"),
+    );
+
+    expect(updated.requestedAt?.toISOString()).toBe("2026-08-26T00:00:00.000Z");
+    expect(updated.actByAt?.toISOString()).toBe("2026-08-26T00:20:00.000Z");
   });
 });

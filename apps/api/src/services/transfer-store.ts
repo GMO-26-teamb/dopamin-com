@@ -45,6 +45,11 @@ export interface TransferPatch {
   registryStatus?: string | null;
   counterpartRegistrarId?: string | null;
   domainId?: string | null;
+  /**
+   * 取り込み元の Poll メッセージ ID を後から紐づける（§9.1 の冪等キー）。
+   * 消す操作は無いので null は取らない（値の設定のみ）。
+   */
+  registryMessageId?: string;
   requestedAt?: Date | null;
   actByAt?: Date | null;
   completedAt?: Date | null;
