@@ -62,7 +62,7 @@ export interface TransferSectionsProps {
   busy?: boolean;
   /** S-53（更新エラー）。承認 / 拒否 / 取消だけを止め、再照会の導線は残す */
   updateFailed?: boolean;
-  /** 「状態を確認」/「再試行」実行中の transfer id */
+  /** 「最新化」/「再試行」実行中の transfer id */
   recheckingId?: string | null;
   onApprove: (transfer: Transfer) => void;
   onReject: (transfer: Transfer) => void;

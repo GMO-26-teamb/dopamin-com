@@ -660,7 +660,7 @@ describe("transfers.list（GET /transfers）", () => {
   });
 });
 
-describe("transfers.refresh（S-50「状態を更新」）", () => {
+describe("transfers.refresh（S-50「最新化」）", () => {
   it("GET /transfers を叩き直す（Poll 消化 + transferQuery はサーバ側で走る）", async () => {
     stubFetch(200, {
       inbound: [],

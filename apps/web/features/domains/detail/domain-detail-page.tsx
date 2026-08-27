@@ -91,7 +91,7 @@ export function DomainDetailPage({ name }: DomainDetailPageProps) {
 
   // S-32 / D-06: 承認 / 拒否の対象。詳細の `transfer` には id が無いので一覧から引く。
   // 一覧が落ちていると id が取れず承認 / 拒否を実行できないので、詳細画面から
-  // 一覧を取り直せるようにしてある（操作パネルの「申請を取得」・#212）
+  // 一覧を取り直せるようにしてある（操作パネルの「申請を最新化」・#212）
   const pendingTransfer =
     transfersQuery.data?.find(
       (transfer) =>
@@ -198,7 +198,7 @@ export function DomainDetailPage({ name }: DomainDetailPageProps) {
   const showActions =
     domain.displayStatus !== "transferred_out" &&
     domain.displayStatus !== "pending_delete";
-  // カード内の「変更」は D-02 を開く近道なので、情報修正そのものが通らない状態
+  // カード内の「情報修正」は D-02 を開く近道なので、情報修正そのものが通らない状態
   // （キャッシュ表示・移管申請中・RGP など）では出さない。押せない理由は
   // 操作パネルの「情報修正」に 1 か所だけ出す
   const editable = showActions && operationState(domain, "update").allowed;
@@ -305,7 +305,7 @@ export function DomainDetailPage({ name }: DomainDetailPageProps) {
             { period },
             settle(
               "renew",
-              `${domain.name} の有効期限を延長しました（お支払い ${formatJpy(receipt.amount)}・受付 ${receipt.id}・モック）`,
+              `${domain.name} の有効期限を更新しました（お支払い ${formatJpy(receipt.amount)} · 受付 ${receipt.id} · モック）`,
             ),
           )
         }
@@ -324,7 +324,7 @@ export function DomainDetailPage({ name }: DomainDetailPageProps) {
         onSubmit={(input: DomainUpdateInput) =>
           update.mutate(
             input,
-            settle("ns-edit", `${domain.name} の情報を更新しました`),
+            settle("ns-edit", `${domain.name} の情報を修正しました`),
           )
         }
         open={dialog === "ns-edit"}

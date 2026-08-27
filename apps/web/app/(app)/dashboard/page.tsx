@@ -77,7 +77,7 @@ export default function DashboardPage() {
     ? "読み込み中…"
     : domains.isError
       ? undefined
-      : `${list.length}件${syncedMeta}`;
+      : `${list.length} 件${syncedMeta}`;
 
   let content: ReactNode;
   if (domains.isPending) {
@@ -107,7 +107,7 @@ export default function DashboardPage() {
             <Link href="/transfers">移管で持ち込む</Link>
           </Button>
         }
-        title="まだドメインがありません"
+        title="ドメインはまだありません"
       />
     );
   } else {

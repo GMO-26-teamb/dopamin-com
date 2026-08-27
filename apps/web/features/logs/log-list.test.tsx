@@ -94,7 +94,7 @@ describe("LogList", () => {
       screen.getByRole("list", { name: "操作ログ" }).children,
     ).toHaveLength(3);
     expect(
-      screen.getByRole("button", { name: "もっと見る（残り 2 件）" }),
+      screen.getByRole("button", { name: "もっと見る（残 2 件）" }),
     ).toBeInTheDocument();
   });
 
@@ -117,7 +117,7 @@ describe("LogList", () => {
     expect(list.children).toHaveLength(3);
 
     await user.click(
-      screen.getByRole("button", { name: "もっと見る（残り 2 件）" }),
+      screen.getByRole("button", { name: "もっと見る（残 2 件）" }),
     );
 
     expect(

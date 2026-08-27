@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown } from "lucide-react";
+import { Check, ChevronDown, TriangleAlert } from "lucide-react";
 import { type ReactNode, useId } from "react";
 import { Badge } from "@/components/ui/badge";
 import { CodeBlock } from "@/components/ui/code-block";
@@ -114,44 +114,59 @@ export function LogRow({
 
   return (
     <li className="flex w-full flex-col">
+      {/*
+        Figma の 6 列は合計 600px を超えるので、`lg` 未満では 2 行に折る（#95）。
+        `lg` で 2 つのラッパーを `display: contents` に落とすと、子が親の flex に
+        直接並ぶので、`order-*` で Figma の列順（日時 / コマンド / レジストリ /
+        対象 / 結果 / レイテンシ）に戻せる。
+      */}
       <button
         aria-expanded={expanded}
-        className="flex w-full items-center gap-2 border-soft border-b border-solid py-1.5 text-left transition-colors hover:bg-hover"
+        className="flex w-full flex-col gap-1 border-soft border-b border-solid py-1.5 text-left transition-colors hover:bg-hover lg:flex-row lg:items-center lg:gap-2"
         onClick={onToggle}
         type="button"
         {...(expanded ? { "aria-controls": detailId } : {})}
       >
-        <span className="w-27.5 shrink-0 truncate text-caption text-muted">
-          {time}
+        <span className="flex w-full min-w-0 items-center gap-2 lg:contents">
+          <span className="order-1 shrink-0 truncate text-caption text-muted lg:w-27.5">
+            {time}
+          </span>
+          <span className="order-2 min-w-0 flex-1 truncate text-code-label text-ink lg:w-40 lg:flex-none">
+            {command}
+          </span>
+          {/* Figma の各列は overflow-clip。長い結果コードで隣の列を押し出さない */}
+          <span className="order-5 flex shrink-0 items-center overflow-hidden lg:w-27.5">
+            <Badge
+              icon={result.tone === "ok" ? <Check /> : <TriangleAlert />}
+              tone={result.tone}
+            >
+              {result.label}
+            </Badge>
+          </span>
+          <ChevronDown
+            aria-hidden="true"
+            className={cn(
+              "order-7 size-4 shrink-0 text-muted transition-transform motion-reduce:transition-none",
+              expanded && "rotate-180",
+            )}
+          />
         </span>
-        <span className="w-40 shrink-0 truncate text-code-label text-ink">
-          {command}
+        <span className="flex w-full min-w-0 items-center gap-2 lg:contents">
+          <span className="order-3 shrink-0 truncate text-caption text-muted lg:w-37.5">
+            {source}
+          </span>
+          <span
+            className={cn(
+              "order-4 min-w-0 flex-1 truncate text-body-sm text-ink",
+              targetClassName,
+            )}
+          >
+            {target}
+          </span>
+          <span className="order-6 shrink-0 truncate text-caption text-muted lg:w-17.5">
+            {latency}
+          </span>
         </span>
-        <span className="w-37.5 shrink-0 truncate text-caption text-muted">
-          {source}
-        </span>
-        <span
-          className={cn(
-            "min-w-0 flex-1 truncate text-body-sm text-ink",
-            targetClassName,
-          )}
-        >
-          {target}
-        </span>
-        {/* Figma の各列は overflow-clip。長い結果コードで隣の列を押し出さない */}
-        <span className="flex w-27.5 shrink-0 items-center overflow-hidden">
-          <Badge tone={result.tone}>{result.label}</Badge>
-        </span>
-        <span className="w-17.5 shrink-0 truncate text-caption text-muted">
-          {latency}
-        </span>
-        <ChevronDown
-          aria-hidden="true"
-          className={cn(
-            "size-4 shrink-0 text-muted transition-transform motion-reduce:transition-none",
-            expanded && "rotate-180",
-          )}
-        />
       </button>
       {expanded ? (
         <div

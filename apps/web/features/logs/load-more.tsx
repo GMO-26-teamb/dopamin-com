@@ -53,7 +53,7 @@ export function LoadMore({ remaining, onClick }: LoadMoreProps) {
       size="sm"
       variant="outline"
     >
-      もっと見る（残り {remaining} 件）
+      もっと見る（残 {remaining} 件）
     </Button>
   );
 }

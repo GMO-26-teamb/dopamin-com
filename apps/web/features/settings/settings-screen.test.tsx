@@ -83,7 +83,9 @@ describe("SettingsScreen", () => {
     expect(screen.getByText("パスキー管理")).toBeInTheDocument();
     // me に依存する 2 枚だけが骨組み
     expect(document.querySelector('[aria-busy="true"]')).not.toBeNull();
-    expect(screen.queryByRole("button", { name: "リセット実行" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "デモデータをリセット" }),
+    ).toBeNull();
     expect(screen.queryByRole("combobox", { name: "モデル" })).toBeNull();
 
     // パスキーは me を待たずに取得が進む
@@ -173,21 +175,23 @@ describe("SettingsScreen", () => {
 
     expect(await screen.findByText("AI 設定")).toBeInTheDocument();
     expect(screen.queryByText("デモデータリセット")).toBeNull();
-    expect(screen.queryByRole("button", { name: "リセット実行" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "デモデータをリセット" }),
+    ).toBeNull();
   });
 
   it("D-10 は「reset」の再入力が一致するまで実行できず、成功したら S-71 の Banner Ok を出す", async () => {
     renderScreen(mockScenario("default"));
 
     await user().click(
-      await screen.findByRole("button", { name: "リセット実行" }),
+      await screen.findByRole("button", { name: "デモデータをリセット" }),
     );
 
     const dialog = await screen.findByRole("dialog", {
       name: "デモデータをリセットしますか？",
     });
     const confirm = within(dialog).getByRole("button", {
-      name: "リセット実行",
+      name: "リセットする",
     });
     expect(confirm).toBeDisabled();
 
@@ -210,7 +214,7 @@ describe("SettingsScreen", () => {
     renderScreen(mockScenario("error"));
 
     await user().click(
-      await screen.findByRole("button", { name: "リセット実行" }),
+      await screen.findByRole("button", { name: "デモデータをリセット" }),
     );
     const dialog = await screen.findByRole("dialog", {
       name: "デモデータをリセットしますか？",
@@ -220,7 +224,7 @@ describe("SettingsScreen", () => {
       "reset",
     );
     await user().click(
-      within(dialog).getByRole("button", { name: "リセット実行" }),
+      within(dialog).getByRole("button", { name: "リセットする" }),
     );
 
     const alert = await screen.findByRole("alert");

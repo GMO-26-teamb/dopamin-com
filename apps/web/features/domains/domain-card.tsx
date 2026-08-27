@@ -20,7 +20,11 @@ import {
   remainingPercent,
 } from "./format";
 import { REGISTRY_LABEL } from "./registry-label";
-import { statusBadgeTone, statusBadgeVariant } from "./status-badge";
+import {
+  statusBadgeTone,
+  statusBadgeVariant,
+  statusLabel,
+} from "./status-badge";
 
 /**
  * Figma: Domain Card `58:132`（S-10 `80:5548` / S-13 `80:5713`）
@@ -126,7 +130,7 @@ interface CardPresentation {
 }
 
 /**
- * 「2027-07-23 · 残330日」。
+ * 「2027-07-23 · 残 330 日」。
  * 残日数はバッジではなく Meta のこの 1 箇所だけに出す（バッジは状態名だけ・#216）。
  */
 function expiryMeta(domain: DomainSummary, now: Date): string {
@@ -135,7 +139,7 @@ function expiryMeta(domain: DomainSummary, now: Date): string {
   }
   const remaining = daysUntil(domain.expiresAt, now);
   const date = formatDate(domain.expiresAt);
-  return remaining === null ? date : `${date} · 残${remaining}日`;
+  return remaining === null ? date : `${date} · 残 ${remaining} 日`;
 }
 
 /** 「つながりません · 2027-07-23」。状態の意味を先に、有効期限を後ろに置く。 */
@@ -179,18 +183,20 @@ function present(
         meta:
           rgpRemaining === null
             ? "いまなら復旧できます"
-            : `復旧できます · 残${rgpRemaining}日`,
-        primary: { kind: "restore", label: "復旧する", variant: "solid" },
+            : `復旧できます · 残 ${rgpRemaining} 日`,
+        primary: { kind: "restore", label: "復旧", variant: "solid" },
       };
     case "transferring":
       return {
         border: "border-soft",
-        badge: { ...badgeStyle, label: "移管申請中" },
+        // 3 つの移管状態（申請中 / 申請受信 / 移管済み）を 1 つのラベルに潰さない。
+        // 詳細ヘッダーと同じ `statusLabel` を通す（同じドメインが 2 画面で別名にならないように）
+        badge: { ...badgeStyle, label: statusLabel(domain.displayStatus) },
         progress: null,
         meta: "完了するまで変更できません",
         primary: {
           kind: "link",
-          label: "状態を確認",
+          label: "移管を見る",
           variant: "subtle",
           href: `/transfers?domain=${encodeURIComponent(domain.name)}`,
           trailingIcon: true,
@@ -230,7 +236,7 @@ function present(
         meta:
           rgpRemaining === null
             ? "完全削除の手続き中"
-            : `完全削除まで · 残${rgpRemaining}日`,
+            : `完全削除まで · 残 ${rgpRemaining} 日`,
         // できる操作が無い状態。詳細はカード面を押せば開くのでボタンは出さない
         primary: null,
       };
@@ -267,7 +273,7 @@ const STALE_REASON = "「最新化」を押すと操作できます。";
  * 主操作を実行できない理由（AC-07-1）。null なら実行できる。
  *
  * カードに見える形で出す文なので、EPP ステータス名をそのまま並べず
- * 「次に何をすれば動くか」だけを書く。詳細を開く導線（カード面 / 状態を確認）は塞がない。
+ * 「次に何をすれば動くか」だけを書く。詳細を開く導線（カード面 / 移管を見る）は塞がない。
  */
 function blockedReason(domain: DomainSummary, kind: ActionKind): string | null {
   if (kind === "link") {

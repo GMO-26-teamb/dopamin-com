@@ -564,6 +564,61 @@ describe("FR-06 / FR-09: コンタクトの再利用（#72）", () => {
     expect(second).toBe(first);
   });
 
+  it("登録時に contacts を渡すとそのプロファイルでコンタクトを作る（S-25）", async () => {
+    const res = await sendJson("/domains", {
+      name: "with-contact.com",
+      period: 1,
+      contacts: { registrant: PROFILE },
+    });
+    expect(res.status).toBe(201);
+    expect(
+      domainDetailResponseSchema.parse(await res.json()).registrantProfile,
+    ).toEqual(PROFILE);
+
+    const contactId = (await kitaqsign.info("with-contact.com")).registrant;
+    expect(kitaqsign.peekContact(String(contactId))).toEqual(PROFILE);
+  });
+
+  it("登録時の contacts は既存コンタクトを同じ ID のまま差し替える（PATCH と同じ経路）", async () => {
+    await createDomain("first.com");
+    const contactId = (await kitaqsign.info("first.com")).registrant;
+
+    const res = await sendJson("/domains", {
+      name: "second.com",
+      period: 1,
+      contacts: { registrant: PROFILE },
+    });
+    expect(res.status).toBe(201);
+
+    expect((await kitaqsign.info("second.com")).registrant).toBe(contactId);
+    expect(kitaqsign.peekContact(String(contactId))).toEqual(PROFILE);
+  });
+
+  it("contacts を省略した登録は今までどおり既定プロファイルになる（後方互換）", async () => {
+    const res = await sendJson("/domains", { name: "no-contact.com" });
+    expect(res.status).toBe(201);
+    expect(
+      domainDetailResponseSchema.parse(await res.json()).registrantProfile,
+    ).toEqual(DEFAULT_REGISTRANT_PROFILE);
+  });
+
+  it("登録時の許可されていないダミー値は 400 VALIDATION_ERROR", async () => {
+    for (const registrant of [
+      { ...PROFILE, name: "山田 太郎" },
+      { ...PROFILE, email: "real.person@gmail.com" },
+      { ...PROFILE, countryCode: "FR" },
+    ]) {
+      const res = await sendJson("/domains", {
+        name: "bad-pii.com",
+        contacts: { registrant },
+      });
+      expect(res.status).toBe(400);
+      expect((await parseError(res)).error.code).toBe("VALIDATION_ERROR");
+    }
+    // 弾いたので登録もされていない
+    expect((await api("/domains/bad-pii.com")).status).toBe(404);
+  });
+
   it("PATCH で登録者プロファイルを変えても同じ ID のまま中身が差し替わる", async () => {
     await createDomain("edit.com");
     const contactId = (await kitaqsign.info("edit.com")).registrant;

@@ -29,13 +29,13 @@ export function RestoreDialog({
   busy,
   onSubmit,
 }: RestoreDialogProps) {
-  // 猶予期限はレジストリが返さないことがある。分からないまま「残り 0 日」と
+  // 猶予期限はレジストリが返さないことがある。分からないまま「残 0 日」と
   // 書かないよう、日数は取れたときだけ添える（#211）
   const remaining = daysUntil(domain.rgpUntil, now);
   const deadline =
     remaining === null || remaining < 0
       ? ""
-      : `復旧できるのは残り ${remaining} 日です。`;
+      : `復旧できるのは残 ${remaining} 日です。`;
 
   return (
     <FormDialog

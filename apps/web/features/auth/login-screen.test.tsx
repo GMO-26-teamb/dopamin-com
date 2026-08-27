@@ -5,6 +5,7 @@ import { ApiClientError } from "@/lib/api/errors";
 import { resetMockStore } from "@/lib/api/mock/mock-services";
 import { AppProviders } from "@/lib/api/query-client";
 import type { AuthService } from "@/lib/api/services";
+import { ThemeProvider } from "@/lib/theme/theme-provider";
 import { LoginScreen } from "./login-screen";
 import { startAuthSession } from "./session";
 import { servicesWithAuth } from "./test-services";
@@ -20,9 +21,14 @@ function renderLogin(
   props: { next?: string | null; expired?: boolean } = {},
 ) {
   render(
-    <AppProviders services={servicesWithAuth(overrides)}>
-      <LoginScreen expired={props.expired ?? false} next={props.next ?? null} />
-    </AppProviders>,
+    <ThemeProvider>
+      <AppProviders services={servicesWithAuth(overrides)}>
+        <LoginScreen
+          expired={props.expired ?? false}
+          next={props.next ?? null}
+        />
+      </AppProviders>
+    </ThemeProvider>,
   );
 }
 
