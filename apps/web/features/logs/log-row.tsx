@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown } from "lucide-react";
+import { Check, ChevronDown, TriangleAlert } from "lucide-react";
 import { type ReactNode, useId } from "react";
 import { Badge } from "@/components/ui/badge";
 import { CodeBlock } from "@/components/ui/code-block";
@@ -140,7 +140,12 @@ export function LogRow({
         </span>
         {/* Figma の各列は overflow-clip。長い結果コードで隣の列を押し出さない */}
         <span className="flex w-27.5 shrink-0 items-center overflow-hidden">
-          <Badge tone={result.tone}>{result.label}</Badge>
+          <Badge
+            icon={result.tone === "ok" ? <Check /> : <TriangleAlert />}
+            tone={result.tone}
+          >
+            {result.label}
+          </Badge>
         </span>
         <span className="w-17.5 shrink-0 truncate text-caption text-muted">
           {latency}

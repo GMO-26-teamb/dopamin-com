@@ -9,6 +9,7 @@
  */
 
 import { transferCreateRequestSchema } from "@dopamin/shared";
+import { ArrowLeftRight } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -142,6 +143,7 @@ export function TransferForm({
             <Button
               className="shrink-0"
               disabled={disabled || submitting}
+              leadingIcon={<ArrowLeftRight />}
               loading={submitting}
               type="submit"
               variant="primary"

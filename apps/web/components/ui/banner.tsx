@@ -46,7 +46,7 @@ export function Banner({
       )}
       role={tone === "warn" ? "alert" : "status"}
     >
-      <Icon aria-hidden="true" className={cn("size-4.5 shrink-0", text)} />
+      <Icon aria-hidden="true" className={cn("size-4 shrink-0", text)} />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <p className={cn("text-label", text)}>{title}</p>
         {body === undefined ? null : (
