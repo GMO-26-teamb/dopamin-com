@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.1.22（2026-08-27） |
+| 版 | v0.1.23（2026-08-27） |
 | プロダクト | ドパ民.com / dopamin.com — Z世代向けドメイン管理プラットフォーム（疑似レジストラ） |
 | チーム | チームドパ民（Team B）: 佐々木 琢登・星 はるか・上原 拓也 |
 | 位置づけ | GMO Internet Internship in kitaQ Webアプリケーションコース（2026/08/24–28）成果物 |
@@ -289,7 +289,7 @@
 - **振る舞い**: `redemptionPeriod` のドメインにのみ「復旧」ボタンを表示。実行時に復旧費用が発生する旨を表示（金額はダミー）。restore は両レジストリとも 1 段階（`POST /domains/{name}/restore`。request → report の 2 段階ではない。Swagger で確定・2026-08-25）。
 - **AC**:
   - AC-11-1: 復旧後、状態が `ok`（Active）に戻る。
-  - AC-11-2: `pendingDelete` のドメインでは復旧ボタンが表示されない。
+  - AC-11-2: `redemptionPeriod` を伴わない `pendingDelete`（RGP 経過後の完全削除待ち）のドメインでは復旧ボタンが表示されない。RGP 中は EPP 仕様上 `pendingDelete` が共存するため、`pendingDelete` の有無だけで復旧不可と判定しない（§11.3）。
 
 ### FR-12 移管（IN / OUT）【P0】
 
@@ -749,7 +749,7 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。アプリのテーブル
 
 ### 9.2 主要な導出ロジック（`packages/shared`）
 
-- `deriveDisplayStatus(statuses, rgp_status, ownership, transfer?)` → `active` / `rgp` / `pending_delete` / `transfer_in_pending` / `transfer_out_pending` / `transferred_out` / `hold` / `inactive` / `locked`（`transfer` は `transfers` の pending 行 `{ direction }`）
+- `deriveDisplayStatus(statuses, rgp_status, ownership, transfer?)` → `active` / `rgp` / `pending_delete` / `transfer_in_pending` / `transfer_out_pending` / `transferred_out` / `hold` / `inactive` / `locked`（`transfer` は `transfers` の pending 行 `{ direction }`）。優先順位は `transferred_out` > `redemptionPeriod`（RGP）> `pendingDelete` > `pendingTransfer` > `hold` > `inactive` > `locked` > `active`。RGP は `pendingDelete` と共存するため `pendingDelete` より先に評価し、`redemptionPeriod` は `rgp_status` 側と `status` 側の両方を見る（§11.3）
 - `isOperationAllowed(op, statuses, ownership, transfer?)` → Server ステータスを Client より優先して判定。`transferred_out` は全操作不可、`pendingTransfer` 中は方向に応じて approve / reject（out）または cancel（in）のみ可（§11.3）
 - `transferEligibleAt(registered_at, last_transfer_at)` → 60 日後の日付（参考表示専用。可否判定には使わない）
 - `transferAutoApproveAt(requested_at, act_by_at?)` → 自動承認期限（`act_by_at` があればそれ、無ければ 20 分後）
@@ -980,6 +980,8 @@ export interface RegistryAdapter {
 
 Server ステータスは Client ステータスより優先される。
 
+- `redemptionPeriod`（RGP）中は EPP 仕様（RFC 3915）上 `pendingDelete` が必ず共存する。表示・可否は RGP を優先し、`redemptionPeriod` を伴わない `pendingDelete`（RGP 経過後の完全削除待ち）だけを「削除待ち・全操作不可」として扱う（FR-11 / AC-11-2）。
+- `redemptionPeriod` を載せる場所はレジストリで違う（kitaqsign 実測は `status` 側、mock は `rgpStatus` 側）。導出は必ず両方を見る（`packages/shared` の `isInRedemptionPeriod`）。
 - `ownership = transferred_out`（§9.1）の行は EPP ステータスに関わらず「移管済み」として表示のみ、全操作不可。
 - 移管可否（AuthCode 表示 / 移管申請）は本表のみで判定し、ICANN の 60 日ルールは含めない（FR-12）。
 
@@ -1460,3 +1462,4 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | v0.1.20 | 2026-08-27 | AI プロバイダ周りをチーム決定に合わせて追記（実装は #186 / #193）。§17: `AI_GATEWAY_API_KEY`（Vercel AI Gateway）を環境変数表に追加。プロバイダ固有キーが無いときだけ使われ、1 本で全プロバイダに出せる。§13.1: 実効モデルの解決を「固有キーがあれば直接 → 無ければ Gateway 経由 → どちらも無ければ `AI_UNAVAILABLE`」に更新し、`xai`（Grok）は Gateway 経由専用であること、Gateway のモデル ID 体系の読み替えは `apps/api` の境界で吸収することを明記。FR-17: 選択肢に `xai` を追加し、有効判定を「固有キーまたは Gateway キー」に。`xai` は Gateway キーが無い環境では選択肢に出ない。§9.1: `users.ai_provider` の値に `xai` を追加（列は `text` のままで制約を持たせない = migration 不要） |
 | v0.1.21 | 2026-08-27 | §11.2: 運営アナウンス（8/27 16:00〜のメンテナンス）による **`.org` / `.info` の管轄移管（kitaqsign → kitaqnic）** を反映。kitaqsign は `.com` `.net` の 2 種、kitaqnic は 20 種に（計 22 種は不変）。`REGISTRY_TLDS` / fixture / `specVersion`（`v2 (2026-08-27)`）を更新し、既存 `.org` / `.info` 行の `domains.registry` / `transfers.registry` を付け替えるデータマイグレーションを追加。§21.2 #2 に追記。#195（採番が衝突していたため v0.1.20 から採り直した）|
 | v0.1.22 | 2026-08-27 | §16.1 / §16.4 / §17: **参照されていない環境変数を削除**。`NEXT_PUBLIC_APP_ORIGIN`（「表示・OGP 用」として §17 に載っていたが、`apps/web` のコードから一度も読まれていなかった。Vercel の web プロジェクトと `.env.example` / `playwright.config.ts` / README からも削除）。GitHub Secrets の `DIRECT_DATABASE_URL` も、v0.1.13 で `migrate` ジョブを外して以降どのワークフローからも参照されていないため削除した（`ci.yml` の `e2e` は Secret ではなくリテラル値を使う。本番 DB への適用は §16.2 のとおりローカルから手で当てる）。Vercel の api プロジェクトからも同変数を削除（ランタイムでは未使用で、`packages/db/drizzle.config.ts` がローカルで読むだけ） |
+| v0.1.23 | 2026-08-27 | §9.2 / §11.3 / FR-11: **RGP（`redemptionPeriod`）と `pendingDelete` の優先順位を確定**。RFC 3915 の RGP 中は EPP の `pendingDelete` が必ず共存するため、`pendingDelete` を先に見る導出だと RGP のドメインが「削除待ち」になり復旧できなくなっていた（#171）。§9.2 に `deriveDisplayStatus` の優先順位（`transferred_out` > `redemptionPeriod` > `pendingDelete` > …）を明記し、§11.3 に「RGP 中は `pendingDelete` が共存する」「`redemptionPeriod` の載る場所はレジストリで違う（kitaqsign は `status` 側、mock は `rgpStatus` 側）ので両方を見る」を追記。AC-11-2 を「`redemptionPeriod` を伴わない `pendingDelete` では復旧ボタンを出さない」に明確化した（文言どおりだと FR-11 の「`redemptionPeriod` のドメインにのみ復旧ボタンを表示」と矛盾していた）。`docs/specs/ui-screens.md` S-33 / S-36 も追随 |

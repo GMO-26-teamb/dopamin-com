@@ -181,11 +181,11 @@ export function createDomains(): DomainDetail[] {
       registrant: { ...LEGACY_REGISTRANT, migrated: false },
       gracePeriods: [{ kind: "transfer", until: at(days(3)) }],
     }),
-    // S-33 復旧猶予（RGP）
+    // S-33 復旧猶予（RGP）。RGP 中は EPP 仕様上 pendingDelete が共存する（#171）
     buildDomain({
       name: "demo-app.online",
       registry: "kitaqnic",
-      statuses: ["ok"],
+      statuses: ["pendingDelete"],
       rgpStatuses: ["redemptionPeriod"],
       registeredAt: at(-days(700)),
       expiresAt: at(-days(45)),

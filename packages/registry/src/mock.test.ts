@@ -60,7 +60,7 @@ describe("MockRegistryAdapter: ライフサイクル", () => {
 
     await mock.delete(name);
     const deleted = await mock.info(name);
-    expect(deleted.statuses).toEqual(["pendingDelete"]);
+    expect(deleted.statuses).toEqual(["pendingDelete", "redemptionPeriod"]);
     expect(deleted.rgpStatuses).toEqual(["redemptionPeriod"]);
 
     const restored = await mock.restore(name);
@@ -972,7 +972,7 @@ describe("MockRegistryAdapter: seedOwnedDomain（FR-16 のデモ投入）", () =
 
     const info = await mock.info("demo-rgp.com");
     expect(info.rgpStatuses).toEqual(["redemptionPeriod"]);
-    expect(info.statuses).toEqual(["pendingDelete"]);
+    expect(info.statuses).toEqual(["pendingDelete", "redemptionPeriod"]);
 
     const restored = await mock.restore("demo-rgp.com");
     expect(restored.rgpStatuses).not.toContain("redemptionPeriod");
