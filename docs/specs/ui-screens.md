@@ -47,23 +47,23 @@
 
 | ID | ルート | 状態 | 表示 / 振る舞い | 使用コンポーネント |
 |---|---|---|---|---|
-| S-10 | `/dashboard` | 通常 | Page Header（件数・最終同期・「最新化」）+ Domain Card 2 列グリッド。カードの表示項目: ドメイン名 / 状態バッジ / 進捗（残日数）/ レジストリ名 / 有効期限 or 残日数 / 最終同期（Meta 右端、キャッシュ時は「未同期」バッジ（`Badge` tone=muted）を最終同期テキストの左に置く）/ 操作。「詳細」→ S-30、「今すぐ更新」→ D-01、「復旧する」→ D-04、「状態を確認」→ S-50、「NS を設定」→ D-02 | Page Header, Domain Card |
+| S-10 | `/dashboard` | 通常 | Page Header（件数・最終同期・「最新化」）+ Domain Card 2 列グリッド。カードの表示項目: ドメイン名 / 状態バッジ / 進捗 / レジストリ名 / Meta（残日数と次にできること。キャッシュ時は「未同期」バッジ（`Badge` tone=muted）+「最終同期 n 分前」）/ 主操作 1 つ。**カード面全体が S-30 へのリンク**（stretched link。主操作ボタンは前面に置く）なので「詳細」ボタンは持たない。「今すぐ更新」→ D-01、「復旧する」→ D-04、「状態を確認」→ S-50、「NS を設定」→ D-02 | Page Header, Domain Card |
 | S-11 | `/dashboard` | 0 件 | Empty State Neutral + CTA「ドメインを取得」→ S-20、「移管で持ち込む」→ S-50 | Empty State |
 | S-12 | `/dashboard` | 読み込み | Skeleton（ヘッダー + カード 4）。DB キャッシュを先に描画し、`POST /domains/sync` はバックグラウンド | Skeleton |
-| S-13 | `/dashboard` | 同期エラー（AC-18-1） | Banner Warn。`POST /domains/sync` は部分失敗でも 200 + `failures[]` を返すので、見出しと案内は `failures[].code`（+ リクエストごとの失敗なら `error.code`）で出し分ける（`REGISTRY_TIMEOUT` / `REGISTRY_UNAVAILABLE` →「〇〇が応答しません — 一覧はキャッシュを表示しています」+「参照系は自動で 2 回再試行しました」、`REGISTRY_SPEC_MISMATCH` →「〇〇の応答が想定と異なります — レジストリの仕様変更の可能性があります」+ 操作ログ導線、`REGISTRY_REJECTED` →「〇〇が最新化を拒否しました」+ 理由（API が `registry-codes.ts` の表から `message` に載せたもの。1 つに定まらなければ操作ログへ誘導）、`NOT_FOUND` →「〇〇に登録が見つかりません」（再試行の記述は出さない）、それ以外 →「一覧を最新化できませんでした」）。コードが混ざるときは最も重い区分（応答なし > 想定外の応答 > 拒否 > レジストリに未登録 > その他）の見出しを採り、本文に内訳（「応答なし 1 件・レジストリに未登録 2 件」）を添える。主語は見出しに採った区分の `failures[].registry`（TLD から特定）から生成し、リクエストごとの失敗のときは `error.registry`、どちらも無ければ stale なカードのレジストリから推定する（「Kitaqsign が…」「Kitaqnic が…」「両レジストリが…」）。部分失敗のときは「n 件が最新化できませんでした」を本文に添える。Banner に最終同期時刻は書かない。同期に失敗したカードだけ「未同期」バッジ（`Badge` tone=muted）+「最終同期 n 分前」を Meta 右端に表示し、更新系操作は Disabled（参照系の「詳細 / 状態を確認」は塞がない） | Banner |
+| S-13 | `/dashboard` | 同期エラー（AC-18-1） | Banner Warn。`POST /domains/sync` は部分失敗でも 200 + `failures[]` を返すので、見出しと案内は `failures[].code`（+ リクエストごとの失敗なら `error.code`）で出し分ける（`REGISTRY_TIMEOUT` / `REGISTRY_UNAVAILABLE` →「〇〇が応答しません — 一覧はキャッシュを表示しています」+「自動で 2 回試し直しました」、`REGISTRY_SPEC_MISMATCH` →「〇〇の応答が想定と異なります」+ 本文で仕様変更の可能性に触れ、操作ログへ誘導、`REGISTRY_REJECTED` →「〇〇が最新化を拒否しました」+ 理由（API が `registry-codes.ts` の表から `message` に載せたもの。1 つに定まらなければ操作ログへ誘導）、`NOT_FOUND` →「〇〇に登録が見つかりません」（再試行の記述は出さない）、それ以外 →「一覧を最新化できませんでした」）。コードが混ざるときは最も重い区分（応答なし > 想定外の応答 > 拒否 > レジストリに未登録 > その他）の見出しを採り、本文に内訳（「応答なし 1 件・レジストリに未登録 2 件」）を添える。主語は見出しに採った区分の `failures[].registry`（TLD から特定）から生成し、リクエストごとの失敗のときは `error.registry`、どちらも無ければ stale なカードのレジストリから推定する（「Kitaqsign が…」「Kitaqnic が…」「両レジストリが…」）。部分失敗のときは「n 件が最新化できませんでした」を本文に添える。Banner に最終同期時刻は書かない。同期に失敗したカードだけ「未同期」バッジ（`Badge` tone=muted）+「最終同期 n 分前」を Meta 右端に表示し、更新系操作は Disabled にして押せない理由をボタン直下に 1 行で出す（カード面リンクと「状態を確認」は塞がない） | Banner |
 
 **Domain Card の Status（§9.2 `deriveDisplayStatus` と 1:1）**
 
 | Status | 導出元 | バッジ（Tone） | 進捗 | 主操作 |
 |---|---|---|---|---|
-| Active | `active` | Active（Ok） | Brand | 更新 / 詳細 |
-| Expiring | `active` かつ残 30 日以内（AC-02-2） | ⚠ 残 n 日（Warn）、枠 Warn | Warn | 今すぐ更新 / 詳細 |
-| Redeemable | `rgp` | 復旧猶予 残 n 日（Warn）（AC-10-1） | — | 復旧する / 詳細 |
-| PendingDelete | `pending_delete` | 削除待ち（Muted Solid）、75% | — | 詳細のみ（`redemptionPeriod` を伴わない場合のみ。伴うなら Redeemable） |
+| Active | `active` | Active（Ok） | Brand | 更新 |
+| Expiring | `active` かつ残 30 日以内（AC-02-2） | ⚠ まもなく期限（Warn）、枠 Warn | Warn | 今すぐ更新 |
+| Redeemable | `rgp` | 復旧猶予（Warn）（AC-10-1） | — | 復旧する |
+| PendingDelete | `pending_delete` | 削除待ち（Muted Solid）、75% | — | なし（カード面リンクのみ。`redemptionPeriod` を伴わない場合。伴うなら Redeemable） |
 | Transferring | `transfer_out_pending`（受信）/ `transfer_in_pending` は `/transfers` のみ | 移管申請中（Muted）、75% | — | 状態を確認 |
-| Hold | `hold` | 停止中（Warn）、枠 Warn | — | 情報修正 / 詳細 |
-| Inactive | `inactive` | NS 未設定（Neutral） | Brand | NS を設定 / 詳細 |
-| Locked | `locked`（client/server *Prohibited のみ） | 移管ロック / 削除ロック / 更新ロック（Neutral、lock アイコン） | Brand | 更新 / 詳細 |
+| Hold | `hold` | 停止中（Warn）、枠 Warn | — | 情報修正 |
+| Inactive | `inactive` | NS 未設定（Neutral） | Brand | NS を設定 |
+| Locked | `locked`（client/server *Prohibited のみ） | 移管ロック / 削除ロック / 更新ロック（Neutral、lock アイコン） | Brand | 更新 |
 
 `transferred_out` は保有一覧に出さない（AC-02-4）。
 
