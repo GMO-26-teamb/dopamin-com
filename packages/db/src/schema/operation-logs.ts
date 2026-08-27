@@ -30,7 +30,7 @@ export const operationLogs = pgTable(
     svTrid: text("sv_trid"),
     // kitaqsign / kitaqnic / mock
     registry: text("registry").notNull(),
-    // packages/shared の OPERATION_COMMANDS（主 15 種 + 補助 4 種）が正（§9.1）
+    // packages/shared の OPERATION_COMMANDS（主 15 種 + 補助 5 種 + アプリ内 1 種）が正（§9.1）
     command: text("command").notNull(),
     domainName: text("domain_name"),
     // success / error / timeout / spec_mismatch

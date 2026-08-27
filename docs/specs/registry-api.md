@@ -29,15 +29,31 @@
   （このアプリで保有していないドメイン）、行の `user_id` がログインユーザーと一致しなければ 403 `FORBIDDEN`。
   未対応 TLD の 400 `VALIDATION_ERROR`（`adapterForDomain`）が所有権より先に返る。
   `/transfers*` は移管の性質上、所有権は見ない（認証のみ）。
-- DB キャッシュ（FR-02 一覧・`domains` テーブル保存）、操作ログの永続化（FR-15）、
-  独自性スコア（FR-05。check レスポンスの `uniqueness` は常に `null` のプレースホルダ）。
+- ~~DB キャッシュ（FR-02 一覧・`domains` テーブル保存）~~ → 解決:
+  `GET /domains` は `listDomainSummaries`（`apps/api/src/services/domain.service.ts`）が
+  `domains` テーブルだけを読み、レジストリには問い合わせない。`info` / 更新系の結果は
+  同ファイルの `upsertDomainFromInfo` で write-through する（§2 の各ルート備考のとおり）。
+- ~~操作ログの永続化（FR-15）~~ → 解決: §5 の同項目のとおり実装済み
+  （設計は [`docs/specs/operation-logs.md`](operation-logs.md)）。
+- ~~独自性スコア（FR-05。check レスポンスの `uniqueness` は常に `null` のプレースホルダ）~~
+  → 解決: プレースホルダではなく実値を返す。`checkDomains`
+  （`apps/api/src/services/check.service.ts`）の `createUniquenessResolver()` が
+  `scoreDistinctiveness()` + `toDomainUniqueness()`（`packages/shared/src/uniqueness/` /
+  `packages/shared/src/api.ts` の `domainUniquenessSchema`）で算出し、呼び出し 1 回のなかで
+  SLD 単位にメモ化する（`{sld, tlds[]}` 形式では全 TLD で同じ値になる）。
+  算出方式が embedding ではなく lexical である経緯は ADR-0003。
+  `null` になるのは (1) `availability: "unavailable"` の行（スコアは空きのときだけ意味を持つ。
+  §10.4 の例に準拠）、(2) 未対応 TLD の行（`availability: "error"` + `VALIDATION_ERROR`）、
+  (3) スコア算出自体が例外になったとき（付随情報なので握りつぶして check 結果は返す）の 3 つだけで、
+  レジストリのタイムアウト・障害・応答欠落による `availability: "error"` の行にはスコアが付く
+  （AC-05-2。UI は [`docs/specs/ui-screens.md`](ui-screens.md) の Unknown バリアント）。
 
 ## 2. API 契約（実装済みルート）
 
 | メソッド | パス | 実装 | 備考 |
 |---|---|---|---|
 | GET | `/health` | ✅ | 各レジストリの `hello` 疎通結果 + レイテンシ + `specVersion`（仕様バージョン。§11.5 手順 4）と、DB の接続結果 `db { ok, latencyMs, error? }` を返す（#62）。**依存の解決ごと try で包む**ので、環境変数の欠落や DB 到達不能でも 200 + `status: "ok"` を返し、どこが壊れているかを個別項目で示す。認証なしで到達できるため、エラーは正規化コード・例外名だけ（接続文字列やレジストリの生文言は出さない） |
-| POST | `/domains/check` | ✅ | `{sld, tlds[]}` or `{names[]}`。レジストリ単位で並列、部分失敗許容（AC-03-2） |
+| POST | `/domains/check` | ✅ | `{sld, tlds[]}` or `{names[]}`。レジストリ単位で並列、部分失敗許容（AC-03-2）。独自性スコア `uniqueness`（FR-05）も同時に返す（レジストリ障害の行にも付く。AC-05-2 / ADR-0003） |
 | POST | `/domains` | ✅ | check 再実行 → contact 作成 → create → info（AC-06 系）。authInfo はサーバー生成 |
 | POST | `/domains/sync` | ✅ | Poll を消化してから保有ドメイン（`ownership = 'owned'` のみ）を `info` で再同期する（#58）。`info` の `pendingTransfer` から受信中の申請を拾って `transfers(out)` を作り、`sponsoringRegistrarId` が自レジストラと違えば `transferred_out` に倒す（clID が取れるまで後者は効かない。【要確認 §21.2 #12】）。応答は `domainSyncWithPollResponseSchema`（`domains` / `failures` + `pollProcessed`）。順序が Poll → 同期なのは、先に消化しないと移管 OUT 済みの行がこの応答の保有一覧に残ってしまうため（AC-02-4） |
 | GET | `/domains/:name` | ✅ | `info` で最新化して DB キャッシュに write-through。応答の契約は `domainDetailResponseSchema`（#53）。レジストリに繋がらない（`REGISTRY_TIMEOUT` / `REGISTRY_UNAVAILABLE` / `REGISTRY_SPEC_MISMATCH`）ときは DB キャッシュを `stale: true` + `syncedAt` + `error`（理由）付きで返す（AC-07-2、#129）。`NOT_FOUND` や拒否応答はそのまま返す。**`ownership = 'transferred_out'` の行はレジストリに問い合わせずキャッシュを返す**（#57。自レジストラが非スポンサーで `info` を信頼できず、`upsertDomainFromInfo` が常に `owned` で書くため部分一意インデックスをすり抜けて保有行が復活する） |
@@ -47,7 +63,7 @@
 | POST | `/domains/:name/restore` | ✅ | `redemptionPeriod` 中のみ（AC-11-2） |
 | POST | `/domains/:name/auth-code` | ✅ | `rotate-auth-info` を実行（取得のたびに authInfo が変わる）。再発行という副作用があるため GET ではなく POST（§10.2 の Origin 検証を通すため） |
 | POST | `/transfers` | ✅ | `{name, authCode}` → transfer request → 202。受理した申請は `transfers(direction = in, status = pending)` として永続化する（`domains` 行は作らない。AC-12-1）。応答は `{ transfer, record }`: `transfer` は正規化 `TransferResult` から `raw` を除いた DTO（`transferResponseSchema`。ADR-0002）、`record` は永続化した行の要約（`transferSummarySchema`。以降の `:id` 操作に使う） |
-| GET | `/transfers` | ✅ | 移管一覧（`transfersListResponseSchema`）。`inbound`（IN 申請中）/ `outbound`（受信した OUT 申請）/ `history`（確定済み）に分けて返す。表示のたびに pending 行を `transferQuery` で照会して DB に反映する（#56。Poll 消化は #58 で足す） |
+| GET | `/transfers` | ✅ | 移管一覧（`transfersListResponseSchema`）。`inbound`（IN 申請中）/ `outbound`（受信した OUT 申請）/ `history`（確定済み）に分けて返す。表示のたびに、まずルート側で `consumePoll()` を呼んで全レジストリの Poll を消化し（承認 / 拒否 / 取消を区別できるのは Poll だけ。ADR-0002 決定 1。サービス層から呼ぶと poll.service ↔ transfer.service が循環参照になるためルートに置く）、そのあと DB の pending 行（と、取り込みに失敗したまま残っている `approved` の IN 行）を `transferQuery` / `info` で照会して反映する（#56 / #58）。Poll 消化の失敗は例外にならず `failures` にまとまる（この応答には含めない）ので、レジストリが落ちていても一覧は返る |
 | GET | `/transfers/:id` | ✅ | 移管 1 件の状態照会（`id` は `transfers.id` の uuid。uuid 以外は 400）。承認を検知したら `info` で取り込み `domains` 行を作って `domain_id` を紐付ける（§6.5）。他ユーザーの行は 403（§10.3） |
 | POST | `/transfers/:id/approve` | ✅ | 受信した OUT 申請を承認（`direction = out` かつ `status = pending` のみ、他は 409）。成功後 `domains.ownership = 'transferred_out'` にして保有一覧から外す（AC-12-5）。行は履歴として残す |
 | POST | `/transfers/:id/reject` | ✅ | 受信した OUT 申請を拒否。保有は動かない（AC-12-4） |
@@ -207,7 +223,11 @@ result code ごとの**ユーザー向け理由文**は `packages/shared/src/reg
   承認 / 拒否 / 取消を区別できない（ADR-0002 決定 1）。#56 では **`info.lastTransferAt`（trDate）が
   申請時刻以降に動いていれば承認**という判定だけを行い（拒否・取消では trDate が動かないので偽陽性が無い）、
   拒否・取消の確定は Poll 消化（#58）に委ねて行を `pending` のまま残す。
-- `POST /domains/check` の 1 リクエストあたりの件数上限がレジストリ側で不明（API 側は 20 件に制限）。
+- `POST /domains/check` の 1 リクエストあたりの件数上限がレジストリ側で不明。API 側は
+  `domainCheckRequestSchema`（`packages/shared/src/api.ts`）が `{names[]}` は最大 20 件、
+  `{sld, tlds[]}` は `tlds` 最大 22 件（対応 TLD の全量。`packages/shared/src/tlds.ts`）に制限している。
+  実際に 1 回のレジストリ呼び出しへ載る件数は `checkDomains` がレジストリ別にまとめるので最大 20 件
+  （`{sld, tlds[]}` 形式なら kitaqsign 最大 4 件 / kitaqnic 最大 18 件。`REGISTRY_TLDS`）。
 - コンタクト更新（FR-09 の一部）は未実装。移管の承認 / 拒否 / 取消（#57）と
   Poll 消化（#58）は実装済み。
 - Poll 消化の失敗時は **ack しない**（`services/poll.service.ts`）。FIFO なのでキューは

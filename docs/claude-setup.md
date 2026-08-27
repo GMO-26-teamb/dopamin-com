@@ -9,6 +9,8 @@
 | `CLAUDE.md` | エージェント向け規約（要件の SSOT、構成、コマンド、禁止事項） |
 | `.claude/settings.json` | チーム共通で有効にするプラグイン一覧と hooks。初回起動時にインストールを促される |
 | `.claude/hooks/*.sh` | hooks の実体（下記「Hooks」参照） |
+| `.claude/skills/*/SKILL.md` | プロジェクト専用スキル（下記「スキル」参照） |
+| `.claude/agents/*.md` | プロジェクト専用サブエージェント（下記「サブエージェント」参照） |
 | `.mcp.json` | プロジェクトスコープの MCP サーバ（Supabase / Chrome DevTools）。初回起動時に承認を求められる |
 
 個人用の上書きは `.claude/settings.local.json`（gitignore 済み）に書く。
@@ -49,6 +51,22 @@ CLAUDE.md の規約のうち機械的に強制できるものを hook にして�
 - `jq` と `pnpm` が PATH にある前提。
 - 秘密情報ファイルの編集や lockfile の更新は、hook の意図どおり人間が手動で行う。
 
+## スキル（`.claude/skills/`）
+
+`docs/requirements.md` は要件の SSOT なので、そこが**気づかないうちに書き換わる / 書き換わらない**
+のを防ぐためのスキルを 2 つ置いている。どちらも該当する状況で自動的に発動する。
+
+| スキル | いつ発動するか | 何をするか |
+|---|---|---|
+| `spec-change-guard` | 仕様・要件が変わりうる作業に**着手する前**（新機能、既存挙動の変更、API 契約 / データモデル / 受け入れ条件の変更、優先度・スコープの変更、`【要確認】` の確定、要件の削除） | 先に `docs/requirements.md` を更新するかをユーザーに確認する。実装を先に進めない |
+| `spec-change-review` | コードレビュー・PR レビュー・マージ前チェックの**冒頭** | `docs/requirements.md` に差分があれば、その仕様変更が意図どおり・承認済みかを問い、版番号と更新履歴が更新されているかを検証する。確認が取れるまでレビューを完了させない |
+
+## サブエージェント（`.claude/agents/`）
+
+| エージェント | 用途 |
+|---|---|
+| `issue-checker` | 実装・修正タスクに**着手する前**に、既存 issue（open / closed）に該当するかを調べて番号・重複度・推奨アクションを返す。CLAUDE.md で必須にしている |
+
 ## MCP サーバ（`.mcp.json`）
 
 | サーバ | 用途 | 前提 |
@@ -77,9 +95,10 @@ CLAUDE.md の規約のうち機械的に強制できるものを hook にして�
 ## 使い方の流れ（このリポジトリの規約に沿って）
 
 1. `docs/requirements.md` と `docs/specs/<feature>.md` を読ませる（`CLAUDE.md` で指示済み）。
-2. 実装依頼は `superpowers` の流れに乗せる: brainstorming → plan → TDD で実装。
-3. 完了前に `pnpm check`、`/code-review` でレビュー、`/simplify` で整理。
-4. `feat/<fr-id>-<slug>` ブランチで PR。`main` へ直接 push しない。
+2. 実装・修正の依頼は着手前に `issue-checker` サブエージェントで既存 issue に該当するかを確認する。該当があればその issue 番号に紐づけ（`blocked:要確認` 付きなら解消してから着手）、無ければ新規に起票してから着手する（`CLAUDE.md` の必須規約）。
+3. 実装依頼は `superpowers` の流れに乗せる: brainstorming → plan → TDD で実装。
+4. 完了前に `pnpm check`、`/code-review` でレビュー、`/simplify` で整理。
+5. `feat/<fr-id>-<slug>` ブランチで PR。`main` へ直接 push しない。
 
 ## 確認コマンド
 

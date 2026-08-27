@@ -258,7 +258,9 @@ export class MockRegistryAdapter implements RegistryAdapter {
 
   /**
    * 公開メソッド 1 回 = 1 レコードで観測フックを呼ぶ（FR-15）。
-   * 実レジストリと違い HTTP 往復が無いため、補助コマンド行は発行せず svTrid は null。
+   * 実レジストリと違い HTTP 往復が無いため svTrid は null。補助コマンドのうち
+   * `hello` / `contact_create` / `contact_update` は mock でも独立した行になるが、
+   * ホストオブジェクトを持たないので `host_info` / `host_create` は発行しない。
    * observer の失敗はレジストリ操作の成否に影響させない。
    *
    * ストアがある場合は、この単位で状態を読み込み → 実行 → 書き戻す（#46）。

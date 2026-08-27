@@ -57,6 +57,7 @@ lexical 方式への転換余地を明示していた。本 ADR がその記録�
   §10.1 の `POST /ai/uniqueness`、§13.3 の埋め込み、§6.1 図・§7 の pgvector、
   §17 の `EMBEDDING_*` / `UNIQUENESS_THETA_*` を「不採用（ADR-0003）」とした。
   §14.3 の【要確認】と §21.2 #9 も解決済み。
+  §16.3 の Supabase `vector` 拡張が不要になった点だけ反映が漏れていたので v0.1.18 で追記した。
 - 参照コーパスにはアダルト・海賊版サイトを含めない（`topSimilar` の名前が画面に
   そのまま描画されるため）。除外規則は `packages/shared/scripts/corpus-denylist.mjs`
   が持ち、生成時に適用する。

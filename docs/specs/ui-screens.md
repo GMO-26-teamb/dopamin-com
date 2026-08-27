@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.4（2026-08-26） |
+| 版 | v0.5（2026-08-27） |
 | 対応要件 | `docs/requirements.md` v0.1.11 §4 FR-01〜19、§9.2、§10.3、§11.3 / 11.4、§15 |
 | Figma | `UI Design (Team B)` — ページ **Prototype / Screens**（全画面・全状態、Standard、Present で遷移可）/ **Prototype / Screens (極ドパ)** / **Prototype / Flow**（遷移図）。コンポーネントは同ファイルのデザインシステム（Getting Started 参照） |
 | アセット | `docs/ui-design/*.png`（抜粋スクリーンショット） |
@@ -20,8 +20,8 @@
 
 | 領域 | 仕様 |
 |---|---|
-| 幅 | デスクトップ固定 1120px（`size/page`）。中央寄せ、外側は `bg/default`。モバイルは §7-6 参照 |
-| サイドバー | 190px（`size/sidebar`）。Logo → 主要 CTA「+ ドメインを取得」→ ナビ（ダッシュボード / ドメイン取得 / 移管 / 設定 / ログ）→ 下部にテーマトグル（Segmented Small）+ ユーザー名 + ログアウト。Active は `Sidebar` の `Active` バリアント |
+| 幅 | デスクトップ最大 1280px（`size/page` = `--size-page` = 80rem）。`max-w-page` + `w-full` の可変幅で中央寄せ、外側は `bg/default`。`html` の font-size を ≥1536px で 106.25%、≥1920px で 112.5% に上げるため、大画面では rem 基準の幅・余白・文字が一緒に拡大する。数値の正は `docs/specs/web-ui.md` §3.2。モバイルは §7-6 参照 |
+| サイドバー | 224px（`size/sidebar` = `--size-sidebar` = 14rem）。Logo → 主要 CTA「+ ドメインを取得」→ ナビ（ダッシュボード / ドメイン取得 / 移管 / 設定 / ログ）→ 下部にテーマトグル（Segmented Small）+ ユーザー名 + ログアウト。Active は `Sidebar` の `Active` バリアント。`md` 未満ではサイドバーの代わりに `MobileNav`（横ナビ）を上部に出す |
 | メイン | padding 20/24、gap 12–16。先頭に `Page Header`（Title / Meta / Action）または見出し行 |
 | AI ログパネル | 右から 360px のドロワー（`AI Log Panel`）。全画面から開ける（ヘッダーの sparkles アイコン）。開いている間もメインは操作可。AI 呼び出し完了時に先頭へ追加 |
 | バナー | 画面内の結果・警告は `Banner`（Ok / Warn / Info）をメイン先頭に 1 つだけ置く。トーストは使わない |
@@ -48,10 +48,10 @@
 
 | ID | ルート | 状態 | 表示 / 振る舞い | 使用コンポーネント |
 |---|---|---|---|---|
-| S-10 | `/dashboard` | 通常 | Page Header（件数・最終同期・「最新化」）+ Domain Card 2 列グリッド。カードの表示項目: ドメイン名 / 状態バッジ / 進捗（残日数）/ レジストリ名 / 有効期限 or 残日数 / 最終同期（Meta 右端、キャッシュ時は「Stale」バッジ）/ 操作。「詳細」→ S-30、「今すぐ更新」→ D-01、「復旧する」→ D-04、「状態を確認」→ S-50、「NS を設定」→ D-02 | Page Header, Domain Card |
+| S-10 | `/dashboard` | 通常 | Page Header（件数・最終同期・「最新化」）+ Domain Card 2 列グリッド。カードの表示項目: ドメイン名 / 状態バッジ / 進捗（残日数）/ レジストリ名 / 有効期限 or 残日数 / 最終同期（Meta 右端、キャッシュ時は「未同期」バッジ（`Badge` tone=muted）を最終同期テキストの左に置く）/ 操作。「詳細」→ S-30、「今すぐ更新」→ D-01、「復旧する」→ D-04、「状態を確認」→ S-50、「NS を設定」→ D-02 | Page Header, Domain Card |
 | S-11 | `/dashboard` | 0 件 | Empty State Neutral + CTA「ドメインを取得」→ S-20、「移管で持ち込む」→ S-50 | Empty State |
 | S-12 | `/dashboard` | 読み込み | Skeleton（ヘッダー + カード 4）。DB キャッシュを先に描画し、`POST /domains/sync` はバックグラウンド | Skeleton |
-| S-13 | `/dashboard` | 同期エラー（AC-18-1） | Banner Warn。`POST /domains/sync` は部分失敗でも 200 + `failures[]` を返すので、文言は `failures[].registry`（TLD から特定）から生成し、リクエストごとの失敗のときは `error.registry`、どちらも無ければ stale なカードのレジストリから推定する（「Kitaqsign が応答しません」「Kitaqnic が…」「両レジストリが応答しません」）。部分失敗のときは「n 件が最新化できませんでした」を本文に添える。Banner に最終同期時刻は書かない。同期に失敗したカードだけ「Stale · 最終同期 n 分前」を表示し、更新系操作は Disabled | Banner |
+| S-13 | `/dashboard` | 同期エラー（AC-18-1） | Banner Warn。`POST /domains/sync` は部分失敗でも 200 + `failures[]` を返すので、文言は `failures[].registry`（TLD から特定）から生成し、リクエストごとの失敗のときは `error.registry`、どちらも無ければ stale なカードのレジストリから推定する（「Kitaqsign が応答しません」「Kitaqnic が…」「両レジストリが応答しません」）。部分失敗のときは「n 件が最新化できませんでした」を本文に添える。Banner に最終同期時刻は書かない。同期に失敗したカードだけ「未同期」バッジ（`Badge` tone=muted）+「最終同期 n 分前」を Meta 右端に表示し、更新系操作は Disabled（参照系の「詳細 / 状態を確認」は塞がない） | Banner |
 
 **Domain Card の Status（§9.2 `deriveDisplayStatus` と 1:1）**
 
@@ -76,7 +76,7 @@
 | S-21 | `/domains/new` | AI 生成中 | ボタン「考え中…」Disabled、Skeleton Card ×6、注記「最大 10 秒」。完了で S-22、10 秒超 / `AI_UNAVAILABLE` / `RATE_LIMITED` で S-23 | Skeleton |
 | S-22 | `/domains/new` | 候補表示 | Candidate Card ×6。各カード: ドメイン名（TLD はブランド色）/ Rarity / Score Gauge（クリックで最も近い既存名 3 件と類似度を展開 = Similarity Row ×3）/ 理由（40 字、Caption）/ 空きバッジ / 操作。「登録へ」→ S-25、「もう一回考える」→ S-21（前回候補を除外）、「自分で入力して探す」→ S-24 | Candidate Card, Score Gauge, Similarity Row |
 | S-23 | `/domains/new` | AI エラー（AC-04-2） | Banner Warn。`REGISTRY_TIMEOUT`→「AI が 10 秒以内に応答しませんでした」、`AI_UNAVAILABLE`→「AI が利用できません。手入力で探せます」、`RATE_LIMITED`→「利用上限に達しました。n 秒後に再試行」。直接検索へ誘導。AI ログに記録 | Banner |
-| S-24 | `/domains/new?q=` | 直接検索の結果 | 入力は `SLD + TLD 複数選択` または FQDN（`.` を含む場合は FQDN として 1 件で check）。結果は Search Result Row（Available / Taken / Error）。読み込み中は行ごとに Skeleton + レジストリ名。部分失敗は「確認不可」+ 注記（AC-03-2）。「登録へ」→ S-25、「代替を見る」→ 別 TLD・綴り違いを展開、「再試行」→ 当該レジストリのみ再 check | Search Result Row, Score Gauge, Rarity |
+| S-24 | `/domains/new` | 直接検索の結果 | S-20〜S-23 と同一 URL（直接検索カードの開閉と結果表示のみが変わる）。検索条件・結果は URL に載らない（画面内 state のため、リロード・URL 共有では復元されない）。入力は `SLD + TLD 複数選択` または FQDN（`.` を含む場合は FQDN として 1 件で check）。結果は Search Result Row（Available / Taken / Error）。読み込み中は行ごとに Skeleton + レジストリ名。部分失敗は「確認不可」+ 注記（AC-03-2）。「登録へ」→ S-25、「代替を見る」→ 別 TLD・綴り違いを展開、「再試行」→ 当該レジストリのみ再 check | Search Result Row, Score Gauge, Rarity |
 | S-25 | `/domains/new`（dialog） | 登録ダイアログ | Dialog / Register：空き（再確認済み）+ スコア + レア度（ゲージクリックで内訳）→ 期間 Select（helper に税込合計）→ NS・コンタクトは既定値表示 → 「お支払いへ」→ S-29。直前に check 再実行 | Dialog / Register |
 | S-29 | `/domains/new`（dialog） | お支払い（FR-19・モック） | 同じ Dialog 内でステップ切替。ご注文内容（Card + Key Value Row：品目 / 期間 / 単価 / 小計 / 消費税 10% / 税込合計 + Badge「固定ダミー価格」）→ カード入力（番号 / 有効期限 / CVC / 名義。デモ用カードが入力済み・AC-19-4）。「¥n を支払って登録する」→ 決済成立で `create` → S-26 /「戻る」→ S-25。入力エラーは欄ごとの warn helper、拒否は Banner Warn「お支払いに失敗しました」でダイアログは開いたまま（AC-19-3。`create` は呼ばない）。末尾 `0002` のカードで拒否を再現 | Dialog / Form, Card, Key Value Row, Input, Banner, Badge |
 | S-26 | `/domains/new`（dialog） | 登録成功 | Dialog / Success：状態・有効期限に加えお支払いの控え（金額・ブランド・下 4 桁・受付番号・モックである旨）。「サブドメイン設計に進む」→ S-40（登録直後は設計なし）、「詳細を見る」→ S-30。閉じた場合は元の S-22 / S-24 に戻り、当該カードは Taken（「取得しました → 詳細」）に更新。一覧は即時反映（AC-06-1） | Dialog / Success |
@@ -226,7 +226,7 @@ Figma **Prototype / Screens** にプロトタイプ接続を設定済み（Prese
 | 読み込み（初回） | Skeleton（形は実コンテンツに合わせる） | 300ms 未満で終わる場合は出さない。DB キャッシュがあるものはキャッシュを先に描画 |
 | 読み込み（操作中） | ボタンを Disabled + ラベルを「〜中…」に | 二重送信防止。更新系はタイムアウト後に `info` で照合し、結果が出るまで Disabled を維持 |
 | 0 件 | Empty State Neutral + 次の行動の CTA | 本文は 1〜2 文。専門用語は日本語ラベル |
-| 参照系エラー | Banner Warn（画面内・キャッシュ表示を継続）+ 再試行 | 自動再試行 2 回（指数バックオフ）の後に表示。レジストリ単位の部分失敗は影響する行 / カードだけ Stale 表示 |
+| 参照系エラー | Banner Warn（画面内・キャッシュ表示を継続）+ 再試行 | 自動再試行 2 回（指数バックオフ）の後に表示。レジストリ単位の部分失敗は影響する行 / カードだけ「未同期」表示（S-13） |
 | 更新系エラー | Error Card（code / HTTP / request ID）または汎用 Dialog | 「ローカルの情報は変更されていません」を必ず含める（FR-18） |
 | バリデーション | Input の Helper を Caption Warn 色に切替（クライアント + サーバー） | RFC 1035（AC-03-3）、表示名 1〜32 文字、期間 1〜10 年 |
 | 成功 | Banner Ok をメイン先頭に、または Dialog / Success | 一覧・詳細は即時再取得して反映 |
@@ -277,7 +277,7 @@ Figma **Prototype / Screens** にプロトタイプ接続を設定済み（Prese
 | 3 | ~~FR-16 `DEMO_RESET_ENABLED` をクライアントが知る手段~~ → 解決（requirements v0.1.8）: `GET /auth/me` の `features.demoReset`。false ならカード非表示 | `GET /auth/me` に含める | 済 |
 | 4 | §15.2「移管 OUT はドメイン名再入力」の適用範囲 | 承認（D-06）で再入力、AuthCode 発行（D-05）は不要 | D-05 にも再入力を課す |
 | 5 | FR-10 AGP 即時削除後の DB 行の扱い | 行を削除し S-10 へ（詳細 URL は S-80） | `pendingDelete` 表示で残す |
-| 6 | NFR-09 / §15.4 のモバイル対応 | 本書はデスクトップ 1120px のみ（ハッカソン期間） | 要件をデスクトップ限定に改訂 / 375px の主要 4 画面を追加 |
+| 6 | NFR-09 / §15.4 のモバイル対応 | 本書が状態を書き下すのはデスクトップ（最大 1280px）のみ。`md` 未満は `MobileNav`（横ナビ）+ 1 列グリッドで実装済み（`apps/web/components/app/mobile-nav.tsx`、`sm` 2 列 / `2xl` 3 列） | 要件をデスクトップ限定に改訂 / 375px の主要 4 画面を追加 |
 | 7 | 移管 IN 取り込み後のコンタクト差し替え失敗時の UI（要確認 #14） | S-39 のバナー + 情報修正で再実行 | — |
 
 ## 更新履歴
@@ -288,3 +288,4 @@ Figma **Prototype / Screens** にプロトタイプ接続を設定済み（Prese
 | v0.2 | 2026-08-26 | 網羅性レビュー（38 件）を反映: Domain Card の Status を §9.2 と 1:1 化、S-36〜39 / S-02c / S-53 / S-40b / S-63 / S-70b を追加、Rarity ↔ FR-05 ラベル対応表、直接検索の複数 TLD / FQDN、S-26 → S-40、S-28 / D-03 / D-06 の分岐、認証リダイレクト規則、エラーコード表に 5 コード追加、§7 要確認 7 件 |
 | v0.3 | 2026-08-26 | S-13 を `POST /domains/sync` の部分失敗契約（200 + `failures[]`、PR #136）に合わせて更新。§7 #2 / #3 は requirements v0.1.8 で解決 |
 | v0.4 | 2026-08-26 | FR-19（requirements v0.1.11）のモック決済を反映: **S-29**（登録のお支払い）/ **D-11**（更新のお支払い）を追加、S-25 / D-01 の主ボタンを「お支払いへ」に変更、S-26 の本文に支払い控え、S-28 の Banner 本文を支払い前提に更新、D-04 に `RESTORE_FEE` 参照を明記、遷移図に決済分岐を追加。詳細は `docs/specs/payment-mock.md` |
+| v0.5 | 2026-08-27 | 実装との乖離を修正: §1 の幅 / サイドバーを実装の 1280px / 224px（rem 基準・大画面で font-size 拡大）と `MobileNav` に合わせ、S-24 のルートを `/domains/new`（検索条件は URL に載らない）に訂正、S-10 / S-13 / §4 の「Stale」を実装の「未同期」バッジ表記に統一、§7 #6 の仮置きを現状に更新 |
