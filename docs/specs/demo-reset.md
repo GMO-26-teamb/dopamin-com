@@ -83,10 +83,17 @@ FR-16 は「実登録するか mock に紐付けるか」を【要確認 §21.2 
 
 ### 2.5 削除の範囲
 
+消す対象は `domains`（+ CASCADE で落ちる `subdomain_plans` / `dns_records`）・`transfers`・
+`operation_logs`・`ai_logs` の 4 つで、いずれも同じトランザクションで消す。
+
 `domains` を消せば `subdomain_plans` / `dns_records` は FK の `ON DELETE CASCADE` で落ちる。
 `transfers.domain_id` は `ON DELETE SET NULL` で行が残るので `user_id` で明示的に消す。
 `operation_logs.user_id` は `ON DELETE SET NULL`（退会後も恒久保存）だが、デモリセットは
 「この画面をきれいにする」操作なので本人の行は消す。他ユーザーの行には触れない。
+`ai_logs.user_id` は `ON DELETE CASCADE`（退会時に一緒に落ちる）なので、`domains` を消すだけでは
+残る。デモリセットは退会ではないため、本人の行を明示的に消す（FR-14 の AI ログも消える）。
+`docs/specs/ai-logs.md` §8 #5 の「無期限（削除しない）」は TTL / アーカイブの話で、
+本人操作によるリセットはその例外。
 
 リセットは何度も押されるので、DB を消す前に前回のデモ用ドメイン名を控え、
 mock からも削除する（best-effort。失敗しても DB のリセットは成立させる）。
@@ -145,4 +152,5 @@ mock からも削除する（best-effort。失敗しても DB のリセットは
 | 版 | 日付 | 内容 |
 |---|---|---|
 | v0.1 | 2026-08-27 | 初版（#71 の実装に合わせて起票） |
+| v0.1.1 | 2026-08-27 | 実装との乖離を修正。§2.5 の削除対象に `ai_logs`（`clearDemoData` が同じトランザクションで本人の行を消す）を追記 |
 | v0.2 | 2026-08-27 | §3 に `NEXT_PUBLIC_API_MODE=http` の配線（応答は検証してから捨てる / 無効な環境の 404 はそのまま画面へ）を追記。§7 に web の契約テスト行。#187 |

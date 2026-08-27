@@ -51,10 +51,16 @@ flowchart LR
 単独キーでページを刻むと、境界で行の重複・欠落が起きる。そこで `(created_at, id)` の複合カーソルにし、
 `ORDER BY created_at DESC, id DESC` と揃える。
 
-- 値は `"<ISO8601>|<uuid>"` を base64url にした不透明文字列。クライアントは中身を解釈しない。
+- 値は `"<created_at::text>|<uuid>"` を base64url にした不透明文字列。クライアントは中身を解釈しない。
+  `created_at` は `timestamptz`（マイクロ秒精度）なので、JS の `Date`（ミリ秒）を経由すると下位桁が落ち、
+  同着タイブレークの `eq` が成立せずページ境界の行が恒久的に欠落する。そのため SELECT で
+  `created_at::text`（例 `2026-08-27 09:00:00.123456+00`）を取り出してそのままカーソルに畳み、
+  比較時は `::timestamptz` にキャストして精度の欠けない側で行う。復号側は旧カーソル互換として
+  ISO 8601（`2026-08-27T09:00:00.123Z`）も受け付ける。
 - drizzle は行値比較（`(a, b) < (x, y)`）を組めないので、同着時のタイブレークを `OR` で展開する。
 - 復元できない値は握りつぶさず `VALIDATION_ERROR`。先頭ページを返してしまうと
-  「同じページが無限に返る」壊れ方になるため。
+  「同じページが無限に返る」壊れ方になるため。日時形式だけでなく `id` の UUID も復号時に検証する
+  （検証せずに SQL へ渡すと `uuid` 列との比較が 22P02 で落ち、400 ではなく 500 になる）。
 
 ### 2.2 次ページの有無
 
@@ -136,4 +142,5 @@ ViewModel（`apps/web/lib/api/types.ts`）への写像で落ちる / 変わる�
 | 版 | 日付 | 内容 |
 |---|---|---|
 | v0.1 | 2026-08-27 | 初版（#64 の実装に合わせて起票） |
-| v0.2 | 2026-08-27 | §3 を「Web の配線」に広げ、`LogService` が 1 ページ契約であること（`limit=PAGINATION_MAX_LIMIT` で 1 回・`nextCursor` は未使用）と ViewModel 写像（`tokensIn`/`tokensOut` → `tokens`、`output` → `raw`、`requestId`/`errorMessage` は不使用）を追記。§7 に web の契約テスト行。#187 |
+| v0.2 | 2026-08-27 | 実装との乖離を修正: カーソルの内部表現は `created_at::text`（6aeacf1）。ISO 8601 は復号側の互換のみ。`id` の UUID 検証を追記 |
+| v0.3 | 2026-08-27 | §3 を「Web の配線」に広げ、`LogService` が 1 ページ契約であること（`limit=PAGINATION_MAX_LIMIT` で 1 回・`nextCursor` は未使用）と ViewModel 写像（`tokensIn`/`tokensOut` → `tokens`、`output` → `raw`、`requestId`/`errorMessage` は不使用）を追記。§7 に web の契約テスト行。#187 |

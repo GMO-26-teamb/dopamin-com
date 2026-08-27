@@ -2,6 +2,10 @@
 
 テスト方針の全体像は [requirements.md §19](requirements.md) を参照。ここでは実行手順をまとめる。
 
+自動テストで担保できない範囲（実レジストリへの副作用を伴う操作・他チームとの相互移管・
+実ブラウザのパスキー・本番 URL での通し）は、発表前日に
+[`specs/manual-checklist.md`](specs/manual-checklist.md) を全員で回して潰す（§19 の manual 行）。
+
 ## 1. 通常のテスト（unit / contract・CI で常時実行）
 
 ```sh
@@ -83,6 +87,14 @@ CI では `check` ジョブの最後に、他の処理が終わってから単�
 時間を測らない AC（AC-05-1 の「有名名は low」など）は
 `packages/shared/src/uniqueness/ac.test.ts` に置き、通常のテストで常時検証する。
 
+API のカバレッジ（`src/**/*.ts`、テストファイルを除く）を確認する場合:
+
+```sh
+pnpm --filter @dopamin/api test:coverage
+```
+
+statement / branch / function / line の各指標に 80% の下限を設けている。
+
 ## 2. 実レジストリ疎通テスト（apps/api/test/connect/）
 
 Kitaqsign / Kitaqnic への接続が正常にできているかを、実レジストリに対する
@@ -125,6 +137,22 @@ REGISTRY_CONNECT_TEST=1 pnpm --filter @dopamin/api exec vitest run test/connect/
 ```sh
 REGISTRY_CONNECT_TEST=1 pnpm --filter @dopamin/api exec vitest run test/connect/kitaqnic.connect.test.ts
 ```
+
+### 相手レジストラを使う Hono API 移管 E2E
+
+`apps/api/.env.local` をアプリ側、`apps/api/.env.test` を相手レジストラ側として、
+Kitaqnic の移管を Hono API 経由で一巡する手動テスト:
+
+```sh
+pnpm --filter @dopamin/api test:connect:transfer
+```
+
+- 両ファイルに `KITAQNIC_*` 5 項目が必要で、`KITAQNIC_REGISTRAR_ID` は互いに異なること。
+- アプリ側の登録・Poll・拒否・承認・取消・再取り込み・廃止は `app.request()` を通す。
+  相手側の申請・承認だけを実アダプタで実行する。
+- 通常の `pnpm test` / CI では skip される。実行時は一意な `.xyz` を登録し、最後に廃止して
+  RGP に入れる。途中失敗時も両レジストラから取消・削除を試み、回収できなければ対象名を警告する。
+- AuthCode、API キー、gate パスワード、レジストリ生応答はログに出さない。
 
 ## 3. e2e（Playwright + CDP Virtual Authenticator、FR-01）
 

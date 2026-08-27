@@ -78,6 +78,12 @@ const apiEnvSchema = z.object({
   AI_MODEL: optionalString,
   GOOGLE_GENERATIVE_AI_API_KEY: optionalString,
   ANTHROPIC_API_KEY: optionalString,
+  /**
+   * Vercel AI Gateway のキー。プロバイダ固有のキーを配らなくても AI を有効化できる
+   * （`ai` パッケージが依存する `@ai-sdk/gateway` が同じ名前で読む値）。
+   * プロバイダ固有のキーがある場合はそちらを優先し、無いときだけ gateway 経由にする。
+   */
+  AI_GATEWAY_API_KEY: optionalString,
 
   // 埋め込み（EMBEDDING_PROVIDER / EMBEDDING_MODEL）と独自性スコアの較正値
   // （UNIQUENESS_THETA_LOW / HIGH）は ADR-0003 で不採用になり、§17 の表からも外れた。

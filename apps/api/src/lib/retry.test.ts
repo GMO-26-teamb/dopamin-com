@@ -102,6 +102,28 @@ describe("withReadRetry", () => {
     expect(waited).toEqual([10, 20, 40]);
   });
 
+  it("既定の待機は実タイマーで待つ（seam を外しても間隔が消えない）", async () => {
+    // ここだけ setRetrySleepForTesting を使わず既定実装（setTimeout）を通す。
+    // 実時間で待つと遅く不安定になるのでフェイクタイマーで進める
+    vi.useFakeTimers();
+    try {
+      const fn = vi
+        .fn()
+        .mockRejectedValueOnce(registryError("REGISTRY_TIMEOUT"))
+        .mockResolvedValue("ok");
+      const pending = withReadRetry(fn, { baseMs: 5_000 });
+
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(fn).toHaveBeenCalledTimes(1); // まだ待機中で再試行していない
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(pending).resolves.toBe("ok");
+      expect(fn).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("retries: 0 なら再試行しない", async () => {
     const fn = vi.fn().mockRejectedValue(registryError("REGISTRY_TIMEOUT"));
     await expect(withReadRetry(fn, { retries: 0 })).rejects.toBeInstanceOf(

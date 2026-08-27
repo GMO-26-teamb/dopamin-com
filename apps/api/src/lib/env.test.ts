@@ -24,6 +24,7 @@ const MANAGED_KEYS = [
   "AI_MODEL",
   "GOOGLE_GENERATIVE_AI_API_KEY",
   "ANTHROPIC_API_KEY",
+  "AI_GATEWAY_API_KEY",
   "GITHUB_TOKEN",
   "DEMO_RESET_ENABLED",
   "LOG_LEVEL",
@@ -49,6 +50,7 @@ describe("getApiEnv: 最小構成（§17）", () => {
     expect(env.AI_MODEL).toBeUndefined();
     expect(env.GOOGLE_GENERATIVE_AI_API_KEY).toBeUndefined();
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(env.AI_GATEWAY_API_KEY).toBeUndefined();
     expect(env.GITHUB_TOKEN).toBeUndefined();
     expect(env.DIRECT_DATABASE_URL).toBeUndefined();
     expect(env.MOCK_FOREIGN_REGISTRAR_ID).toBeUndefined();
@@ -137,5 +139,17 @@ describe("requireEnv", () => {
   it("空文字も未設定として扱う", () => {
     process.env.GITHUB_TOKEN = "";
     expect(() => requireEnv("GITHUB_TOKEN")).toThrow(ApiException);
+  });
+});
+
+describe("getApiEnv: AI_GATEWAY_API_KEY（#179）", () => {
+  it("設定すればそのまま読める（任意。固有キーが無いときの経路で使う）", () => {
+    process.env.AI_GATEWAY_API_KEY = "vck_gateway";
+    expect(getApiEnv().AI_GATEWAY_API_KEY).toBe("vck_gateway");
+  });
+
+  it("空文字は未設定扱い（キーがあると誤判定して 503 を隠さない）", () => {
+    process.env.AI_GATEWAY_API_KEY = "";
+    expect(getApiEnv().AI_GATEWAY_API_KEY).toBeUndefined();
   });
 });

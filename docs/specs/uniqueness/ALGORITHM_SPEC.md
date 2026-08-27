@@ -77,7 +77,7 @@ else:
 ## 8. 最終出力
 
 - 全エントリを `si` 昇順でソート。**同点規則**: ECMAScript仕様(ES2019以降)により `Array.prototype.sort` は安定 — 同点時はコーパス配列の元順序を保持
-- `score = round(clamp(先頭エントリのsi, 0, 100))`(整数)。closestMatches = 上位3件(各ビュー生類似度・pop・決定カーブ付き。**先頭 = スコアを決定した相手**であることをpropertyテストで保証)
+- `score = round(clamp(先頭エントリのsi, 0, 100))`(整数)。closestMatches = 上位3件。各件が持つのは `name`(コーパス上の名前)/ `score`(そのエントリ単体のsi。丸め前)/ `similarity`(§5の`weighted`。重み付き類似度であってビュー別の生類似度ではない)/ `curve`(決定カーブ名: popularity / floor / derived / contain / edit1 / edit2 / popularity+word / floor+word)/ `popularity`(エントリのpop)の5項目。ビュー別の生類似度(§5の`sims`)は内部計算のみで公開しない(§10のプレフィルタでスキップしたエントリでは未計算のため全件分は存在しない)。**先頭 = スコアを決定した相手**であることをpropertyテストで保証
 - `band: score≥70 high / 40..69 mid / <40 low`。`riskLevel` はその逆向き(high band → risk low)
 - コーパスが空: score 100, closestMatches [], confidence は短名規則どおり
 
@@ -108,4 +108,4 @@ else:
 
 ## 11. 既知の限界(要旨)
 
-短名(≤3文字)は判定精度が構造的に低い(confidence: lowで明示)/ 接辞リスト外+4文字有名名は素通りし得る / 一般語辞書の網羅性に依存(固有名詞混入は0.95ガードで緩和)/ min合成は複数の中程度リスクを加算しない / 0.95・8文字等の境界に不連続がある / 実Trancoコーパス未投入(投入後に再較正) — 詳細はDESIGN_RATIONALE.mdと監査レポート(B_math_audit.md)を参照。
+短名(≤3文字)は判定精度が構造的に低い(confidence: lowで明示)/ 接辞リスト外+4文字有名名は素通りし得る / 一般語辞書の網羅性に依存(固有名詞混入は0.95ガードで緩和)/ min合成は複数の中程度リスクを加算しない / 0.95・8文字等の境界に不連続がある / 較正値は擬似コーパス129件時点のもので、実コーパス基準の再較正は未実施(実Tranco 8,520件 + curated 58件 = 統合8,543件は投入済み。既定コーパス識別子 `tranco-74V4X-2026-08-26-top10k+curated-v1`。移行時の挙動変化と未適用の対応候補は AUDIT_TRANCO.md を参照) — 詳細はDESIGN_RATIONALE.mdと数理監査レポート(検証ワークスペース側。リポジトリには含まれない)を参照。

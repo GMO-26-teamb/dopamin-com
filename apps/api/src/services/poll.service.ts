@@ -126,8 +126,12 @@ async function importApproved(
   return domain.id;
 }
 
-/** 通知 1 件の処理結果の内訳（`PollConsumeResult` に足し込む）。 */
-type Outcome = "created" | "settled" | "skipped";
+/**
+ * 通知 1 件の処理結果。
+ * `duplicate` は業務反映後に ack だけ失敗した通知の再配信で、processed には数えるが
+ * 「新しく作った行」には再計上しない（pollConsumeResultSchema の created の定義）。
+ */
+type Outcome = "created" | "settled" | "skipped" | "duplicate";
 
 /**
  * 受信した移管申請（`transfer_request`）を `transfers(out, pending)` にする（AC-12-4）。
@@ -139,6 +143,16 @@ async function handleRequest(
   name: string,
   now: Date,
 ): Promise<Outcome> {
+  // 業務反映が成功した後に ack だけ失敗すると、同じメッセージが再配信される。
+  // 行の UNIQUE 制約だけでも重複挿入は防げるが、先に検知しないと応答の created を
+  // 再び増やしてしまうため、冪等キーで早期終了する。
+  const known = await getTransferStore().findByMessageId(
+    adapter.id,
+    message.id,
+  );
+  if (known !== null) {
+    return "duplicate";
+  }
   const domain = await getDomainStore().find(name);
   if (domain === null || domain.ownership !== "owned") {
     return "skipped";
@@ -285,7 +299,9 @@ async function consumeRegistry(
     const outcome = await handleMessage(adapter, message, now);
     await adapter.ackMessage(message.id);
     result.processed += 1;
-    result[outcome] += 1;
+    if (outcome !== "duplicate") {
+      result[outcome] += 1;
+    }
   }
   console.warn(
     JSON.stringify({

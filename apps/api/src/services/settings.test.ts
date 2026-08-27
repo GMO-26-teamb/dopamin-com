@@ -8,6 +8,7 @@ const AI_KEYS = [
   "AI_MODEL",
   "GOOGLE_GENERATIVE_AI_API_KEY",
   "ANTHROPIC_API_KEY",
+  "AI_GATEWAY_API_KEY",
 ] as const;
 
 type AiKey = (typeof AI_KEYS)[number];
@@ -175,5 +176,38 @@ describe("resolveAiSettings（ユーザー設定 → env 既定の順）", () =>
       envWith(bothKeys),
     );
     expect(settings.provider).toBe("google");
+  });
+});
+
+describe("AI_GATEWAY_API_KEY（Vercel AI Gateway。#179）", () => {
+  it("gateway キーだけでも全プロバイダが有効になる（固有キーを配らずに動かす）", () => {
+    const providers = enabledAiProviders(
+      envWith({ AI_GATEWAY_API_KEY: "vck_gateway" }),
+    );
+    expect(providers.map((p) => p.id)).toEqual(["google", "anthropic"]);
+  });
+
+  it("gateway キーがあれば ANTHROPIC_API_KEY 無しでも anthropic を実効値にできる", () => {
+    const settings = resolveAiSettings(
+      { aiProvider: "anthropic", aiModel: null },
+      envWith({ AI_GATEWAY_API_KEY: "vck_gateway" }),
+    );
+    expect(settings.provider).toBe("anthropic");
+    expect(settings.model).toBe("claude-sonnet-4-5");
+  });
+
+  it("固有キーと併用してもプロバイダ一覧は変わらない（gateway は有効化の別経路）", () => {
+    const providers = enabledAiProviders(
+      envWith({
+        GOOGLE_GENERATIVE_AI_API_KEY: "g",
+        AI_GATEWAY_API_KEY: "vck_gateway",
+      }),
+    );
+    expect(providers.map((p) => p.id)).toEqual(["google", "anthropic"]);
+  });
+
+  it("どのキーも無ければ従来どおり AI_PROVIDER だけが選択肢", () => {
+    const providers = enabledAiProviders(envWith({ AI_PROVIDER: "anthropic" }));
+    expect(providers.map((p) => p.id)).toEqual(["anthropic"]);
   });
 });

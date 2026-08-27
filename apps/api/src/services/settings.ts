@@ -50,8 +50,19 @@ export function aiProviderApiKey(
   }
 }
 
+/**
+ * そのプロバイダを実際に呼べるか（FR-17 の「有効なプロバイダ」判定）。
+ *
+ * 固有キーが無くても Vercel AI Gateway のキーがあれば `lib/ai-provider.ts` が
+ * gateway 経由で出せるので、その場合は全プロバイダを有効として扱う。
+ * ここを固有キーだけで判定すると、gateway キーしか無い環境で `providerOptions` が
+ * 「有効なプロバイダ無し」に倒れ、設定画面も AI 呼び出しも 503 のままになる。
+ */
 function hasApiKey(provider: AiProvider, env: ApiEnv): boolean {
-  return aiProviderApiKey(provider, env) !== undefined;
+  return (
+    aiProviderApiKey(provider, env) !== undefined ||
+    env.AI_GATEWAY_API_KEY !== undefined
+  );
 }
 
 function providerOption(id: AiProvider, env: ApiEnv): ProviderOption {

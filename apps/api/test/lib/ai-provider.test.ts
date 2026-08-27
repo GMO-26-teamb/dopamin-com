@@ -43,6 +43,7 @@ const AI_KEYS = [
   "AI_MODEL",
   "GOOGLE_GENERATIVE_AI_API_KEY",
   "ANTHROPIC_API_KEY",
+  "AI_GATEWAY_API_KEY",
 ] as const;
 
 type AiKey = (typeof AI_KEYS)[number];
@@ -229,6 +230,55 @@ describe("resolveAiAttempt / resolveModel（§13.1 実効設定）", () => {
       expect((error as ApiException).code).toBe("AI_UNAVAILABLE");
       expect((error as ApiException).status).toBe(503);
     }
+  });
+});
+
+/**
+ * `LanguageModel` は `string | LanguageModelVx` のユニオンなので、
+ * どちらの形でもモデル ID を取り出せるようにする。
+ */
+function modelIdOf(model: LanguageModel): string {
+  return typeof model === "string" ? model : model.modelId;
+}
+
+describe("defaultModelFactory の gateway 経路（#179）", () => {
+  // このブロックだけは差し替えを外して既定のファクトリを通す
+  beforeEach(() => {
+    setAiModelFactoryForTesting(null);
+  });
+
+  it("固有キーが無くても AI_GATEWAY_API_KEY があれば 503 にならない", () => {
+    envWith({ AI_GATEWAY_API_KEY: "vck_gateway" });
+    expect(() => resolveModel()).not.toThrow();
+  });
+
+  it("gateway 経由のモデル ID は <provider>/<model> になる", () => {
+    envWith({
+      AI_PROVIDER: "anthropic",
+      AI_MODEL: "claude-haiku-4-5",
+      AI_GATEWAY_API_KEY: "vck_gateway",
+    });
+    expect(modelIdOf(resolveModel())).toBe("anthropic/claude-haiku-4-5");
+  });
+
+  it("AI_MODEL が既にスラッシュ付きなら二重に前置しない", () => {
+    envWith({
+      AI_PROVIDER: "google",
+      AI_MODEL: "google/gemini-2.5-pro",
+      AI_GATEWAY_API_KEY: "vck_gateway",
+    });
+    expect(modelIdOf(resolveModel())).toBe("google/gemini-2.5-pro");
+  });
+
+  it("固有キーがあるときは gateway を挟まず従来どおり直接プロバイダを使う", () => {
+    envWith({
+      AI_PROVIDER: "google",
+      AI_MODEL: "gemini-2.5-flash",
+      GOOGLE_GENERATIVE_AI_API_KEY: "g-key",
+      AI_GATEWAY_API_KEY: "vck_gateway",
+    });
+    // 直接経路はプロバイダ側の素のモデル ID（gateway の <provider>/ 前置が付かない）
+    expect(modelIdOf(resolveModel())).toBe("gemini-2.5-flash");
   });
 });
 
