@@ -111,7 +111,9 @@ FR-04 は 6 件に満たなければ 1 回だけ再生成するため、**残り
 
 Gemini は既定で思考トークンを使う。FR-13 のサブドメイン提案（GitHub 解析結果を含む
 2,235 文字のプロンプト）を `gemini-2.5-flash` で流すと reasoning に 1,800〜2,200 トークンを
-使い、1 回の生成が 11〜17 秒かかって 10 秒予算を**必ず**超える（毎回 `AI_UNAVAILABLE`）。
+使い、1 回の生成が 11〜17 秒かかって**当時の 10 秒予算**を必ず超えていた（毎回 `AI_UNAVAILABLE`）。
+予算はその後 20 秒に緩和された（requirements v0.1.22）が、思考量と無関係な揺れが残る以上
+上限を絞る意味は変わらないので `thinkingConfig` はそのまま使う。
 
 `callProvider` は google のときだけ `providerOptions.google.thinkingConfig` で上限を渡す。
 gateway 経由でも同じキーがそのまま転送される（実測で確認）。2026-08-27 の実測:
@@ -195,7 +197,7 @@ xai の追加（§2.6）では、設定画面の表示名マッピング
 
 | メソッド | パス | 変化 |
 |---|---|---|
-| GET | `/auth/me` | gateway キーがある環境では `ai.providers` に google / anthropic の両方が載る（FR-17） |
+| GET | `/auth/me` | gateway キーがある環境では `ai.providers` に google / anthropic / xai がすべて載る（FR-17。§2.6 のとおり xai は Gateway 経由専用なので、gateway キーが無ければ出ない） |
 | PATCH | `/settings/ai` | 上記に伴い、固有キーの無いプロバイダも保存できるようになる |
 | POST | `/ai/domain-candidates` ほか AI 経路 | 固有キーが無くても 503 にならず、gateway 経由で応答する |
 
@@ -250,3 +252,4 @@ xai の追加（§2.6）では、設定画面の表示名マッピング
 | v0.1.2 | 2026-08-27 | §2.5.1 を追加。Gemini の思考トークンで FR-13 が毎回 10 秒予算を超えていた問題（#199）と、`thinkingConfig` の上限 256 を採用した実測根拠 |
 | v0.2 | 2026-08-27 | §2.6〜2.9 を追加。xai（Grok）を Gateway 専用プロバイダとして足す方針、Gateway の ID 変換表（`xai` → `spacexai`、anthropic のハイフン → ドット）、既定モデル `grok-4.1-fast-non-reasoning`、3 プロバイダでのフォールバック。§3 に表示名マッピング、§6 に AC-G-7〜10、§8 に未決事項 #4 / #5 を追加。#187 |
 | v0.2.1 | 2026-08-27 | `AI_CALL_TIMEOUT_MS` が 10 → 20 秒になったことに追随（requirements v0.1.22）。§2.7 / §2.8 の「10 秒予算」の記述を更新。速いモデルを既定に置く方針（§2.8）は不変。§7 の実測記録は当時の 10 秒予算下のものなのでそのまま残す |
+| v0.2.2 | 2026-08-28 | §4 の `/auth/me` 行を 3 プロバイダ（google / anthropic / xai）に更新（§2.6 の xai 追加が反映されていなかった）。§2.5.1 の「10 秒予算」が当時の値であることを明示し、20 秒に緩和されても `thinkingConfig` を使い続ける理由を追記 |
