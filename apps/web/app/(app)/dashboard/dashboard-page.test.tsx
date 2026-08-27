@@ -98,7 +98,9 @@ describe("DashboardPage", () => {
       "Kitaqsign が応答しません — 一覧はキャッシュを表示しています",
     );
     expect(banner).toHaveTextContent("2 件が最新化できませんでした。");
-    expect(screen.getByText(/（キャッシュ）$/)).toBeInTheDocument();
+    // キャッシュ表示であることは Banner とカードの「未同期」バッジが言う。
+    // ヘッダーの Meta では重ねない（#216）
+    expect(screen.queryByText(/（キャッシュ）/)).not.toBeInTheDocument();
 
     // 落ちた kitaqsign（takutaku.com / tkt-lab.net）だけが未同期。
     // kitaqnic 側は最新化できているのでバッジは付かない = 部分縮退が画面に出ている
@@ -110,8 +112,12 @@ describe("DashboardPage", () => {
       screen.getByRole("link", { name: "今すぐ更新" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "復旧する" })).toBeInTheDocument();
-    // 参照系（詳細）は stale でも塞がない
-    expect(screen.getAllByRole("link", { name: "詳細" })).toHaveLength(3);
+    // 押せない理由は目に見える形で出す（#216）
+    expect(
+      screen.getByText("「最新化」を押すと操作できます。"),
+    ).toBeInTheDocument();
+    // 詳細を開く導線（カード面のリンク）は stale でも塞がない
+    expect(screen.getAllByRole("link", { name: /の詳細$/ })).toHaveLength(4);
   });
 
   it("参照系が落ちたら Error Card + 再試行（ui-screens §4）", async () => {

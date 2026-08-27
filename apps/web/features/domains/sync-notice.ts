@@ -81,14 +81,14 @@ const COPY: Record<FailureKind, KindCopy> = {
     // AC-18-1 / #130 の完了条件。疎通障害のときの文言は変えない
     title: "{registry}が応答しません — 一覧はキャッシュを表示しています",
     guidance:
-      "参照系は自動で 2 回再試行しました。しばらくして「最新化」を押してください。",
+      "自動で 2 回試し直しました。しばらくして「最新化」を押してください。",
     label: "応答なし",
   },
   spec_mismatch: {
-    title:
-      "{registry}の応答が想定と異なります — レジストリの仕様変更の可能性があります",
-    // lib/error-messages.ts の REGISTRY_SPEC_MISMATCH と同じ言い回しに揃える
-    guidance: "応答の形式が想定と異なりました。操作ログを確認してください。",
+    // 見出しは事実だけにして、原因の推測（仕様変更）は本文に回す
+    title: "{registry}の応答が想定と異なります",
+    guidance:
+      "レジストリの仕様が変わった可能性があります。操作ログを確認してください。",
     label: "想定外の応答",
   },
   rejected: {

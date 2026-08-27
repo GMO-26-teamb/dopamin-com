@@ -57,6 +57,11 @@ function renderCard(
   return domain;
 }
 
+/** カード面そのもののリンク（stretched link）。名前はドメイン名 + 「の詳細」。 */
+function cardLink(name = "takutaku.com") {
+  return screen.getByRole("link", { name: `${name} の詳細` });
+}
+
 describe("deriveCardStatus", () => {
   it("active は残り 30 日以内で Expiring に落ちる（AC-02-2）", () => {
     expect(deriveCardStatus(makeDomain({ expiresAt: at(31) }), NOW)).toBe(
@@ -90,32 +95,76 @@ describe("deriveCardStatus", () => {
   });
 });
 
+describe("カード面が詳細へのリンクになる（#216）", () => {
+  it("カード全体が詳細へのリンクで、別途「詳細」ボタンは出さない", () => {
+    renderCard();
+
+    expect(cardLink()).toHaveAttribute("href", "/domains/takutaku.com");
+    expect(
+      screen.queryByRole("link", { name: "詳細" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("カード面のリンクはカード全体を覆う（どこを押しても詳細へ行く）", () => {
+    renderCard();
+
+    // stretched link: article（relative）いっぱいに敷いた <a>
+    expect(cardLink()).toHaveClass("absolute", "inset-0");
+  });
+
+  it("Tab はカード面のリンク → 主操作の順に進み、Enter で詳細へ行ける", async () => {
+    const user = userEvent.setup();
+    renderCard();
+
+    await user.tab();
+    const link = cardLink();
+    expect(link).toHaveFocus();
+
+    // フォーカスしたリンクを Enter で起動できる（= キーボードだけで詳細に到達できる）
+    const activated = vi.fn((event: Event) => {
+      event.preventDefault();
+    });
+    link.addEventListener("click", activated);
+    await user.keyboard("{Enter}");
+    expect(activated).toHaveBeenCalled();
+
+    await user.tab();
+    expect(screen.getByRole("link", { name: "更新" })).toHaveFocus();
+  });
+
+  it("状態バッジ横の HelpTip は出さない（意味は Meta が持つ）", () => {
+    renderCard();
+
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+});
+
 describe("DomainCard の 8 ステータス（ui-screens §2.2）", () => {
-  it("Active: Active バッジ + 進捗 + 更新 / 詳細", () => {
+  it("Active: Active バッジ + 進捗 + 更新。残日数は Meta に出す", () => {
     renderCard();
 
     expect(screen.getByText("Active")).toBeInTheDocument();
     expect(screen.getByRole("progressbar")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "更新" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "詳細" })).toHaveAttribute(
-      "href",
-      "/domains/takutaku.com",
-    );
+    expect(
+      screen.getByText(/^\d{4}-\d{2}-\d{2} · 残330日$/),
+    ).toBeInTheDocument();
     expect(screen.getByText("Kitaqsign")).toBeInTheDocument();
   });
 
-  it("Expiring: 残日数バッジ（Warn）+ 今すぐ更新", () => {
+  it("Expiring: バッジは状態名だけ（Warn）で、残日数は Meta 側に出す", () => {
     renderCard({ name: "harupika.xyz", expiresAt: at(23), tld: "xyz" });
 
-    // 残日数はバッジだけが持つ（Meta 側は期限日のみ）ので getByText が一意に取れる
-    expect(screen.getByText("残23日")).toBeInTheDocument();
+    expect(screen.getByText("まもなく期限")).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "今すぐ更新" }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/^\d{4}-\d{2}-\d{2}$/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/^\d{4}-\d{2}-\d{2} · 残23日$/),
+    ).toBeInTheDocument();
   });
 
-  it("Redeemable: 復旧猶予の残日数 + 復旧する（AC-10-1）", () => {
+  it("Redeemable: バッジは状態名、Meta は次にできること + 残日数（AC-10-1）", () => {
     renderCard({
       name: "demo-app.online",
       // RGP 中は EPP 仕様上 pendingDelete が共存する（mock の形・#171）
@@ -125,9 +174,9 @@ describe("DomainCard の 8 ステータス（ui-screens §2.2）", () => {
       rgpUntil: at(18),
     });
 
-    expect(screen.getByText("復旧猶予 残18日")).toBeInTheDocument();
+    expect(screen.getByText("復旧猶予")).toBeInTheDocument();
+    expect(screen.getByText("復旧できます · 残18日")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "復旧する" })).toBeInTheDocument();
-    expect(screen.getByText("廃止済み — 復旧可能")).toBeInTheDocument();
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
   });
 
@@ -140,11 +189,11 @@ describe("DomainCard の 8 ステータス（ui-screens §2.2）", () => {
       rgpUntil: at(18),
     });
 
-    expect(screen.getByText("復旧猶予 残18日")).toBeInTheDocument();
+    expect(screen.getByText("復旧猶予")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "復旧する" })).toBeInTheDocument();
   });
 
-  it("Transferring: 移管申請中 + 状態を確認（/transfers へ）。詳細は出さない", () => {
+  it("Transferring: 移管申請中 + 状態を確認（/transfers へ）", () => {
     renderCard({
       name: "tkt-lab.net",
       statuses: ["ok", "pendingTransfer"],
@@ -152,13 +201,16 @@ describe("DomainCard の 8 ステータス（ui-screens §2.2）", () => {
     });
 
     expect(screen.getByText("移管申請中")).toBeInTheDocument();
+    expect(screen.getByText("完了するまで変更できません")).toBeInTheDocument();
+    // 宛先がカード面（詳細）と違うので、この導線だけはボタンとして残す
     expect(screen.getByRole("link", { name: "状態を確認" })).toHaveAttribute(
       "href",
       "/transfers?domain=tkt-lab.net",
     );
-    expect(
-      screen.queryByRole("link", { name: "詳細" }),
-    ).not.toBeInTheDocument();
+    expect(cardLink("tkt-lab.net")).toHaveAttribute(
+      "href",
+      "/domains/tkt-lab.net",
+    );
   });
 
   it("Hold: 停止中 + 情報修正", () => {
@@ -168,15 +220,18 @@ describe("DomainCard の 8 ステータス（ui-screens §2.2）", () => {
     expect(screen.getByRole("link", { name: "情報修正" })).toBeInTheDocument();
   });
 
-  it("Inactive: NS 未設定 + NS を設定", () => {
+  it("Inactive: NS 未設定 + 何が起きているかを Meta に足す", () => {
     renderCard({ statuses: ["inactive"] });
 
     expect(screen.getByText("NS 未設定")).toBeInTheDocument();
+    expect(
+      screen.getByText(/^つながりません · \d{4}-\d{2}-\d{2}$/),
+    ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "NS を設定" })).toBeInTheDocument();
     expect(screen.getByRole("progressbar")).toBeInTheDocument();
   });
 
-  it("PendingDelete: 削除待ち + 詳細のみ", () => {
+  it("PendingDelete: 削除待ち。できる操作が無いのでボタンは出さない", () => {
     renderCard({
       statuses: ["pendingDelete"],
       rgpStatuses: ["pendingDelete"],
@@ -184,12 +239,10 @@ describe("DomainCard の 8 ステータス（ui-screens §2.2）", () => {
     });
 
     expect(screen.getByText("削除待ち")).toBeInTheDocument();
-    expect(screen.getByText("完全削除まで 残4日")).toBeInTheDocument();
+    expect(screen.getByText("完全削除まで · 残4日")).toBeInTheDocument();
+    // 残るリンクはカード面の 1 本だけ
     expect(screen.getAllByRole("link")).toHaveLength(1);
-    expect(screen.getByRole("link", { name: "詳細" })).toHaveAttribute(
-      "href",
-      "/domains/takutaku.com",
-    );
+    expect(cardLink()).toHaveAttribute("href", "/domains/takutaku.com");
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
   });
 
@@ -205,29 +258,38 @@ describe("DomainCard の 8 ステータス（ui-screens §2.2）", () => {
 });
 
 describe("DomainCard の操作", () => {
-  it("更新ロック中は主操作を Disabled にして理由を読み上げる（AC-07-1）", () => {
+  it("更新ロック中は主操作を Disabled にし、理由を目に見える形で出す（AC-07-1）", () => {
     renderCard({ statuses: ["ok", "clientRenewProhibited"] });
 
     expect(screen.getByText("更新ロック")).toBeInTheDocument();
     const renew = screen.getByRole("button", { name: "更新" });
     expect(renew).toBeDisabled();
-    expect(
-      screen.getByText("clientRenewProhibited のため実行できません。"),
-    ).toBeInTheDocument();
-    expect(renew).toHaveAttribute(
-      "aria-describedby",
-      screen.getByText("clientRenewProhibited のため実行できません。").id,
-    );
+
+    const note = screen.getByText("詳細画面でロックを外すと操作できます。");
+    // sr-only に隠さない（目で見ているユーザーにも理由が届く）
+    expect(note).not.toHaveClass("sr-only");
+    expect(renew).toHaveAttribute("aria-describedby", note.id);
   });
 
-  it("Stale のカードは Stale バッジ + 最終同期を出し、更新系を Disabled にする（S-13）", () => {
+  it("レジストリ側のロックは自分で外せないと分かる文言にする", () => {
+    renderCard({ statuses: ["ok", "serverRenewProhibited"] });
+
+    expect(
+      screen.getByText("レジストリ側で止まっているため操作できません。"),
+    ).toBeInTheDocument();
+  });
+
+  it("Stale のカードは未同期バッジ + 最終同期 + 押せない理由を出す（S-13）", () => {
     renderCard({ stale: true, syncedAt: minutesAgo(42) });
 
     expect(screen.getByText("未同期")).toBeInTheDocument();
     expect(screen.getByText("最終同期 42分前")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "更新" })).toBeDisabled();
-    // 参照系（詳細）は塞がない
-    expect(screen.getByRole("link", { name: "詳細" })).toBeInTheDocument();
+
+    const note = screen.getByText("「最新化」を押すと操作できます。");
+    expect(note).not.toHaveClass("sr-only");
+    // 詳細を開く導線は stale でも塞がない
+    expect(cardLink()).toHaveAttribute("href", "/domains/takutaku.com");
   });
 
   it("onRenew を渡すとダイアログ用のコールバックが呼ばれる", async () => {
