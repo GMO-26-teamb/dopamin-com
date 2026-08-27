@@ -206,6 +206,50 @@ async function seedUserWithPasskeys(
   return { userId: session.user.id, cookie: session.cookie, ids };
 }
 
+async function remainingIds(userId: string): Promise<string[]> {
+  const rows = await db
+    .select({ id: schema.passkeyCredentials.id })
+    .from(schema.passkeyCredentials)
+    .where(eq(schema.passkeyCredentials.userId, userId));
+  return rows.map((r) => r.id).sort();
+}
+
+/**
+ * #220: 別タブ / 別端末からほぼ同時に削除しても、必ず 1 件残ること。
+ * web 側の busy 抑止は同一タブの React 状態でしかなく、API が守らないと
+ * ログイン手段が 0 件になって復旧できない（docs/specs/passkey-auth.md §0）。
+ */
+describe("DELETE /api/v1/auth/passkeys/:id の同時実行（#220）", () => {
+  async function del(id: string, cookie: string): Promise<Response> {
+    return await app.request(
+      `/api/v1/auth/passkeys/${encodeURIComponent(id)}`,
+      { method: "DELETE", headers: { cookie } },
+    );
+  }
+
+  it("2 件を同時に削除しても片方が 409 LAST_PASSKEY で、1 件残る", async () => {
+    const { userId, cookie, ids } = await seedUserWithPasskeys("concur2", 2);
+
+    const responses = await Promise.all(ids.map((id) => del(id, cookie)));
+
+    expect(responses.map((r) => r.status).sort()).toEqual([200, 409]);
+    const conflict = responses.find((r) => r.status === 409);
+    expect(await conflict?.json()).toMatchObject({
+      error: { code: "LAST_PASSKEY" },
+    });
+    expect(await remainingIds(userId)).toHaveLength(1);
+  });
+
+  it("3 件を同時に削除しても 1 件残る", async () => {
+    const { userId, cookie, ids } = await seedUserWithPasskeys("concur3", 3);
+
+    const responses = await Promise.all(ids.map((id) => del(id, cookie)));
+
+    expect(responses.filter((r) => r.status === 200)).toHaveLength(2);
+    expect(await remainingIds(userId)).toHaveLength(1);
+  });
+});
+
 /**
  * #221: 一覧の並びを API が保証する（作成日昇順 → id 昇順）。
  * orderBy が無いと Postgres のプラン任せになり、UPDATE された行が末尾へ飛ぶ。

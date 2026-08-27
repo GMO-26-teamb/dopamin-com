@@ -586,6 +586,89 @@ describe("deletePasskey（FR-01 spec §3.4）", () => {
 });
 
 /**
+ * #220: 「最後の 1 件は消せない」ガードの原子性。
+ *
+ * SELECT →（件数判定）→ DELETE を別文で行うと、同一ユーザーの並行削除が
+ * どちらも「まだ 2 件ある」を観測してすり抜け、パスキーが 0 件になる。
+ * パスキーは唯一のログイン手段で復旧手段が無い（docs/specs/passkey-auth.md §0）ため、
+ * 0 件になった時点でそのアカウントは二度と開けない。
+ */
+describe("deletePasskey の並行削除（#220 / FR-01 spec §3.4）", () => {
+  /** userId のパスキーを n 件（p-0 … p-{n-1}）持つ状態を作る */
+  async function seedPasskeys(count: number): Promise<string> {
+    const { userId } = await seedUserWithPasskey(db, { credentialId: "p-0" });
+    for (let i = 1; i < count; i += 1) {
+      await db.insert(schema.passkeyCredentials).values({
+        id: `p-${i}`,
+        userId,
+        publicKey: new Uint8Array([i]),
+        counter: 0,
+      });
+    }
+    return userId;
+  }
+
+  function rejections(
+    results: PromiseSettledResult<unknown>[],
+  ): PromiseRejectedResult[] {
+    return results.filter(
+      (r): r is PromiseRejectedResult => r.status === "rejected",
+    );
+  }
+
+  /** 失敗したのはちょうど 1 本で、その理由が期待した ApiException であること */
+  function expectSingleFailure(
+    results: PromiseSettledResult<unknown>[],
+    code: ErrorCode,
+  ): void {
+    const failed = rejections(results);
+    expect(failed).toHaveLength(1);
+    const reason: unknown = failed[0]?.reason;
+    expect(reason).toBeInstanceOf(ApiException);
+    expect((reason as ApiException).code).toBe(code);
+  }
+
+  it("2 件を同時に削除しても 1 件残り、片方が 409 LAST_PASSKEY", async () => {
+    const userId = await seedPasskeys(2);
+
+    const results = await Promise.allSettled([
+      deletePasskey(db, userId, "p-0"),
+      deletePasskey(db, userId, "p-1"),
+    ]);
+
+    expectSingleFailure(results, "LAST_PASSKEY");
+    expect(await db.$count(schema.passkeyCredentials)).toBe(1);
+  });
+
+  it("3 件を同時に削除しても 1 件残る", async () => {
+    const userId = await seedPasskeys(3);
+
+    const results = await Promise.allSettled([
+      deletePasskey(db, userId, "p-0"),
+      deletePasskey(db, userId, "p-1"),
+      deletePasskey(db, userId, "p-2"),
+    ]);
+
+    expect(rejections(results)).toHaveLength(1);
+    expect(await db.$count(schema.passkeyCredentials)).toBe(1);
+  });
+
+  it("同じ ID を 2 回同時に削除しても、消えるのは 1 件だけ", async () => {
+    const userId = await seedPasskeys(2);
+
+    const results = await Promise.allSettled([
+      deletePasskey(db, userId, "p-0"),
+      deletePasskey(db, userId, "p-0"),
+    ]);
+
+    // 2 本目は「もう無い」= NOT_FOUND。200 を返して消えた気にさせない
+    expectSingleFailure(results, "NOT_FOUND");
+    const rest = await db.select().from(schema.passkeyCredentials);
+    expect(rest.map((r) => r.id)).toEqual(["p-1"]);
+  });
+});
+
+/**
  * #221: 一覧の並び順は API が保証する（作成日昇順、同時刻は id 昇順）。
  * orderBy が無いと返却順が Postgres のプラン任せになり、ログインや名前変更で
  * UPDATE された行が Seq Scan の末尾へ移動して画面の行が飛ぶ。
