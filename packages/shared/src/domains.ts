@@ -47,6 +47,21 @@ export const domainStaleReasonSchema = z.object({
 });
 
 /**
+ * 保存済みサブドメイン設計の件数（FR-13 → FR-07 の詳細カード）。
+ *
+ * 詳細画面のカードは「保存済み · n ホスト · 反映済み a/n」しか出さないので、
+ * 設計そのもの（`GET /domains/:name/subdomain-plan`）ではなく件数だけを詳細に載せる。
+ * 中身が要る画面（S-43）は従来どおり設計 API を読む。
+ * `applied` は疑似 DNS ゾーンと突き合わせた反映済みホスト数で、保存後に編集した
+ * ホストは含まれない（AC-13-6 の `changed`）。
+ */
+export const subdomainPlanSummarySchema = z.object({
+  hosts: z.number().int().nonnegative(),
+  applied: z.number().int().nonnegative(),
+});
+export type SubdomainPlanSummary = z.infer<typeof subdomainPlanSummarySchema>;
+
+/**
  * `GET /domains/:name` などのレスポンス（FR-07）。
  *
  * - `domain`: 正規化済み `info`（レジストリが正。§6.5）
@@ -74,6 +89,14 @@ export const domainDetailResponseSchema = z.object({
    * （中身を知らないため。非スポンサーの `contact info` 可否は要確認 #14）。
    */
   registrantProfile: registrantProfileSchema.nullable(),
+  /**
+   * 保存済みサブドメイン設計の件数（FR-13）。未保存なら `null`。
+   *
+   * 導出値ではなく別テーブル（`subdomain_plans` / `dns_records`）にある事実なので、
+   * `displayStatus` と違って API が返す。詳細を開くたびに設計 API を追加で呼ばずに
+   * 済ませるためで、画面はこの値だけでカードを描く。
+   */
+  subdomainPlan: subdomainPlanSummarySchema.nullable(),
   stale: z.boolean(),
   /** 最後にレジストリと同期できた時刻（ISO 8601）。 */
   syncedAt: z.string(),

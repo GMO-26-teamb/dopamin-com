@@ -30,12 +30,25 @@ export interface DomainRecord {
   ownership: Ownership;
   /** 最後に取得した `info` の正規化結果。 */
   info: DomainInfo;
+  /**
+   * 復旧猶予（RGP）の期限（§9.1 `rgp_until`）。分からなければ null。
+   *
+   * 両レジストリの `info` は RGP のステータスしか返さず期限を持たないので、
+   * この列を書けるのは期限を知っている経路だけ（現状は FR-16 のデモ投入）。
+   * `info` からの write-through では触らない（{@link toDomainValues} に無い）ので、
+   * 一度入った値は再同期で消えない。null のまま出す画面は残日数を出さない。
+   */
+  rgpUntil: Date | null;
   /** 最後にレジストリと同期できた時刻。 */
   syncedAt: Date;
 }
 
-/** 書き込み時の入力。`id` は DB が採番するので渡さない。 */
-export type DomainUpsert = Omit<DomainRecord, "id">;
+/**
+ * 書き込み時の入力。`id` は DB が採番するので渡さない。
+ * `rgpUntil` も渡さない: `info` からは決まらない値で、書き込み経路
+ * （`setDomainRgpUntil`）が別にあるため（上書きすると消えてしまう）。
+ */
+export type DomainUpsert = Omit<DomainRecord, "id" | "rgpUntil">;
 
 export type DomainRow = typeof schema.domains.$inferSelect;
 export type DomainValues = typeof schema.domains.$inferInsert;
@@ -94,6 +107,7 @@ export function toDomainRecord(row: DomainRow): DomainRecord {
     // 想定外の値（手動更新など）で一覧が落ちるより owned として扱う方が安全（NFR-05）
     ownership: ownershipSchema.catch("owned").parse(row.ownership),
     info,
+    rgpUntil: row.rgpUntil,
     syncedAt: row.syncedAt ?? row.createdAt,
   };
 }

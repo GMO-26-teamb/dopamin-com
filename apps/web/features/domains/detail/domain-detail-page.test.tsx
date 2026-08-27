@@ -24,12 +24,14 @@ function renderPage(
   name: string,
   scenario: MockScenario = "default",
   domainOverrides: Partial<DomainService> = {},
+  transferOverrides: Partial<Services["transfers"]> = {},
 ) {
   // 遅延 0ms で全状態を待たずに検証する（scenario ごとの挙動は mock-services が持つ）
   const base = createMockServices(scenario, { delayMs: 0 });
   const services: Services = {
     ...base,
     domains: { ...base.domains, ...domainOverrides },
+    transfers: { ...base.transfers, ...transferOverrides },
   };
   return render(
     <ThemeProvider>
@@ -101,43 +103,49 @@ describe("DomainDetailPage", () => {
 
     const panel = actionsPanel();
     expect(
-      within(panel).getByRole("button", { name: /更新（期限延長）/ }),
+      within(panel).getByRole("button", { name: "有効期限を延長" }),
     ).toBeEnabled();
     expect(
-      within(panel).getByRole("button", { name: /情報修正（NS・コンタクト）/ }),
+      within(panel).getByRole("button", { name: "情報修正" }),
     ).toBeEnabled();
-    // 復旧は RGP ではないので不可（理由つき）
+    // Active では復旧という操作自体が無いので、Disabled でも出さない
+    expect(within(panel).queryByRole("button", { name: "復旧" })).toBeNull();
+    expect(within(panel).queryByText("RGP ではないため不可")).toBeNull();
+  });
+
+  it("S-30: サブドメイン設計は件数を出し、カード全体がリンクになる（#217）", async () => {
+    renderPage("takutaku.com");
+
     expect(
-      within(panel).getByRole("button", {
-        name: "復旧 — RGP ではないため不可",
-      }),
-    ).toBeDisabled();
+      await screen.findByText("保存済み · 4ホスト · 反映済み 2/4"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /開く/ })).toHaveAttribute(
+      "href",
+      "/domains/takutaku.com/subdomains",
+    );
   });
 
   it("S-31: ?mock=stale は Banner Warn を出し、全操作を Disabled にする", async () => {
     renderPage("takutaku.com", "stale");
 
-    expect(
-      await screen.findByText("最新の状態を取得できませんでした"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("キャッシュを表示中")).toBeInTheDocument();
     const panel = actionsPanel();
     for (const label of [
-      /更新（期限延長）/,
-      /情報修正/,
-      /移管OUT/,
-      /廃止/,
-      /復旧/,
+      "有効期限を延長",
+      "情報修正",
+      "他社へ移管する",
+      "廃止",
     ]) {
       expect(within(panel).getByRole("button", { name: label })).toBeDisabled();
     }
+    // 理由はラベルに連結せず、ボタンの下に別の行として出す
+    expect(within(panel).getAllByText("再同期が必要")).toHaveLength(4);
   });
 
   it("S-32: 移管申請の受信は承認 / 拒否とカウントダウンを出し、他操作を止める", async () => {
     renderPage("tkt-lab.net");
 
-    expect(
-      await screen.findByText("相手レジストラから移管申請を受信しました"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("移管申請を受信")).toBeInTheDocument();
     expect(screen.getByText("移管中（申請受信）")).toBeInTheDocument();
 
     const panel = actionsPanel();
@@ -145,31 +153,93 @@ describe("DomainDetailPage", () => {
       expect(within(panel).getByRole("button", { name: "承認" })).toBeEnabled();
     });
     expect(within(panel).getByRole("button", { name: "拒否" })).toBeEnabled();
+    // カウントダウンはボタンの隣（操作パネル）だけに出す
     expect(
       within(panel).getByText(/自動承認まで \d+:\d{2}/),
     ).toBeInTheDocument();
+    expect(screen.getAllByText(/自動承認まで \d+:\d{2}/)).toHaveLength(1);
     expect(
-      within(panel).getByRole("button", { name: /更新（期限延長）/ }),
+      within(panel).getByRole("button", { name: "有効期限を延長" }),
     ).toBeDisabled();
   });
+
+  it("S-32: /transfers が落ちても再取得から承認 / 拒否に進める（#212）", async () => {
+    const user = userEvent.setup();
+    const base = createMockServices("default", { delayMs: 0 });
+    let failing = true;
+    const list = vi.fn(() =>
+      failing
+        ? Promise.reject(
+            new ApiClientError({
+              code: "INTERNAL",
+              message: "移管一覧を取得できませんでした。",
+              // 自動再試行に入ると「取得中…」のままになるので、この検証では 1 回で確定させる
+              retryable: false,
+            }),
+          )
+        : base.transfers.list(),
+    );
+    renderPage("tkt-lab.net", "default", {}, { list });
+
+    // 受信中であることは詳細だけで分かるので、状態と理由は必ず出る
+    expect(await screen.findByText("移管申請を受信")).toBeInTheDocument();
+    const panel = actionsPanel();
+    await waitFor(() => {
+      expect(
+        within(panel).getByText("申請の内容をまだ取得できていません。"),
+      ).toBeInTheDocument();
+    });
+    expect(within(panel).getByRole("button", { name: "承認" })).toBeDisabled();
+
+    // 再取得が通れば、詳細画面から応答できるようになる
+    failing = false;
+    await user.click(within(panel).getByRole("button", { name: "申請を取得" }));
+    await waitFor(() => {
+      expect(within(panel).getByRole("button", { name: "承認" })).toBeEnabled();
+    });
+    expect(
+      within(panel).queryByText("申請の内容をまだ取得できていません。"),
+    ).toBeNull();
+  }, 20_000);
 
   it("S-33: RGP は Banner Info と「復旧」だけ有効", async () => {
     renderPage("demo-app.online");
 
+    expect(await screen.findByText("復旧猶予（RGP）中")).toBeInTheDocument();
+    // 猶予期限（fixtures は 18 日後）から残日数を出す。0 日と丸めない（#211）
     expect(
-      await screen.findByText("復旧猶予（RGP）期間中です"),
+      screen.getByText(
+        "残り 18 日。「復旧」で Active に戻せます。期間を過ぎると完全に削除されます。",
+      ),
     ).toBeInTheDocument();
     const panel = actionsPanel();
     expect(within(panel).getByRole("button", { name: "復旧" })).toBeEnabled();
     expect(
-      within(panel).getByRole("button", { name: /更新（期限延長）/ }),
+      within(panel).getByRole("button", { name: "有効期限を延長" }),
     ).toBeDisabled();
+  });
+
+  it("S-33: 猶予期限が分からないときは残日数を出さない（#211）", async () => {
+    const base = createMockServices("default", { delayMs: 0 });
+    const get = vi.fn(async (name: string) => ({
+      ...(await base.domains.get(name)),
+      rgpUntil: null,
+    }));
+    renderPage("demo-app.online", "default", { get });
+
+    expect(await screen.findByText("復旧猶予（RGP）中")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "「復旧」で Active に戻せます。期間を過ぎると完全に削除されます。",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/残り \d+ 日/)).toBeNull();
   });
 
   it("S-34: 移管済みは操作パネルを出さない", async () => {
     renderPage("old-blog.xyz");
 
-    expect(await screen.findByText("表示のみ")).toBeInTheDocument();
+    expect(await screen.findByText("記録として表示中")).toBeInTheDocument();
     expect(screen.getByText("移管済み")).toBeInTheDocument();
     expect(screen.queryByText("操作")).toBeNull();
   });
@@ -177,9 +247,8 @@ describe("DomainDetailPage", () => {
   it("S-36: 削除待ちは操作パネルを出さず復旧も出さない（AC-11-2）", async () => {
     renderPage("pending-delete.example");
 
-    expect(
-      await screen.findByText(/完全削除まで残り \d+ 日/),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("完全削除の処理中")).toBeInTheDocument();
+    expect(screen.getByText(/^残り \d+ 日。/)).toBeInTheDocument();
     expect(screen.queryByText("操作")).toBeNull();
     expect(screen.queryByRole("button", { name: "復旧" })).toBeNull();
   });
@@ -188,23 +257,21 @@ describe("DomainDetailPage", () => {
     renderPage("hold.example");
 
     expect(
-      await screen.findByText("名前解決されません。運営の案内を確認"),
+      await screen.findByText("停止中（名前解決されません）"),
     ).toBeInTheDocument();
     const panel = actionsPanel();
     expect(
-      within(panel).getByRole("button", { name: /更新（期限延長）/ }),
+      within(panel).getByRole("button", { name: "有効期限を延長" }),
     ).toBeEnabled();
     expect(
-      within(panel).getByRole("button", { name: /情報修正/ }),
+      within(panel).getByRole("button", { name: "情報修正" }),
     ).toBeEnabled();
   });
 
   it("S-38: NS 未設定は CTA 付き Banner と「—（未設定）」を出す", async () => {
     renderPage("inactive.example");
 
-    expect(
-      await screen.findByText("ネームサーバーを設定してください"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("ネームサーバー未設定")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "NS を設定" }),
     ).toBeInTheDocument();
@@ -214,10 +281,12 @@ describe("DomainDetailPage", () => {
   it("S-39: コンタクト未移行は Banner Warn と「情報修正」CTA を出す", async () => {
     renderPage("harupika.xyz");
 
-    expect(
-      await screen.findByText("登録者情報が旧レジストラのままです"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("登録者情報が未移行")).toBeInTheDocument();
     expect(screen.getByText("未移行")).toBeInTheDocument();
+    // 直し方はカードの中にも置く（バナーまで戻らなくていい）
+    expect(
+      screen.getByRole("button", { name: "登録者情報を変更" }),
+    ).toBeInTheDocument();
   });
 
   it("?mock=error は Error Card と再試行を出す", async () => {
@@ -237,7 +306,7 @@ describe("DomainDetailPage", () => {
     renderPage("takutaku.com");
 
     await user.click(
-      await screen.findByRole("button", { name: /更新（期限延長）/ }),
+      await screen.findByRole("button", { name: "有効期限を延長" }),
     );
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("有効期限を延長")).toBeInTheDocument();
@@ -274,7 +343,7 @@ describe("DomainDetailPage", () => {
     renderPage("takutaku.com", "default", { renew });
 
     await user.click(
-      await screen.findByRole("button", { name: /更新（期限延長）/ }),
+      await screen.findByRole("button", { name: "有効期限を延長" }),
     );
     const dialog = await screen.findByRole("dialog");
     await user.click(
@@ -321,7 +390,7 @@ describe("DomainDetailPage", () => {
     renderPage("takutaku.com");
 
     await user.click(
-      await screen.findByRole("button", { name: /移管OUT — AuthCode表示/ }),
+      await screen.findByRole("button", { name: "他社へ移管する" }),
     );
     const dialog = await screen.findByRole("dialog");
     const first = await within(dialog).findByText(/^MOCK-TAKUTAKU-\d+$/);
@@ -377,7 +446,7 @@ describe("DomainDetailPage", () => {
     renderPage("takutaku.com", "default", { renew });
 
     await user.click(
-      await screen.findByRole("button", { name: /更新（期限延長）/ }),
+      await screen.findByRole("button", { name: "有効期限を延長" }),
     );
     await payThroughRenewDialog(user);
 
@@ -413,7 +482,7 @@ describe("DomainDetailPage", () => {
     renderPage("takutaku.com", "default", { renew });
 
     await user.click(
-      await screen.findByRole("button", { name: /更新（期限延長）/ }),
+      await screen.findByRole("button", { name: "有効期限を延長" }),
     );
     await payThroughRenewDialog(user);
 

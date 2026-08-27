@@ -5,12 +5,20 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { DomainDetail } from "@/lib/api/types";
 import { formatRelativeTime } from "../format";
-import { statusBadgeTone, statusBadgeVariant } from "../status-badge";
-import { isTransferLocked, statusBadgeLabel } from "./derive";
+import {
+  statusBadgeTone,
+  statusBadgeVariant,
+  statusLabel,
+} from "../status-badge";
 
 /**
  * Figma: S-30 `83:2444` header（`83:2447`）
- * ドメイン名 + 状態バッジ + 移管ロックバッジ + 最終同期 / 再同期。
+ * ドメイン名 + 状態バッジ + 最終同期 / 再同期。
+ *
+ * 移管ロックはここに出さない。ロックの ON / OFF と切り替え方は操作パネルの行が持ち、
+ * 根拠の EPP ステータスは基本情報カードのバッジが持つ。ヘッダーにも並べると
+ * 同じ事実が 3 か所に出て、どこを見ればいいか分からなくなる。
+ * 残日数も同じ理由で状態バナーに寄せてある（バッジは状態名だけ）。
  */
 export interface DetailHeaderProps {
   domain: DomainDetail;
@@ -37,11 +45,8 @@ export function DetailHeader({
         tone={statusBadgeTone(domain.displayStatus)}
         variant={statusBadgeVariant(domain.displayStatus)}
       >
-        {statusBadgeLabel(domain, now)}
+        {statusLabel(domain.displayStatus)}
       </Badge>
-      {isTransferLocked(domain.statuses) ? (
-        <Badge tone="neutral">移管ロック中</Badge>
-      ) : null}
       <div aria-hidden="true" className="min-w-0 flex-1" />
       <p className="shrink-0 text-caption text-muted">
         最終同期 {formatRelativeTime(domain.syncedAt, now)}

@@ -64,6 +64,7 @@ function record(overrides: Partial<DomainRecord> = {}): DomainRecord {
     registry: "kitaqsign",
     ownership: "owned",
     info: INFO,
+    rgpUntil: null,
     syncedAt: new Date("2026-08-26T00:00:00.000Z"),
     ...overrides,
   };
@@ -80,6 +81,12 @@ describe("toDomainRecord", () => {
       ownership: "owned",
     });
     expect(result.syncedAt.toISOString()).toBe("2026-08-26T00:00:00.000Z");
+  });
+
+  it("rgp_until を読み出して RGP の残日数の元にする（#211）", () => {
+    const until = new Date("2026-09-25T00:00:00.000Z");
+    expect(toDomainRecord(row({ rgpUntil: until })).rgpUntil).toEqual(until);
+    expect(toDomainRecord(row()).rgpUntil).toBeNull();
   });
 
   it("#26 以前に書かれた raw_info（sponsoringRegistrarId 無し）も落とさない", () => {
@@ -234,6 +241,10 @@ describe("toDomainValues", () => {
     );
     expect(values.sld).toBe("api.example");
     expect(values.tld).toBe("com");
+  });
+
+  it("rgp_until は書かない（info から決まらないので既存値を消さない・#211）", () => {
+    expect("rgpUntil" in toDomainValues(record())).toBe(false);
   });
 });
 

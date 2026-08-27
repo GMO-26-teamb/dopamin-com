@@ -137,6 +137,7 @@ function apiDetail(overrides: Record<string, unknown> = {}) {
       city: "N/A",
       countryCode: "JP",
     },
+    subdomainPlan: null,
     stale: false,
     syncedAt: "2026-08-26T00:00:00.000Z",
     ...overrides,
@@ -363,6 +364,40 @@ describe("domains.get（GET /domains/:name）", () => {
     });
     // 移管可能日は登録日 + 60 日（参考表示）
     expect(detail.transferableFrom).toBe("2026-09-30T00:00:00.000Z");
+  });
+
+  it("サブドメイン設計の件数をそのまま画面用に渡す（#217）", async () => {
+    stubFetch(200, apiDetail({ subdomainPlan: { hosts: 4, applied: 2 } }));
+
+    const detail = await services().domains.get("example.com");
+
+    expect(detail.subdomainPlan).toEqual({ hosts: 4, applied: 2 });
+  });
+
+  it("設計が未保存なら subdomainPlan は null（カードは「未作成」）", async () => {
+    stubFetch(200, apiDetail());
+
+    expect(
+      (await services().domains.get("example.com")).subdomainPlan,
+    ).toBeNull();
+  });
+
+  it("RGP の猶予期限を summary から取り、無ければ null のまま渡す（#211）", async () => {
+    stubFetch(
+      200,
+      apiDetail({
+        summary: apiSummary({
+          statuses: ["pendingDelete"],
+          rgpStatuses: ["redemptionPeriod"],
+          rgpUntil: "2026-09-25T00:00:00.000Z",
+        }),
+      }),
+    );
+
+    const detail = await services().domains.get("example.com");
+
+    expect(detail.displayStatus).toBe("rgp");
+    expect(detail.rgpUntil).toBe("2026-09-25T00:00:00.000Z");
   });
 });
 

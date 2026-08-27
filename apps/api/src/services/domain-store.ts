@@ -86,7 +86,9 @@ export function createDbDomainStore(db: Db): DomainStore {
           set: values,
         })
         .returning();
-      return row ? toDomainRecord(row) : { ...record, id: null };
+      return row
+        ? toDomainRecord(row)
+        : { ...record, id: null, rgpUntil: null };
     },
 
     async markTransferredOut(name, at) {
@@ -120,13 +122,16 @@ export function createDbDomainStore(db: Db): DomainStore {
 /**
  * `domains.rgp_until` を直接書く（FR-16 のデモ投入専用）。
  *
- * 通常経路（`upsertDomainFromInfo` → `toDomainValues`）はこの列を書かない。
- * 両レジストリの `info` が猶予期限を返さないためで、画面も §11.4 の目安日数から
- * 自前で計算している。デモでは「残日数つきの RGP バッジ」を見せたいので、
- * ここだけ目安日数を実データとして入れる。
+ * 通常経路（`upsertDomainFromInfo` → `toDomainValues`）はこの列を書かない
+ * （両レジストリの `info` が猶予期限を返さないため）。書かないので、ここで入れた値は
+ * その後の再同期でも消えない。デモでは「残日数つきの RGP」を見せたいので、
+ * §11.4 の目安日数を実データとして入れる。
  *
- * `DomainStore` の口にはしない: インメモリ実装（`DomainRecord`）が `rgpUntil` を
- * 持っておらず、デモ以外に使い道が無いため。
+ * この列が空のまま（= 期限が分からない）の行は、`toDomainSummary` が `rgpUntil: null`
+ * を返し、画面は残日数を出さない（0 日と偽らない・#211）。
+ *
+ * `DomainStore` の口にはしない: 書き込みの用途がデモしか無く、読み出しは
+ * `toDomainRecord` が行から拾うため。
  */
 export async function setDomainRgpUntil(
   db: Db,
@@ -160,7 +165,13 @@ export function createInMemoryDomainStore(
       const id =
         existing?.id ??
         `00000000-0000-4000-9000-${String(sequence).padStart(12, "0")}`;
-      const stored: DomainRecord = { ...record, id };
+      // `rgp_until` は toDomainValues に無い = DB の upsert でも更新されない列なので、
+      // ここでも既存値を残す（info の write-through で猶予期限が消えないこと）
+      const stored: DomainRecord = {
+        ...record,
+        id,
+        rgpUntil: existing?.rgpUntil ?? null,
+      };
       byName.set(record.name, stored);
       return Promise.resolve(stored);
     },

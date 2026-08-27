@@ -33,6 +33,7 @@ import { DetailHeader } from "./detail-header";
 import { DetailSkeleton } from "./detail-skeleton";
 import { InfoCard } from "./info-card";
 import { NameserverCard } from "./nameserver-card";
+import { operationState } from "./operations";
 import { StateBanner } from "./state-banner";
 import { SubdomainCard } from "./subdomain-card";
 
@@ -88,7 +89,9 @@ export function DomainDetailPage({ name }: DomainDetailPageProps) {
   const domain = domainQuery.data;
   const now = Date.now();
 
-  // S-32 / D-06: 承認 / 拒否の対象。詳細の `transfer` には id が無いので一覧から引く
+  // S-32 / D-06: 承認 / 拒否の対象。詳細の `transfer` には id が無いので一覧から引く。
+  // 一覧が落ちていると id が取れず承認 / 拒否を実行できないので、詳細画面から
+  // 一覧を取り直せるようにしてある（操作パネルの「申請を取得」・#212）
   const pendingTransfer =
     transfersQuery.data?.find(
       (transfer) =>
@@ -195,7 +198,10 @@ export function DomainDetailPage({ name }: DomainDetailPageProps) {
   const showActions =
     domain.displayStatus !== "transferred_out" &&
     domain.displayStatus !== "pending_delete";
-  const editable = showActions && !domain.stale;
+  // カード内の「変更」は D-02 を開く近道なので、情報修正そのものが通らない状態
+  // （キャッシュ表示・移管申請中・RGP など）では出さない。押せない理由は
+  // 操作パネルの「情報修正」に 1 か所だけ出す
+  const editable = showActions && operationState(domain, "update").allowed;
   const busy =
     renew.isPending ||
     update.isPending ||
@@ -230,7 +236,6 @@ export function DomainDetailPage({ name }: DomainDetailPageProps) {
         </div>
       )}
       <StateBanner
-        countdownLabel={countdown.label}
         domain={domain}
         now={now}
         onDismissSuccess={() => setSuccess(null)}
@@ -254,7 +259,10 @@ export function DomainDetailPage({ name }: DomainDetailPageProps) {
           />
           <div className="flex w-full flex-col items-start gap-3 md:flex-row">
             <div className="w-full min-w-0 flex-1">
-              <ContactCard domain={domain} />
+              <ContactCard
+                domain={domain}
+                {...(editable ? { onEdit: () => openDialog("ns-edit") } : {})}
+              />
             </div>
             <div className="min-w-0 flex-1">
               <SubdomainCard domain={domain} readOnly={!showActions} />
@@ -274,6 +282,8 @@ export function DomainDetailPage({ name }: DomainDetailPageProps) {
               onRejectTransfer={() => openDialog("transfer-reject")}
               onRenew={() => openDialog("renew")}
               onRestore={() => openDialog("restore")}
+              onRetryTransfers={() => void transfersQuery.refetch()}
+              retryingTransfers={transfersQuery.isFetching}
               transferActionable={pendingTransfer !== null}
             />
           </div>

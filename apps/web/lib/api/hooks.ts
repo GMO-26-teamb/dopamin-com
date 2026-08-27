@@ -382,6 +382,11 @@ export function useSaveSubdomainPlan(
       void queryClient.invalidateQueries({
         queryKey: keys.dnsDiff(domain),
       });
+      // 詳細のサブドメイン設計カードはホスト数・反映済み数を持つので、保存で変わる（#217）。
+      // 一覧（keys.domains）は設計を持たないので触らない（NS が変わる apply とはそこが違う）
+      void queryClient.invalidateQueries({
+        queryKey: keys.domain(domain),
+      });
     },
   });
 }

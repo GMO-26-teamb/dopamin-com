@@ -1,3 +1,4 @@
+import type { Db } from "@dopamin/db";
 import {
   createRegistrySet,
   MockRegistryAdapter,
@@ -16,6 +17,7 @@ import {
   domainUniquenessSchema,
 } from "@dopamin/shared";
 import {
+  afterAll,
   afterEach,
   beforeAll,
   beforeEach,
@@ -25,6 +27,7 @@ import {
   vi,
 } from "vitest";
 import app from "../../src/index";
+import { setDbForTesting } from "../../src/lib/db";
 import { setRegistrySetForTesting } from "../../src/lib/registries";
 import { setRetrySleepForTesting } from "../../src/lib/retry";
 import {
@@ -40,6 +43,7 @@ import {
   createInMemoryTransferStore,
   setTransferStoreForTesting,
 } from "../../src/services/transfer-store";
+import { createTestDb } from "../helpers/db";
 import {
   clearTestSession,
   installTestSession,
@@ -83,13 +87,25 @@ const APP_ORIGIN = "http://localhost:3000";
 let kitaqsign: MockRegistryAdapter;
 let kitaqnic: MockRegistryAdapter;
 let store: DomainStore;
+let db: Db;
+let closeDb: () => Promise<void>;
 
-// originCheck は Origin ヘッダ付きの更新系リクエストでだけ env() を評価する。
-// DB には触らない（domains 行は setDomainStoreForTesting の seam 経由）ので接続先はダミーで良い。
-beforeAll(() => {
+// originCheck は Origin ヘッダ付きの更新系リクエストでだけ env() を評価する。接続先はダミーで良い。
+// domains 行は setDomainStoreForTesting の seam 経由だが、詳細（FR-07）は
+// サブドメイン設計の件数（#217）を subdomain_plans / dns_records から引くので DB が要る。
+// この DB には domains 行を入れないため、ここでの件数は常に null になる
+// （設計あり側は routes/subdomain-plan-apply.test.ts が本番と同じ経路で見る）。
+beforeAll(async () => {
   process.env.DATABASE_URL = "postgres://unused:unused@localhost:1/unused";
   process.env.WEBAUTHN_RP_ID = "localhost";
   process.env.WEBAUTHN_ORIGIN = APP_ORIGIN;
+  ({ db, close: closeDb } = await createTestDb());
+  setDbForTesting(db);
+}, 30_000);
+
+afterAll(async () => {
+  setDbForTesting(null);
+  await closeDb();
 });
 
 beforeEach(() => {
@@ -388,6 +404,13 @@ describe("GET /api/v1/domains/:name（FR-07 詳細）", () => {
     expect(res.status).toBe(200);
     const { domain } = (await res.json()) as DomainPayload;
     expect(domain?.name).toBe("info.com");
+  });
+
+  it("設計を保存していないドメインは subdomainPlan が null（#217）", async () => {
+    await createDomain("no-plan.com");
+    const res = await api("/domains/no-plan.com");
+    const detail = domainDetailResponseSchema.parse(await res.json());
+    expect(detail.subdomainPlan).toBeNull();
   });
 
   it("未登録は 404 NOT_FOUND（registry / registryCode 付き）", async () => {
