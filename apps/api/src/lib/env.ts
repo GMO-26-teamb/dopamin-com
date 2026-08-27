@@ -1,3 +1,4 @@
+import { AI_PROVIDERS } from "@dopamin/shared";
 import { z } from "zod";
 import { ApiException } from "./errors";
 
@@ -72,8 +73,13 @@ const apiEnvSchema = z.object({
     .positive()
     .default(20 * 60 * 1000),
 
-  /** 生成 AI（§13.1）。既定は Google AI Studio の無料枠、ANTHROPIC_API_KEY がある環境では anthropic を選択可。 */
-  AI_PROVIDER: z.enum(["google", "anthropic"]).default("google"),
+  /**
+   * 生成 AI の既定プロバイダ（§13.1）。値域は `packages/shared` の {@link AI_PROVIDERS} が正
+   * （プロバイダを足したらそちらだけを直せばよい。ここで別に列挙すると、
+   * shared に足したプロバイダを `AI_PROVIDER` に設定した瞬間に起動時 parse が落ちる）。
+   * 既定は Google AI Studio の無料枠。`xai` は Gateway 経由専用（`docs/specs/ai-gateway.md` §2.6）。
+   */
+  AI_PROVIDER: z.enum(AI_PROVIDERS).default("google"),
   /** 具体的なモデル ID は運用側で決定・設定する（未設定時は AI 呼び出し側が requireEnv 等で扱う）。 */
   AI_MODEL: optionalString,
   GOOGLE_GENERATIVE_AI_API_KEY: optionalString,
