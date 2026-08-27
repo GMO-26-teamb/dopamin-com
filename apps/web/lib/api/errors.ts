@@ -151,3 +151,30 @@ export function toApiClientError(
     ...withOrigin,
   });
 }
+
+/**
+ * 内容はそのままに「失敗した相手」だけを差し替えた複製を返す。
+ *
+ * 応答を読むまで相手が決まらない経路のためのもの。FR-13 の提案（`POST
+ * /domains/:name/subdomain-plan`）は GitHub 解析 → AI の 2 段で、前段の失敗は
+ * `NOT_FOUND`（概要入力へ倒す・AC-13-2）、後段の失敗は `origin: "ai"`（Banner Warn +
+ * 再試行・S-41）と扱いが分かれる。`toApiClientError` は既存の `ApiClientError` の
+ * 相手を上書きしない方針なので、そこには寄せられない。
+ */
+export function withErrorOrigin(
+  error: ApiClientError,
+  origin: ErrorOrigin,
+): ApiClientError {
+  return new ApiClientError({
+    code: error.code,
+    message: error.message,
+    retryable: error.retryable,
+    origin,
+    ...(error.registry === undefined ? {} : { registry: error.registry }),
+    ...(error.registryCode === undefined
+      ? {}
+      : { registryCode: error.registryCode }),
+    ...(error.requestId === undefined ? {} : { requestId: error.requestId }),
+    details: error.details,
+  });
+}

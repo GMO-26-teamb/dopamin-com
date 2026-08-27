@@ -100,7 +100,15 @@ mock からも削除する（best-effort。失敗しても DB のリセットは
 
 ## 3. 画面・UI
 
-本書の範囲外（設定画面のリセット UI は #94。`features.demoReset` が false のときはボタンを出さない）。
+設定画面のリセット UI は #94 の範囲（`features.demoReset` が false のときはボタンを出さない）。
+`NEXT_PUBLIC_API_MODE=http` の配線（`apps/web/lib/api/http/http-services.ts` の
+`SettingsService.demoReset`。#187）は `POST /demo/reset` を叩き、応答を
+`demoResetResponseSchema` で検証してから捨てる（`SettingsService` の契約は `Promise<void>` で、
+作り直したドメイン名は画面が使わない。一覧は hooks 側の invalidate で取り直す）。
+
+無効な環境の 404 は握りつぶさず `NOT_FOUND` として画面に上げる。ボタン自体は
+`GET /auth/me` の `features.demoReset` で隠れているので、ここに来るのは
+「表示後に環境変数が変わった」場合だけ（AC-16-1）。
 
 ## 4. API 契約
 
@@ -127,7 +135,8 @@ mock からも削除する（best-effort。失敗しても DB のリセットは
 |---|---|
 | unit | `packages/registry/src/mock.test.ts`: `seedOwnedDomain`（保有・期限・RGP・inactive・重複・ログ非発行） |
 | 契約 / 統合 | `apps/api/test/routes/demo.test.ts`: 5 件の投入と各状態、移管 IN / OUT が 1 件ずつ pending、既存データの削除、他ユーザー不可視、連続実行、`DEMO_RESET_ENABLED` 未設定 / false で 404、`REGISTRY_MODE=real` で 409 |
-| 手動 | リセット後に一覧・詳細・移管画面がデモシナリオどおりに見えること |
+| 契約（web） | `apps/web/lib/api/http/http-services.test.ts`: `settings.demoReset`（`POST /demo/reset` の送信・無効な環境の 404） |
+| 手動 | リセット後に一覧・詳細・移管画面がデモシナリオどおりに見えること。`NEXT_PUBLIC_API_MODE=http` でリセットが実行できること |
 
 ## 8. 未決事項・要確認
 
@@ -144,3 +153,4 @@ mock からも削除する（best-effort。失敗しても DB のリセットは
 |---|---|---|
 | v0.1 | 2026-08-27 | 初版（#71 の実装に合わせて起票） |
 | v0.1.1 | 2026-08-27 | 実装との乖離を修正。§2.5 の削除対象に `ai_logs`（`clearDemoData` が同じトランザクションで本人の行を消す）を追記 |
+| v0.2 | 2026-08-27 | §3 に `NEXT_PUBLIC_API_MODE=http` の配線（応答は検証してから捨てる / 無効な環境の 404 はそのまま画面へ）を追記。§7 に web の契約テスト行。#187 |

@@ -12,10 +12,14 @@ import {
   RECORD_TYPE_OPTIONS,
   RECORD_TYPES,
 } from "./apply-status";
+import type { HostFieldErrors } from "./validate";
 
 /**
  * S-43 右パネル上段「〜 の編集」。ホスト名 / 用途 / レコード / 向き先 / 優先度を編集する。
  * 編集しただけでは DNS は変わらない（保存 → 反映の 2 段。FR-13）。
+ *
+ * `errors` は保存を押したあとだけ入る（`validate.ts`）。入力の途中で赤くしないのは
+ * ネームサーバー編集（D-02）と同じ扱い。
  */
 
 function isRecordType(value: string): value is SubdomainHost["recordType"] {
@@ -24,11 +28,18 @@ function isRecordType(value: string): value is SubdomainHost["recordType"] {
 
 export interface EditPanelProps {
   host: SubdomainHost;
+  /** 保存を試みたあとに出す欄ごとのエラー（未検証なら空）。 */
+  errors?: HostFieldErrors;
   onChange: (host: SubdomainHost) => void;
   onRemove: () => void;
 }
 
-export function EditPanel({ host, onChange, onRemove }: EditPanelProps) {
+export function EditPanel({
+  host,
+  errors = {},
+  onChange,
+  onRemove,
+}: EditPanelProps) {
   return (
     <div className="flex w-full flex-col gap-3">
       <p className="w-full text-heading-card text-ink">
@@ -42,6 +53,7 @@ export function EditPanel({ host, onChange, onRemove }: EditPanelProps) {
         placeholder="www"
         surface="panel"
         value={host.host}
+        {...(errors.host === undefined ? {} : { error: errors.host })}
       />
       <Input
         autoComplete="off"
@@ -50,6 +62,7 @@ export function EditPanel({ host, onChange, onRemove }: EditPanelProps) {
         placeholder="メインサイト（apps/web）"
         surface="panel"
         value={host.purpose}
+        {...(errors.purpose === undefined ? {} : { error: errors.purpose })}
       />
       <div className="flex w-full items-start gap-3">
         <Select
@@ -73,6 +86,7 @@ export function EditPanel({ host, onChange, onRemove }: EditPanelProps) {
           placeholder="cname.example.com"
           surface="panel"
           value={host.target}
+          {...(errors.target === undefined ? {} : { error: errors.target })}
         />
       </div>
       <div className="flex w-full items-center gap-1.5">

@@ -79,7 +79,22 @@ flowchart LR
 
 ## 3. 画面・UI
 
-本書の範囲外（`/logs` 画面の接続は #90 / #93）。
+画面そのものは #90 / #93 の範囲。ここには、`NEXT_PUBLIC_API_MODE=http` で `/logs` を
+本 API に繋ぐ層（`apps/web/lib/api/http/http-services.ts` の `LogService`。#187）だけを書く。
+
+`LogService`（fe-ui 設計 §4.2）は `Promise<OperationLog[]>` / `Promise<AiLog[]>` を返す
+**1 ページ契約**で、cursor を辿る口を持たない。S-60 / S-61 の「もっと見る」は取得済みの配列を
+クライアント側で刻んで出している（`features/logs/load-more.tsx`）。そのため配線は
+`limit=PAGINATION_MAX_LIMIT` で 1 回だけ取り、`nextCursor` は捨てる。`useInfiniteQuery` に
+寄せるときは、この `limit` をそのままページサイズに使える。
+
+ViewModel（`apps/web/lib/api/types.ts`）への写像で落ちる / 変わるのは次の 3 つ。
+
+| 契約 | ViewModel | 理由 |
+|---|---|---|
+| `tokensIn` / `tokensOut` | `tokens`（合計） | 表示は合計 1 つ。導出は `packages/shared` の `aiTokenTotal` が SSOT（どちらも無ければ null） |
+| `ai_logs.output` | `raw` | ドロワーで JSON として展開する値 |
+| `operation_logs.requestId` / `ai_logs.errorMessage` | 無し | 画面に出していない（失敗の本文は `outputSummary` に入る） |
 
 ## 4. API 契約
 
@@ -111,7 +126,8 @@ flowchart LR
 |---|---|
 | unit | カーソルの符号化 / 復号（`encodeLogCursor` / `decodeLogCursor`） |
 | 契約 / 統合 | `apps/api/test/routes/logs.test.ts`: ページング境界（25 件を 10/10/5）、同着 `created_at`、他ユーザー不可視、`limit` 超過、壊れた cursor、契約外の行のスキップ |
-| 手動 | `/logs` 画面接続後にスクロールで続きが読めること |
+| 契約（web） | `apps/web/lib/api/http/http-services.test.ts`: `logs.operations` / `logs.ai`（`limit` の指定・写像・トークン合計・0 件） |
+| 手動 | `/logs` 画面接続後にスクロールで続きが読めること。`NEXT_PUBLIC_API_MODE=http` で操作ログ / AI ログの両タブが表示されること |
 
 ## 8. 未決事項・要確認
 
@@ -127,3 +143,4 @@ flowchart LR
 |---|---|---|
 | v0.1 | 2026-08-27 | 初版（#64 の実装に合わせて起票） |
 | v0.2 | 2026-08-27 | 実装との乖離を修正: カーソルの内部表現は `created_at::text`（6aeacf1）。ISO 8601 は復号側の互換のみ。`id` の UUID 検証を追記 |
+| v0.3 | 2026-08-27 | §3 を「Web の配線」に広げ、`LogService` が 1 ページ契約であること（`limit=PAGINATION_MAX_LIMIT` で 1 回・`nextCursor` は未使用）と ViewModel 写像（`tokensIn`/`tokensOut` → `tokens`、`output` → `raw`、`requestId`/`errorMessage` は不使用）を追記。§7 に web の契約テスト行。#187 |

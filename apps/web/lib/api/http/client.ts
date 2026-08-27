@@ -7,6 +7,9 @@
 
 import type { AppType } from "@dopamin/api";
 import {
+  aiLogsResponseSchema,
+  demoResetResponseSchema,
+  dnsZoneResponseSchema,
   domainAvailabilitySchema,
   domainCandidatesResponseSchema,
   domainListResponseSchema,
@@ -14,7 +17,11 @@ import {
   domainSyncResponseSchema,
   domainUniquenessSchema,
   errorCodeSchema,
+  operationLogsResponseSchema,
   registryIdSchema,
+  subdomainPlanApplyResponseSchema,
+  subdomainPlanProposalResponseSchema,
+  subdomainPlanResponseSchema,
   transferResponseSchema,
   transferSummarySchema,
   transfersListResponseSchema,
@@ -130,3 +137,20 @@ export const transfersListSchema = transfersListResponseSchema;
 export const transferSummaryEnvelopeSchema = z.object({
   transfer: transferSummarySchema,
 });
+
+/**
+ * サブドメイン設計と疑似 DNS ゾーン（FR-13 / §10.1）。スキーマは packages/shared が SSOT。
+ * `subdomainPlanSchema` は保存済み設計（反映状態つき）、`subdomainProposalSchema` は
+ * 保存前の提案で、items に `applyState` が無いぶんだけ形が違う。
+ */
+export const subdomainPlanSchema = subdomainPlanResponseSchema;
+export const subdomainProposalSchema = subdomainPlanProposalResponseSchema;
+export const subdomainPlanApplySchema = subdomainPlanApplyResponseSchema;
+export const dnsZoneSchema = dnsZoneResponseSchema;
+
+/** ログ一覧（FR-14 / FR-15 / §10.1）。どちらも `{ items, nextCursor }`。 */
+export const operationLogsSchema = operationLogsResponseSchema;
+export const aiLogsSchema = aiLogsResponseSchema;
+
+/** `POST /demo/reset` の応答（FR-16 / §10.1）。 */
+export const demoResetSchema = demoResetResponseSchema;

@@ -111,7 +111,46 @@ sequenceDiagram
 
 ## 3. 画面・UI
 
-本書の範囲外（設計ツリー・差分ダイアログの接続は #91 / #92）。
+画面（設計ツリー・差分ダイアログ）そのものは #91 / #92 の範囲。ここには、
+`NEXT_PUBLIC_API_MODE=http` で画面を本 API に繋ぐ層（`apps/web/lib/api/http/http-services.ts` の
+`SubdomainService`。#187）の写像だけを書く。ブラウザ内モックと同じ ViewModel
+（`apps/web/lib/api/types.ts` の `SubdomainPlan` / `DnsDiff`）に寄せるため、次を補っている。
+
+| 画面が要るもの | API の応答 | 補い方 |
+|---|---|---|
+| `SubdomainHost.id` | 無し（項目に ID を振らない） | ホスト名をそのまま ID にする。設計内でホストは一意（`hasUniqueHosts`）なので衝突せず、保存で採番し直されない |
+| `applyStatus`（`pending` / `applied` / `changed`） | `applyState`（`unapplied` / `applied` / `changed`） | 呼び名の対応表で 1:1 に写す |
+| `SubdomainPlan.nameserversSwitched` | 無し（設計の応答は NS を返さない） | `appliedAt !== null` から導く。反映は NS 切替を先に行い、切り替えられなければレコードを 1 件も変えずに失敗する（AC-13-5）ので「反映済み = NS はドパ民 DNS」が成り立つ。`GET /domains/:name` を足すとレジストリ呼び出しが S-43 を開くたびに 1 回増えるため採らない |
+| 差分の各行の用途・重要度 | `GET /domains/:name/dns` はレコード（host / recordType / target / ttl）だけ | 保存済み設計を併せて引き、ホスト名で引き当てて埋める |
+| 反映後の設計（S-45 の全ノード「反映済み」） | apply の応答は件数のみ | apply の直後に `GET /domains/:name/subdomain-plan` を取り直す |
+| 未保存 = S-40 の空状態 | 未保存は 404 | `NOT_FOUND` だけを `null` に倒す（他の失敗はそのまま投げる） |
+
+提案（`POST`）の失敗は、相手によって画面の出方が変わる（S-41 = Banner Warn + 再試行 /
+S-42 = 概要入力へ倒す・AC-13-2）。GitHub 解析の失敗は `NOT_FOUND` で返るので、
+`AI_UNAVAILABLE` / `REGISTRY_TIMEOUT` / `REGISTRY_UNAVAILABLE` のときだけ
+`origin: "ai"` を付ける（`withErrorOrigin`）。`RATE_LIMITED` は GitHub と AI の
+どちらでも返り相手を断定できないため、手が残る方（概要入力）に倒す。
+
+### 3.1 保存前の入力検証（`features/subdomains/validate.ts`）
+
+「ホストを追加」が作る行は用途・向き先が空で、`savedSubdomainProposalSchema` を満たさない。
+ブラウザ内モックは保存を受け付けていたので mock では通り、http モードでは 400 が
+Error Card で返るだけ、という割れ方をしていた（#187 で表面化）。保存を押した時点で
+契約を満たすか先に見て、満たさなければサーバーに投げずに該当ホストを選び直し、
+欄（`Input` の `error`）に文言を出す。入力の途中では赤くしない（D-02 と同じ扱い）。
+
+判定は shared のスキーマ部品と定数に委ね、画面側で文字数・件数の数値を持たない。
+
+| 見るもの | 委ねる先 | 画面で止める理由 |
+|---|---|---|
+| 件数 1〜8 | `MIN_SUBDOMAIN_ITEMS` / `MAX_SUBDOMAIN_ITEMS` | 全部消して保存 / 9 件目の追加。追加ボタンは上限で `disabled` にする |
+| 全体方針 1〜120 字 | `MAX_SUBDOMAIN_POLICY_LENGTH` | `PolicyBar` は空にできる |
+| ホスト名 | `subdomainHostSchema` | 1 ラベルまたは apex の `@`。行またぎの重複もここで見る |
+| 用途 1〜100 字 | `MAX_SUBDOMAIN_PURPOSE_LENGTH` | 追加直後は空 |
+| 向き先 | `dnsTargetSchema` / `isIpv4` | 追加直後は空。A ↔ IPv4、CNAME / ALIAS ↔ ホスト名の対応も見る |
+
+出す指摘は 1 件だけにする（ui-screens §1 と同じ方針）。文言は「`www`: 用途を入力してください」の形で、
+ツリーのどの行かが分かるようにする。
 
 ## 4. API 契約
 
@@ -151,7 +190,10 @@ sequenceDiagram
 |---|---|
 | unit | `packages/shared/src/subdomains.test.ts`（差分・反映状態・手順テキスト）、`packages/db` のスキーマ制約は `apps/api/test/db/subdomain-schema.test.ts` |
 | 契約 / 統合 | `apps/api/test/lib/github.test.ts`（mock / real 両経路、失敗の分類、8KB 切り出し）、`test/routes/subdomain-plan-generate.test.ts`、`test/routes/subdomain-plan-save.test.ts`、`test/routes/subdomain-plan-apply.test.ts` |
-| 手動 | `GITHUB_MODE=real` で実リポジトリを解析し、提案が構造ヒントを反映していること |
+| 契約（web） | `apps/web/lib/api/http/http-services.test.ts`: `subdomains` の 5 メソッド（写像・未保存の 404 → null・提案の失敗の相手分け・apply 後の取り直し） |
+| unit（web） | `apps/web/features/subdomains/validate.test.ts`: 欄ごとの検証と、通った設計が `savedSubdomainProposalSchema` も通ること |
+| 統合（web） | `apps/web/features/subdomains/subdomains-screen.test.tsx`: 追加直後の保存を止める / 埋めれば保存できる / 全消し / 上限で追加不可 |
+| 手動 | `GITHUB_MODE=real` で実リポジトリを解析し、提案が構造ヒントを反映していること。`NEXT_PUBLIC_API_MODE=http` で提案 → 保存 → 反映が通ること |
 
 ## 8. 未決事項・要確認
 
@@ -167,3 +209,5 @@ sequenceDiagram
 | 版 | 日付 | 内容 |
 |---|---|---|
 | v0.1 | 2026-08-27 | 初版（#36 / #68 / #69 / #70 の実装に合わせて起票） |
+| v0.2 | 2026-08-27 | §3 を「Web の配線」に広げ、`NEXT_PUBLIC_API_MODE=http` での ViewModel 写像（ホスト名 = ID / `applyState` → `applyStatus` / `nameserversSwitched` を `appliedAt` から導く / 差分の用途・重要度の補完 / apply 後の取り直し / 未保存の 404 → null）と提案の失敗の相手分けを追記。§7 に web の契約テスト行。#187 |
+| v0.3 | 2026-08-27 | §3.1 に保存前の入力検証を追加（契約を満たさない設計はサーバーに投げず欄で直させる）。判定に使う上限を `packages/shared` の定数として切り出し、画面が数値を二重に持たないようにした。#187 |
