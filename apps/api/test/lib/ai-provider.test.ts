@@ -16,6 +16,7 @@ import { z } from "zod";
 import {
   type AiAttempt,
   type AiModelFactory,
+  GOOGLE_THINKING_BUDGET_TOKENS,
   resolveAiAttempt,
   resolveModel,
   runStructured,
@@ -98,6 +99,34 @@ function respondingModel(
       },
       warnings: [],
     }),
+  });
+}
+
+/** doGenerate に渡されたプロバイダ固有オプションを記録するモデル。 */
+function recordingModel(
+  record: (providerOptions: unknown) => void,
+): LanguageModel {
+  return new MockLanguageModelV4({
+    doGenerate: async (options) => {
+      record(options.providerOptions);
+      return {
+        content: [
+          { type: "text" as const, text: JSON.stringify({ names: ["a.com"] }) },
+        ],
+        finishReason: { unified: "stop" as const, raw: undefined },
+        usage: {
+          inputTokens: {
+            total: 10,
+            noCache: undefined,
+            cacheRead: undefined,
+            cacheWrite: undefined,
+          },
+          outputTokens: { total: 10, text: undefined, reasoning: undefined },
+          totalTokens: 20,
+        },
+        warnings: [],
+      };
+    },
   });
 }
 
@@ -671,6 +700,55 @@ describe("Gateway の ID 変換表（#187）", () => {
       AI_GATEWAY_API_KEY: "vck_gateway",
     });
     expect(modelIdOf(resolveModel())).toBe("google/gemini-2.5-pro");
+  });
+});
+
+describe("Google の思考トークン上限（#199 / §13.1 10 秒予算）", () => {
+  it("google の呼び出しには thinkingConfig で上限を渡す", async () => {
+    const env = envWith({ GOOGLE_GENERATIVE_AI_API_KEY: "g-key" });
+    let passed: unknown;
+    useModels(() =>
+      recordingModel((providerOptions) => {
+        passed = providerOptions;
+      }),
+    );
+
+    await runStructured("subdomain_plan", CANDIDATES, "プロンプト", {
+      user: { id: userId },
+      input: { domain: "example.com" },
+      settings: defaultSettings(env),
+    });
+
+    expect(passed).toMatchObject({
+      google: {
+        thinkingConfig: {
+          thinkingBudget: GOOGLE_THINKING_BUDGET_TOKENS,
+          includeThoughts: false,
+        },
+      },
+    });
+  });
+
+  it("上限は gemini-2.5-pro でも指定できる値にする（pro は思考を切れない）", () => {
+    expect(GOOGLE_THINKING_BUDGET_TOKENS).toBeGreaterThanOrEqual(128);
+  });
+
+  it("google 以外のプロバイダに google 向けオプションは渡さない", async () => {
+    const env = envWith({ ANTHROPIC_API_KEY: "a-key" });
+    let passed: unknown;
+    useModels(() =>
+      recordingModel((providerOptions) => {
+        passed = providerOptions;
+      }),
+    );
+
+    await runStructured("subdomain_plan", CANDIDATES, "プロンプト", {
+      user: { id: userId },
+      input: { domain: "example.com" },
+      settings: defaultSettings(env),
+    });
+
+    expect(passed ?? {}).not.toHaveProperty("google");
   });
 });
 
