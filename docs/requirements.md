@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.1.20（2026-08-27） |
+| 版 | v0.1.22（2026-08-27） |
 | プロダクト | ドパ民.com / dopamin.com — Z世代向けドメイン管理プラットフォーム（疑似レジストラ） |
 | チーム | チームドパ民（Team B）: 佐々木 琢登・星 はるか・上原 拓也 |
 | 位置づけ | GMO Internet Internship in kitaQ Webアプリケーションコース（2026/08/24–28）成果物 |
@@ -950,14 +950,16 @@ export interface RegistryAdapter {
 両 Swagger の仕様メモは `docs/registry/spec-notes.md`。認証方式・エンベロープ・result code は両レジストリで同一。
 
 `GET /sessions/hello` で確定済み（2026-08-25 取得）。**両者に重複は無く、TLD からレジストリが一意に決まる。**
+2026-08-27 の仕様変更（運営アナウンス）で **`.org` / `.info` の管轄が kitaqsign → kitaqnic へ移管**された（`docs/registry/kitaqsign/CHANGELOG.md` / `docs/registry/kitaqnic/CHANGELOG.md` 同日エントリ）。
 
 | レジストリ | 対応 TLD（計 22） |
 |---|---|
-| kitaqsign | `.com` `.net` `.org` `.info`（4） |
-| kitaqnic | `.xyz` `.online` `.site` `.tech` `.space` `.store` `.website` `.press` `.host` `.fun` `.icu` `.cyou` `.sbs` `.bond` `.cfd` `.art` `.build` `.ceo`（18） |
+| kitaqsign | `.com` `.net`（2） |
+| kitaqnic | `.org` `.info` `.xyz` `.online` `.site` `.tech` `.space` `.store` `.website` `.press` `.host` `.fun` `.icu` `.cyou` `.sbs` `.bond` `.cfd` `.art` `.build` `.ceo`（20） |
 
 - **`.jp` は両レジストリとも非対応**（kitaqnic は gTLD のみ）。プロトタイプのデモデータ `gmo-hackathon.jp` / API 例の `takutaku.xyz` は使えないため、デモシナリオと UI の TLD 選択肢を上記 22 種から選び直す。
 - kitaqnic の登録期間は 1〜10 年、猶予期間 45 日、IDN 許可（`hello` の `info` より）。
+- 移管に伴い kitaqsign では `.org` / `.info` が非対応になった（`domain:check` は 2306、`hello` の `tlds` からも外れる）。既存の `.org` / `.info` ドメインはコンタクト・ホスト含むデータごと kitaqnic に引き継がれ、保有者は変わらない（アプリ側は `domains.registry` / `transfers.registry` をデータマイグレーションで付け替え）。
 
 対応 TLD の定数は `packages/shared/src/tlds.ts`（`REGISTRY_TLDS` / `SUPPORTED_TLDS`）の 1 箇所で管理し、`packages/registry` のルーティングも `apps/web` の TLD 選択肢もここを参照する。
 
@@ -1176,7 +1178,7 @@ FR-05 は埋め込みを使わない（§14）。他に埋め込みを必要と�
 | `dopamin-api` | `apps/api` | Hono（Vercel の Hono プリセット、なければ `hono/vercel` の `handle(app)` を `api/index.ts` で export） | Node.js 22 ランタイム |
 
 - Git 連携は使わない（組織リポジトリ + Hobby プランの制約）。GitHub Actions から Vercel CLI でデプロイする。
-- 本番ドメイン: Web `dopamin.ut42tech.com` / API `dopamin-api.ut42tech.com`（`*.vercel.app` も併存）。ドメイン変更時は `WEBAUTHN_RP_ID` / `WEBAUTHN_ORIGIN` / `API_ORIGIN` / `NEXT_PUBLIC_APP_ORIGIN` を更新する。
+- 本番ドメイン: Web `dopamin.ut42tech.com` / API `dopamin-api.ut42tech.com`（`*.vercel.app` も併存）。ドメイン変更時は `WEBAUTHN_RP_ID` / `WEBAUTHN_ORIGIN` / `API_ORIGIN` を更新する。
 
 ### 16.2 GitHub Actions
 
@@ -1234,7 +1236,6 @@ FR-05 は埋め込みを使わない（§14）。他に埋め込みを必要と�
 | 変数 | 用途 |
 |---|---|
 | `API_ORIGIN` | rewrites 先（`https://dopamin-api.ut42tech.com`）。サーバー専用 |
-| `NEXT_PUBLIC_APP_ORIGIN` | 表示・OGP 用 |
 | `NEXT_PUBLIC_API_MODE` | `http` = 実 API / `mock`（未設定時の既定）= ブラウザ内モック。**ビルド時に静的置換されるので、変更したら再デプロイが必要**。`mock` では `proxy.ts` の認証チェックも素通しになるため、**本番は必ず `http` を明示設定する**（§16.4） |
 
 **Vercel の Sensitive 属性を付けてよいのはサーバー専用の秘密だけ**。`NEXT_PUBLIC_*` はビルド時にクライアント JS へ静的置換される値で、Sensitive を付けると `vercel pull` / `vercel build` に復号されずリテラル `[SENSITIVE]` が渡り、ビルドが落ちるか黙って壊れた本番が出来上がる（2026-08-27 に `NEXT_PUBLIC_API_MODE` で実際に発生し、本番が mock モードのまま約 20 時間固着した）。`dopamin-web` プロジェクトは「既定で Sensitive」ポリシーが有効なので、追加は必ず `vercel env add <NAME> production --no-sensitive` を使う。`deploy.yml` の `web` ジョブは `vercel pull` の直後にこれを検証して落とす（§16.2）。`API_ORIGIN` はサーバー専用だが `next.config.ts` の rewrites がビルド時に読むため、同じ理由で Sensitive を付けてはいけない。
@@ -1265,7 +1266,7 @@ FR-05 は埋め込みを使わない（§14）。他に埋め込みを必要と�
 
 `VERCEL_TOKEN` `VERCEL_ORG_ID` `VERCEL_PROJECT_ID_WEB` `VERCEL_PROJECT_ID_API`
 
-`DIRECT_DATABASE_URL` は v0.1.13 で `deploy.yml` から `migrate` ジョブを外したため、**Secret としては参照するワークフローが無い**（本番 DB への適用はローカルから手で当てる。§16.2）。登録済みの Secret は消さなくてよい。ただし `ci.yml` の `e2e` ジョブは、使い捨ての postgres service コンテナ向けに**リテラル値の `DIRECT_DATABASE_URL` を job-level env で渡して `pnpm --filter @dopamin/db migrate` を実行する**（Secret は使わず、本番 DB には触れない）。自動適用に戻すときは Supavisor session mode（5432）の URL を `production` environment の Secrets に置く（`VERCEL_*` はリポジトリ Secrets。全ジョブが `environment: production` なのでどちらでも解決される）。
+`DIRECT_DATABASE_URL` は v0.1.13 で `deploy.yml` から `migrate` ジョブを外したため、**Secret としては参照するワークフローが無い**（本番 DB への適用はローカルから手で当てる。§16.2）。**登録済みの Secret は 2026-08-27 に削除した**（参照が無く、残しておくと「CI が本番 DB を触る」という誤解を招くため）。ただし `ci.yml` の `e2e` ジョブは、使い捨ての postgres service コンテナ向けに**リテラル値の `DIRECT_DATABASE_URL` を job-level env で渡して `pnpm --filter @dopamin/db migrate` を実行する**（Secret は使わず、本番 DB には触れない）。自動適用に戻すときは Supavisor session mode（5432）の URL を `production` environment の Secrets に**登録し直す**（`VERCEL_*` はリポジトリ Secrets。全ジョブが `environment: production` なのでどちらでも解決される）。
 
 ローカルは `.env.example` を各 app に置き、`.env.local` は git 管理外。
 
@@ -1366,7 +1367,7 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | # | 項目 | 確認先 | 期限 |
 |---|---|---|---|
 | 1 | ~~両レジストリの認証方式・ベース URL・エンドポイント・リクエスト/レスポンス形式~~ → 解決（8/25、`docs/registry/spec-notes.md` §1・§2）: 2 段認証（共通 Basic ゲート + `X-Registrar-Id` / `X-Api-Key`。`GET /sessions/hello` のみ API キー不要）、オリジン `https://epp.kitaqsign.com` / `https://epp.kitaqnic.com`、ベースパス `/api/v1/epp`、エンベロープ・result code は両レジストリ同一。なお「Basic ゲートの資格情報が両者共通か」は spec-notes §3 #7 として別途未解決（実装はレジストリごとに 4 変数を分けて保持） | Swagger | 済 |
-| 2 | ~~対応 TLD と TLD → レジストリのルーティング~~ → 解決（8/25、§11.2 / `packages/shared/src/tlds.ts`）: `GET /sessions/hello` で 22 種（kitaqsign 4 / kitaqnic 18）を確定、重複なしで TLD からレジストリが一意（`REGISTRY_TLDS` / `SUPPORTED_TLDS`）。`.jp` は両レジストリとも非対応 | Swagger / 運営 | 済 |
+| 2 | ~~対応 TLD と TLD → レジストリのルーティング~~ → 解決（8/25、§11.2 / `packages/shared/src/tlds.ts`）: `GET /sessions/hello` で 22 種（kitaqsign 4 / kitaqnic 18）を確定、重複なしで TLD からレジストリが一意（`REGISTRY_TLDS` / `SUPPORTED_TLDS`）。`.jp` は両レジストリとも非対応。その後 8/27 の仕様変更で `.org` / `.info` は kitaqnic 管轄へ移管（§11.2） | Swagger / 運営 | 済 |
 | 3 | ~~`renew` の必須パラメータ~~ → 解決: `curExpDate` 必須（8/25） | Swagger | 済 |
 | 4 | ~~`restore` が 1 段階か 2 段階か~~ → 解決: 両レジストリとも 1 段階（8/25） | Swagger | 済 |
 | 5 | ~~`transfer` の承認フロー、AuthCode の取得方法~~ → 解決: 承認待ち + 20 分自動承認 / AuthCode は `rotate-auth-info` のみ（8/25） | Swagger | 済 |
@@ -1456,4 +1457,6 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | v0.1.17 | 2026-08-26 | §11.1: `poll` / `ackMessage` の実装（#44）と mock の移管シミュレーション（#45）を実装に合わせて確定。Poll のエンドポイント差はアダプタで吸収し（応答の形は両レジストリ同一）、`msgType` が未知の通知は捨てず `'unknown'` に倒す。mock は相手レジストラ保有ドメインの seed・レジストラ別 Poll キュー・役割チェック（approve / reject は対応側、cancel は申請側、更新系は現スポンサー）を持ち、**自動承認は `setTimeout` ではなく `info` / `transferQuery` / `poll` 時の遅延評価**で確定させる（Vercel Functions でタイマーが生き残らないため）。`transferRequest` は自レジストラ保有のドメインには出せない（暫定 2304、§21.2 #15）（採番が衝突していたため v0.1.14 から再採番。日付は原文のまま） |
 | v0.1.18 | 2026-08-27 | 実装が先行していた記述を現状に同期。§6.4 / §11.1: `RegistryAdapter` に `hello` / `createContact` / `updateContact` を追記し `getAuthInfo` を `authCode` に訂正、mock の状態の永続先を `domains.raw_info` から専用テーブル `mock_registry_state` に訂正、`MOCK_REGISTRY_FAIL_MODE` に `timeout_after_write` を追加。§8: `apps/web/lib/api/` と `apps/api` の routes / services / middleware / lib を実ファイルに合わせる。§9 前書き / §9.1: `mock_registry_state` の表を追加、`operation_logs.command` を SSOT どおり 21 種（主 15 + 補助 5 + アプリ内 1）に、`contacts` の例値を許可値に修正。§10.2: `requestContext` を追加し `Origin` ヘッダ欠落は通す仕様を明記。§10.4: 応答例に `confidence` / `algorithmVersion` / `corpusVersion` と `error` 行の `uniqueness` を反映。§11.3: renew ロックの行を追加し UpdateProhibited の表示を「変更ロック」に修正（FR-08 に AC-08-3 を追加）。§14.1: コーパス生成コマンドに `TRANCO_RETRIEVED_DATE` と出力リダイレクトを明記。§15: shadcn/ui CLI ではなく Radix UI + cva の自前実装、`/dashboard` はカードグリッド、ブレークポイントは `md`（768px）+ `MobileNav`。§16.2 / §17: `ci.yml` の perf / e2e ジョブ、**`NEXT_PUBLIC_*` に Vercel の Sensitive 属性を付けない**規定（2026-08-27 の本番障害の再発防止）、`DIRECT_DATABASE_URL` の Secret と CI env の区別。§16.3: `vector` 拡張の有効化は不要（ADR-0003）。§21.1 / §21.2 #1 / #2 / #8 / #11 / §21.3: 解決済みの事項を反映。あわせて更新履歴の版番号の重複・順序の乱れを解消（外部参照の無い 2 行を v0.1.16 / v0.1.17 に再採番し、表を版番号の昇順に並べ替え） |
 | v0.1.19 | 2026-08-27 | §2.2: サブドメイン設計の反映先を「アプリ内の疑似 DNS ゾーン」にした判断を `docs/adr/0004-pseudo-dns-zone.md` として残し、本文から参照を張った（要件の内容は変えていない。外部 DNS プロバイダへ反映しない理由・NS 切替だけは実レジストリに効く理由・却下案を記録）。#16 |
-| v0.1.20 | 2026-08-27 | AI プロバイダ周りをチーム決定に合わせて追記（実装は #186 / #190）。§17: `AI_GATEWAY_API_KEY`（Vercel AI Gateway）を環境変数表に追加。プロバイダ固有キーが無いときだけ使われ、1 本で全プロバイダに出せる。§13.1: 実効モデルの解決を「固有キーがあれば直接 → 無ければ Gateway 経由 → どちらも無ければ `AI_UNAVAILABLE`」に更新し、`xai`（Grok）は Gateway 経由専用であること、Gateway のモデル ID 体系の読み替えは `apps/api` の境界で吸収することを明記。FR-17: 選択肢に `xai` を追加し、有効判定を「固有キーまたは Gateway キー」に。`xai` は Gateway キーが無い環境では選択肢に出ない。§9.1: `users.ai_provider` の値に `xai` を追加（列は `text` のままで制約を持たせない = migration 不要） |
+| v0.1.20 | 2026-08-27 | AI プロバイダ周りをチーム決定に合わせて追記（実装は #186 / #193）。§17: `AI_GATEWAY_API_KEY`（Vercel AI Gateway）を環境変数表に追加。プロバイダ固有キーが無いときだけ使われ、1 本で全プロバイダに出せる。§13.1: 実効モデルの解決を「固有キーがあれば直接 → 無ければ Gateway 経由 → どちらも無ければ `AI_UNAVAILABLE`」に更新し、`xai`（Grok）は Gateway 経由専用であること、Gateway のモデル ID 体系の読み替えは `apps/api` の境界で吸収することを明記。FR-17: 選択肢に `xai` を追加し、有効判定を「固有キーまたは Gateway キー」に。`xai` は Gateway キーが無い環境では選択肢に出ない。§9.1: `users.ai_provider` の値に `xai` を追加（列は `text` のままで制約を持たせない = migration 不要） |
+| v0.1.21 | 2026-08-27 | §11.2: 運営アナウンス（8/27 16:00〜のメンテナンス）による **`.org` / `.info` の管轄移管（kitaqsign → kitaqnic）** を反映。kitaqsign は `.com` `.net` の 2 種、kitaqnic は 20 種に（計 22 種は不変）。`REGISTRY_TLDS` / fixture / `specVersion`（`v2 (2026-08-27)`）を更新し、既存 `.org` / `.info` 行の `domains.registry` / `transfers.registry` を付け替えるデータマイグレーションを追加。§21.2 #2 に追記。#195（採番が衝突していたため v0.1.20 から採り直した）|
+| v0.1.22 | 2026-08-27 | §16.1 / §16.4 / §17: **参照されていない環境変数を削除**。`NEXT_PUBLIC_APP_ORIGIN`（「表示・OGP 用」として §17 に載っていたが、`apps/web` のコードから一度も読まれていなかった。Vercel の web プロジェクトと `.env.example` / `playwright.config.ts` / README からも削除）。GitHub Secrets の `DIRECT_DATABASE_URL` も、v0.1.13 で `migrate` ジョブを外して以降どのワークフローからも参照されていないため削除した（`ci.yml` の `e2e` は Secret ではなくリテラル値を使う。本番 DB への適用は §16.2 のとおりローカルから手で当てる）。Vercel の api プロジェクトからも同変数を削除（ランタイムでは未使用で、`packages/db/drizzle.config.ts` がローカルで読むだけ） |

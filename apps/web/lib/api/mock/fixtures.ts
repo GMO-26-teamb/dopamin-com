@@ -459,7 +459,7 @@ export function createCandidatePool(): Candidate[] {
       sld: "kitaq-studio",
       tld: "org",
       reason: "地名を入れて由来が伝わるようにした案",
-      registry: "kitaqsign",
+      registry: "kitaqnic",
       availability: "available",
       uniqueness: score(58, [
         ["kitaq-studio.com", 0.91],

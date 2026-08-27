@@ -7,13 +7,15 @@ import {
 } from "./routing";
 
 describe("TLD ルーティング（docs/requirements.md §11.2）", () => {
-  it("kitaqsign の 4 TLD が引ける", () => {
-    for (const tld of ["com", "net", "org", "info"]) {
+  it("kitaqsign の 2 TLD が引ける（8/27 の .org / .info 移管後）", () => {
+    for (const tld of ["com", "net"]) {
       expect(registryIdForTld(tld)).toBe("kitaqsign");
     }
   });
 
-  it("kitaqnic の 18 TLD が引ける", () => {
+  it("kitaqnic の 20 TLD（.org / .info 含む）が引ける", () => {
+    expect(REGISTRY_TLDS.kitaqnic).toContain("org");
+    expect(REGISTRY_TLDS.kitaqnic).toContain("info");
     for (const tld of REGISTRY_TLDS.kitaqnic) {
       expect(registryIdForTld(tld)).toBe("kitaqnic");
     }

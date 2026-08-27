@@ -4,6 +4,8 @@ import type { RegistryId } from "./registry";
 /**
  * TLD → レジストリのルーティング表（docs/requirements.md §11.2）。
  * `GET /sessions/hello` で確定済み（2026-08-25）。両者に重複は無い。
+ * 2026-08-27 の仕様変更で `.org` / `.info` の管轄が kitaqsign → kitaqnic に移管された
+ * （`docs/registry/kitaqnic/CHANGELOG.md`）。
  *
  * 対応 TLD の定数はここが正。`packages/registry` のルーティングも `apps/web` の
  * TLD 選択肢もこの表を参照する（`@dopamin/registry` は `node:crypto` に依存する
@@ -13,8 +15,11 @@ export const REGISTRY_TLDS: Record<
   Exclude<RegistryId, "mock">,
   readonly string[]
 > = {
-  kitaqsign: ["com", "net", "org", "info"],
+  kitaqsign: ["com", "net"],
   kitaqnic: [
+    // 2026-08-27 に kitaqsign から移管。UI の並び（SUPPORTED_TLDS）を保つため先頭に置く
+    "org",
+    "info",
     "xyz",
     "online",
     "site",

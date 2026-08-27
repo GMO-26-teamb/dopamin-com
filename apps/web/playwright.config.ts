@@ -92,7 +92,6 @@ export default defineConfig({
       env: {
         NEXT_PUBLIC_API_MODE: "http",
         API_ORIGIN,
-        NEXT_PUBLIC_APP_ORIGIN: WEB_ORIGIN,
       },
     },
   ],

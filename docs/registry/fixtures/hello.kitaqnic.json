@@ -6,6 +6,8 @@
     "svcMenu": { "version": "1.0", "lang": ["en", "ja"] },
     "info": {
       "supportedTlds": [
+        "org",
+        "info",
         "xyz",
         "online",
         "site",
