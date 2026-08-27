@@ -64,9 +64,9 @@ sequenceDiagram
 | `apps/api/src/services/subdomain-plan.service.ts` | 提案生成、保存 / 取得、応答への写像 |
 | `apps/api/src/services/subdomain-plan-store.ts` | 2 テーブルの永続化と読み戻しの検証 |
 | `apps/api/src/services/dns.service.ts` | 差分の実行（NS 切替 → レコード書き込み → 操作ログ） |
-| `apps/api/src/routes/subdomain-plan.ts` | 認証・所有権チェック・サービス呼び出し |
+| `apps/api/src/routes/subdomain-plan.ts` | 所有権チェック・サービス呼び出し（認証はネスト元の `routes/domains.ts` が 1 箇所で掛ける。#166） |
 
-ルートは `/domains` に重ねてマウントする（`routes/domains.ts` とは関心が違うのでファイルを分ける）。
+ルートは `routes/domains.ts` のチェーンにネストする（関心が違うのでファイルは分けるが、`/domains` に重ねてマウントすると `requireSession` が 2 回走るため。#166）。
 
 ### 2.2 GitHub 解析（#68）
 
