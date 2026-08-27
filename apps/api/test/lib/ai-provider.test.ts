@@ -16,6 +16,7 @@ import { z } from "zod";
 import {
   type AiAttempt,
   type AiModelFactory,
+  GOOGLE_THINKING_BUDGET_TOKENS,
   resolveAiAttempt,
   resolveModel,
   runStructured,
@@ -98,6 +99,34 @@ function respondingModel(
       },
       warnings: [],
     }),
+  });
+}
+
+/** doGenerate に渡されたプロバイダ固有オプションを記録するモデル。 */
+function recordingModel(
+  record: (providerOptions: unknown) => void,
+): LanguageModel {
+  return new MockLanguageModelV4({
+    doGenerate: async (options) => {
+      record(options.providerOptions);
+      return {
+        content: [
+          { type: "text" as const, text: JSON.stringify({ names: ["a.com"] }) },
+        ],
+        finishReason: { unified: "stop" as const, raw: undefined },
+        usage: {
+          inputTokens: {
+            total: 10,
+            noCache: undefined,
+            cacheRead: undefined,
+            cacheWrite: undefined,
+          },
+          outputTokens: { total: 10, text: undefined, reasoning: undefined },
+          totalTokens: 20,
+        },
+        warnings: [],
+      };
+    },
   });
 }
 
@@ -535,7 +564,7 @@ describe("runStructured（§13.1 呼び出し / AC-14-1・AC-14-2 記録）", ()
   });
 });
 
-describe("runStructured のタイムアウト（§13.1 10 秒）", () => {
+describe("runStructured のタイムアウト（§13.1 20 秒）", () => {
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -557,19 +586,19 @@ describe("runStructured のタイムアウト（§13.1 10 秒）", () => {
     const assertion = expect(pending).rejects.toMatchObject({
       code: "AI_UNAVAILABLE",
     });
-    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.advanceTimersByTimeAsync(20_000);
     await assertion;
 
     expect(values).toHaveBeenCalledWith(
       expect.objectContaining({
         status: "error",
-        errorMessage: "AI が 10000ms 以内に応答しませんでした",
-        latencyMs: 10_000,
+        errorMessage: "AI が 20000ms 以内に応答しませんでした",
+        latencyMs: 20_000,
       }),
     );
   });
 
-  it("本命が予算を使い切ったらフォールバックしない（合計 10 秒を守る）", async () => {
+  it("本命が予算を使い切ったらフォールバックしない（合計 20 秒を守る）", async () => {
     const env = envWithBothKeys();
     const factory = useModels(() => hangingModel());
     const values = vi.fn().mockResolvedValue(undefined);
@@ -585,7 +614,7 @@ describe("runStructured のタイムアウト（§13.1 10 秒）", () => {
     const assertion = expect(pending).rejects.toMatchObject({
       code: "AI_UNAVAILABLE",
     });
-    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.advanceTimersByTimeAsync(20_000);
     await assertion;
 
     // 両プロバイダ有効でも 2 回目は始めない（始めても即打ち切りになるだけ）
@@ -597,7 +626,7 @@ describe("runStructured のタイムアウト（§13.1 10 秒）", () => {
     const env = envWithBothKeys();
     const factory = useModels((attempt) =>
       attempt.provider === "google"
-        ? failingModel(new Error("google down"), 6_200)
+        ? failingModel(new Error("google down"), 16_200)
         : respondingModel({ names: ["dopamin.dev"] }),
     );
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -613,9 +642,9 @@ describe("runStructured のタイムアウト（§13.1 10 秒）", () => {
       settings: defaultSettings(env),
       db: stuckDb,
     });
-    // google 失敗まで 6.2 秒 + 記録待ち 3 秒 = 9.2 秒。予算に記録待ちを含めると
+    // google 失敗まで 16.2 秒 + 記録待ち 3 秒 = 19.2 秒。予算に記録待ちを含めると
     // 残り 0.8 秒となってフォールバックが打ち切られてしまう
-    await vi.advanceTimersByTimeAsync(20_000);
+    await vi.advanceTimersByTimeAsync(40_000);
 
     await expect(pending).resolves.toEqual({ names: ["dopamin.dev"] });
     expect(factory).toHaveBeenCalledTimes(2);
@@ -671,6 +700,55 @@ describe("Gateway の ID 変換表（#187）", () => {
       AI_GATEWAY_API_KEY: "vck_gateway",
     });
     expect(modelIdOf(resolveModel())).toBe("google/gemini-2.5-pro");
+  });
+});
+
+describe("Google の思考トークン上限（#199 / §13.1 10 秒予算）", () => {
+  it("google の呼び出しには thinkingConfig で上限を渡す", async () => {
+    const env = envWith({ GOOGLE_GENERATIVE_AI_API_KEY: "g-key" });
+    let passed: unknown;
+    useModels(() =>
+      recordingModel((providerOptions) => {
+        passed = providerOptions;
+      }),
+    );
+
+    await runStructured("subdomain_plan", CANDIDATES, "プロンプト", {
+      user: { id: userId },
+      input: { domain: "example.com" },
+      settings: defaultSettings(env),
+    });
+
+    expect(passed).toMatchObject({
+      google: {
+        thinkingConfig: {
+          thinkingBudget: GOOGLE_THINKING_BUDGET_TOKENS,
+          includeThoughts: false,
+        },
+      },
+    });
+  });
+
+  it("上限は gemini-2.5-pro でも指定できる値にする（pro は思考を切れない）", () => {
+    expect(GOOGLE_THINKING_BUDGET_TOKENS).toBeGreaterThanOrEqual(128);
+  });
+
+  it("google 以外のプロバイダに google 向けオプションは渡さない", async () => {
+    const env = envWith({ ANTHROPIC_API_KEY: "a-key" });
+    let passed: unknown;
+    useModels(() =>
+      recordingModel((providerOptions) => {
+        passed = providerOptions;
+      }),
+    );
+
+    await runStructured("subdomain_plan", CANDIDATES, "プロンプト", {
+      user: { id: userId },
+      input: { domain: "example.com" },
+      settings: defaultSettings(env),
+    });
+
+    expect(passed ?? {}).not.toHaveProperty("google");
   });
 });
 

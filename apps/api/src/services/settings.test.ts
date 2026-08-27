@@ -232,7 +232,7 @@ describe("xai（Grok）— Gateway 専用プロバイダ（#187）", () => {
     expect(providers.map((p) => p.id)).toEqual(["google", "anthropic", "xai"]);
   });
 
-  it("xai の既定モデルは速度優先の grok-4.1-fast-non-reasoning（10 秒予算）", () => {
+  it("xai の既定モデルは速度優先の grok-4.1-fast-non-reasoning（20 秒予算）", () => {
     const settings = resolveAiSettings(
       { aiProvider: "xai", aiModel: null },
       envWith({ AI_GATEWAY_API_KEY: "vck_gateway" }),

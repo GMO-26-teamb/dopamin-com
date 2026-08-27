@@ -321,6 +321,14 @@ describe("/domains/new", () => {
     expect(within(dialog).getByText(`${name} を登録`)).toBeInTheDocument();
     await within(dialog).findByText("空き・再確認済み");
 
+    // NS 欄は表示だけで送信しない。実際には適用されない既定 NS を出さない（#173）
+    expect(
+      within(dialog).getByText(
+        "登録時は未設定。あとから「情報修正」で設定できます",
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText(/ns1\.dopamin/)).toBeNull();
+
     // S-25 は期間選択まで。決済はまだ通っていない（AC-19-1）
     await user.click(
       within(dialog).getByRole("button", { name: "お支払いへ" }),
