@@ -98,10 +98,25 @@ export const SUBDOMAIN_PRIORITIES = [
 export const subdomainPrioritySchema = z.enum(SUBDOMAIN_PRIORITIES);
 export type SubdomainPriority = z.infer<typeof subdomainPrioritySchema>;
 
+/**
+ * 保存できる設計の件数（FR-13）。提案は 3 件以上を要求するが（{@link MIN_PROPOSED_ITEMS}）、
+ * ユーザーは編集で 1 件まで減らせる。画面側の入力検証もこの値を使う（数値を二重に持たない）。
+ */
+export const MIN_SUBDOMAIN_ITEMS = 1;
+export const MAX_SUBDOMAIN_ITEMS = 8;
+/** AI の提案に要求する下限（FR-13「3〜8 件」）。 */
+export const MIN_PROPOSED_ITEMS = 3;
+/** 用途（1 ホストの説明）と全体方針の最大文字数。 */
+export const MAX_SUBDOMAIN_PURPOSE_LENGTH = 100;
+export const MAX_SUBDOMAIN_POLICY_LENGTH = 120;
+
+/** 全体方針（`policy`）。提案・保存・応答で共通。 */
+const policySchema = z.string().min(1).max(MAX_SUBDOMAIN_POLICY_LENGTH);
+
 const subdomainItemShape = {
   host: subdomainHostSchema,
   /** そのホストの用途（例: ランディングページ）。 */
-  purpose: z.string().min(1).max(100),
+  purpose: z.string().min(1).max(MAX_SUBDOMAIN_PURPOSE_LENGTH),
   recordType: dnsRecordTypeSchema,
   target: dnsTargetSchema,
   priority: subdomainPrioritySchema,
@@ -147,11 +162,11 @@ const UNIQUE_HOSTS_MESSAGE = "同じホストを複数回指定することは�
  */
 export const subdomainProposalSchema = z.object({
   /** 全体方針（120 字以内）。 */
-  policy: z.string().min(1).max(120),
+  policy: policySchema,
   items: z
     .array(subdomainItemSchema)
-    .min(3)
-    .max(8)
+    .min(MIN_PROPOSED_ITEMS)
+    .max(MAX_SUBDOMAIN_ITEMS)
     .refine(hasUniqueHosts, { message: UNIQUE_HOSTS_MESSAGE })
     .refine((items) => items.some((item) => hostKey(item.host) === "www"), {
       message: "提案には www を含めてください",
@@ -198,7 +213,7 @@ export type SubdomainPlanGenerateRequest = z.infer<
 export const subdomainPlanProposalResponseSchema = z.object({
   domain: domainNameSchema,
   repoUrl: z.string().nullable(),
-  policy: z.string().min(1).max(120),
+  policy: policySchema,
   items: z.array(subdomainItemSchema),
 });
 export type SubdomainPlanProposalResponse = z.infer<
@@ -213,11 +228,11 @@ export type SubdomainPlanProposalResponse = z.infer<
  * DB から読み戻すときもこのスキーマで検証する（jsonb は素通しなので）。
  */
 export const savedSubdomainProposalSchema = z.object({
-  policy: z.string().min(1).max(120),
+  policy: policySchema,
   items: z
     .array(subdomainItemSchema)
-    .min(1)
-    .max(8)
+    .min(MIN_SUBDOMAIN_ITEMS)
+    .max(MAX_SUBDOMAIN_ITEMS)
     .refine(hasUniqueHosts, { message: UNIQUE_HOSTS_MESSAGE }),
 });
 export type SavedSubdomainProposal = z.infer<
