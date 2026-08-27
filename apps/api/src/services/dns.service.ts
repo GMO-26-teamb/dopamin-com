@@ -152,6 +152,18 @@ async function writeRecords(
     ...diff.added,
     ...diff.changed.map((change) => change.desired),
   ];
+  // 種別が変わった変更（CNAME → A など）は、upsert の競合キーに record_type が
+  // 含まれるため新種別の行が INSERT されるだけで旧種別の行に触れない。旧行を
+  // 残すと反映直後の GET /dns の差分が空にならず AC-13-4 を満たさないので、
+  // current 側も削除対象に含める
+  const removals = [
+    ...diff.removed,
+    ...diff.changed
+      .filter(
+        (change) => change.current.recordType !== change.desired.recordType,
+      )
+      .map((change) => change.current),
+  ];
   await db.transaction(async (tx) => {
     for (const record of upserts) {
       await tx
@@ -180,8 +192,8 @@ async function writeRecords(
           },
         });
     }
-    // 設計から消えたホストのレコードを落とす
-    for (const record of diff.removed) {
+    // 設計から消えたホストと、種別が変わって置き換えられた旧行を落とす
+    for (const record of removals) {
       await tx
         .delete(schema.dnsRecords)
         .where(

@@ -220,6 +220,36 @@ describe("POST /domains/:name/subdomain-plan/apply（FR-13）", () => {
     });
   });
 
+  it("AC-13-4: recordType を変えて再反映しても旧種別の行が残らない", async () => {
+    const { cookie } = await createTestSession(db);
+    await registerDomain(cookie, "apply10.com", [...DOPAMIN_NAMESERVERS]);
+    await savePlan(cookie, "apply10.com", [WWW]);
+    await apply(cookie, "apply10.com");
+
+    // www を CNAME → A に切り替える（upsert の競合キーが record_type を含むため、
+    // 新種別の行が INSERT されるだけで旧種別の行が削除されず残る回帰があった）
+    await savePlan(cookie, "apply10.com", [
+      { ...WWW, recordType: "A" as const, target: "203.0.113.10" },
+    ]);
+    const { json } = await apply(cookie, "apply10.com");
+    expect(json).toMatchObject({ added: 0, updated: 1, removed: 0 });
+
+    const records = await selectRecords("apply10.com");
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      host: "www",
+      recordType: "A",
+      target: "203.0.113.10",
+    });
+
+    // 反映直後の GET /dns は設計と一致し、差分が空になる（AC-13-4）
+    const { json: dns } = await getDns(cookie, "apply10.com");
+    const zone = dns as DnsZoneResponse;
+    expect(zone.diff.added).toEqual([]);
+    expect(zone.diff.changed).toEqual([]);
+    expect(zone.diff.removed).toEqual([]);
+  });
+
   it("AC-13-6: 反映 → 編集 → 再反映で applied に戻る", async () => {
     const { cookie } = await createTestSession(db);
     await registerDomain(cookie, "apply4.com", [...DOPAMIN_NAMESERVERS]);
