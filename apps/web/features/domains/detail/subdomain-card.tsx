@@ -10,6 +10,10 @@ import type { DomainDetail } from "@/lib/api/types";
  * Figma: S-30 サブドメイン設計カード（`83:2478`、Emphasis = Brand）
  * 設計あり → 「保存済み · n ホスト · 反映済み a/n」+「開く」（S-43）。
  * 未作成 → 「未作成」+「設計をはじめる」（S-40）。
+ *
+ * 画面で一番目立つカードなので、カード面のどこを押しても S-43 へ入れるようにする
+ * （リンクの疑似要素をカード全面に広げる stretched link。リンクは 1 つのままなので
+ * 読み上げも変わらず、フォーカスリングはリンク自身に出る）。
  */
 export interface SubdomainCardProps {
   domain: DomainDetail;
@@ -25,7 +29,7 @@ export function SubdomainCard({
   const href = `/domains/${encodeURIComponent(domain.name)}/subdomains`;
 
   return (
-    <Card emphasis="brand" kicker="サブドメイン設計">
+    <Card className="relative" emphasis="brand" kicker="サブドメイン設計">
       <div className="flex w-full items-center justify-between gap-2">
         <p className="min-w-0 text-body-sm text-ink">
           {plan === null
@@ -35,6 +39,7 @@ export function SubdomainCard({
         {readOnly ? null : (
           <Button
             asChild
+            className="after:absolute after:inset-0"
             size="sm"
             trailingIcon={<ArrowRight />}
             variant="subtle"

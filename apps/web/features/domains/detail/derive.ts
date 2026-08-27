@@ -11,28 +11,18 @@
  */
 
 import type { DomainDetail, GracePeriod } from "@/lib/api/types";
-import { formatDate, remainingDays } from "../format";
-import { statusLabel } from "../status-badge";
+import { formatDate } from "../format";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** 残り 30 日以内は警告色にする（Domain Card と同じ閾値）。 */
 export const EXPIRY_WARN_DAYS = 30;
 
-/** 状態バッジの文言。RGP / 削除待ちは残日数を添える（S-33 / S-36）。 */
-export function statusBadgeLabel(domain: DomainDetail, now: number): string {
-  const base = statusLabel(domain.displayStatus);
-  if (domain.displayStatus === "rgp") {
-    return `${base} 残 ${remainingDays(domain.rgpUntil, now)} 日`;
-  }
-  if (domain.displayStatus === "pending_delete") {
-    const until = gracePeriodOf(domain, "pendingDelete");
-    return until === null
-      ? base
-      : `${base} 残 ${remainingDays(until.until, now)} 日`;
-  }
-  return base;
-}
+/**
+ * 状態バッジは状態名だけを出す（`statusLabel`）。残日数は Banner に 1 本化した:
+ * ヘッダー・Banner・基本情報カードの 3 か所に同じ日数が並んでいたうえ、
+ * 猶予期限が分からないとき（`rgpUntil === null`）に「残 0 日」と読めてしまった（#211）。
+ */
 
 /** 指定種別の Grace Period を返す。 */
 export function gracePeriodOf(

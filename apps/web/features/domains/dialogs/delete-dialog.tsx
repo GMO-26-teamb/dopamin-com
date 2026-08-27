@@ -30,13 +30,13 @@ export function deleteCopy(name: string, withinAgp: boolean) {
     ? {
         title: `${name} を取り消しますか？`,
         subtitle: `登録から ${ADD_GRACE_PERIOD_DAYS} 日以内のため、無課金で取消扱いになります（Add Grace Period）。`,
-        note: "取消後の扱いはレジストリ次第です。復旧猶予（RGP）に入れば「復旧」から戻せますが、即時に削除された場合は元に戻せず、ダッシュボードからも消えます。",
+        note: "復旧猶予（RGP）に入れば「復旧」から戻せます。即時に削除された場合は元に戻せません。",
         primaryLabel: "取り消す",
       }
     : {
         title: `${name} を廃止しますか？`,
         subtitle: `登録から ${ADD_GRACE_PERIOD_DAYS} 日を過ぎているため、30 日間の復旧猶予（RGP）の後に完全に削除されます。`,
-        note: "復旧猶予の間は「復旧」から戻せます（復旧費用はダミー表示）。削除ロック中は実行できません。",
+        note: "復旧猶予の間は「復旧」から戻せます（復旧費用はダミー表示）。",
         primaryLabel: "廃止する",
       };
 }
