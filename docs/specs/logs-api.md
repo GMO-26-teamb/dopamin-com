@@ -13,7 +13,9 @@
 ## 0. ユーザーストーリー
 
 - 利用者として、自分が行った操作（レジストリ通信）と AI 呼び出しを `/logs` 画面で新しい順に辿りたい。
-  デモの場で「今なにが起きたか」を見せる導線であり、障害時の自己診断にも使う。
+  障害時の自己診断と、デモで「今なにが起きたか」を見せるための導線。
+  requirements v0.1.27 でこの画面は**開発者向け**の位置づけになり、サイドバーのナビからは外れて
+  `/settings` の「開発者向け」からのみ到達する（`docs/specs/ui-screens.md` §1 / S-70）。
 - 開発者として、件数が増えても一定コストで読めるページングが欲しい（offset だと後ろのページが重く、
   かつ書き込みが続くと行がずれる）。
 
@@ -82,6 +84,9 @@ flowchart LR
 画面そのものは #90 / #93 の範囲。ここには、`NEXT_PUBLIC_API_MODE=http` で `/logs` を
 本 API に繋ぐ層（`apps/web/lib/api/http/http-services.ts` の `LogService`。#187）だけを書く。
 
+AI ログを全画面から開くスライドインパネル（P-01）は廃止した（requirements v0.1.27 /
+ui-screens v0.10）。AI ログは S-61（`/logs?tab=ai`）の行を開いて見る。
+
 `LogService`（fe-ui 設計 §4.2）は `Promise<OperationLog[]>` / `Promise<AiLog[]>` を返す
 **1 ページ契約**で、cursor を辿る口を持たない。S-60 / S-61 の「もっと見る」は取得済みの配列を
 クライアント側で刻んで出している（`features/logs/load-more.tsx`）。そのため配線は
@@ -93,7 +98,7 @@ ViewModel（`apps/web/lib/api/types.ts`）への写像で落ちる / 変わる�
 | 契約 | ViewModel | 理由 |
 |---|---|---|
 | `tokensIn` / `tokensOut` | `tokens`（合計） | 表示は合計 1 つ。導出は `packages/shared` の `aiTokenTotal` が SSOT（どちらも無ければ null） |
-| `ai_logs.output` | `raw` | ドロワーで JSON として展開する値 |
+| `ai_logs.output` | `raw` | 行を開いたときに JSON として展開する値（`features/logs/ai-log-row.tsx`） |
 | `operation_logs.requestId` / `ai_logs.errorMessage` | 無し | 画面に出していない（失敗の本文は `outputSummary` に入る） |
 
 ## 4. API 契約
@@ -144,3 +149,4 @@ ViewModel（`apps/web/lib/api/types.ts`）への写像で落ちる / 変わる�
 | v0.1 | 2026-08-27 | 初版（#64 の実装に合わせて起票） |
 | v0.2 | 2026-08-27 | 実装との乖離を修正: カーソルの内部表現は `created_at::text`（6aeacf1）。ISO 8601 は復号側の互換のみ。`id` の UUID 検証を追記 |
 | v0.3 | 2026-08-27 | §3 を「Web の配線」に広げ、`LogService` が 1 ページ契約であること（`limit=PAGINATION_MAX_LIMIT` で 1 回・`nextCursor` は未使用）と ViewModel 写像（`tokensIn`/`tokensOut` → `tokens`、`output` → `raw`、`requestId`/`errorMessage` は不使用）を追記。§7 に web の契約テスト行。#187 |
+| v0.4 | 2026-08-28 | UI 見直しに追随（requirements v0.1.27 / ui-screens v0.10）。§0 に `/logs` が開発者向けになり `/settings` の「開発者向け」からのみ到達することを、§3 に AI ログのスライドインパネル（P-01）を廃止したことを明記。§3 の写像表の「ドロワー」を実装どおり「行を開いたときの展開」に訂正 |

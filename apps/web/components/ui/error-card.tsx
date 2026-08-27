@@ -52,7 +52,7 @@ export function ErrorCard({
       <div className="flex w-full items-center gap-2">
         <TriangleAlert
           aria-hidden="true"
-          className="size-4.5 shrink-0 text-warn"
+          className="size-4 shrink-0 text-warn"
         />
         <p className="min-w-0 flex-1 text-label text-warn">{copy.title}</p>
       </div>

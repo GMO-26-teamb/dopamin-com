@@ -20,7 +20,7 @@ import type { ApiClientError } from "@/lib/api/errors";
 /**
  * Figma: D-05 `83:3954`（Dialog / Form + Code Block）
  *
- * 開いた時点で `rotate-auth-info` により発行し、「再発行」で発行し直す（FR-12）。
+ * 開いた時点で `rotate-auth-info` により発行し、「再発行する」で発行し直す（FR-12）。
  * ドメイン名の再入力は課さない（ui-screens §7-4 の仮置き）。値は保存せず、
  * 操作ログではマスクされる。
  */
@@ -91,7 +91,7 @@ export function AuthCodeDialog({
             onClick={onIssue}
             variant="primary"
           >
-            {busy ? "発行中…" : "再発行"}
+            {busy ? "発行中…" : "再発行する"}
           </Button>
         </DialogFooter>
       </DialogContent>

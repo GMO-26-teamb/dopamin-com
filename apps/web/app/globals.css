@@ -311,46 +311,12 @@
   }
 
   /*
-   * S-00 右カラムの抽象の場（`features/landing/score-field.tsx`）。
-   * 罫線は全段が同じ継ぎ目で切ってあり、右側だけが 0 → 1.75rem ゆっくり開く。
-   * 揃う / ずれる の往復が場の唯一の動き。段ごとに位相をずらす。
+   * 大きな面に敷くブランドグラデーション（S-00 の右半分・#224）。
+   * `.brand-gradient` の RGB のパンは小さな帯を想定した速さなので、
+   * 画面の半分に広げるとうるさい。同じ動きのまま周期だけ伸ばす。
    */
-  @keyframes score-field-seam {
-    from {
-      transform: translate3d(0, 0, 0);
-    }
-    to {
-      transform: translate3d(1.75rem, 0, 0);
-    }
-  }
-
-  .score-field-seam {
-    animation: score-field-seam 11s ease-in-out var(--seam-delay, 0s) infinite
-      alternate;
-  }
-
-  /*
-   * 場の中で唯一色を持つ 1 本。面の作り方は `.brand-gradient` と同じで、
-   * 極ドパでは `--gradient-motion`（RGB のパン）も走る。
-   */
-  .score-field-brand {
-    background-image: var(--gradient-brand);
-    background-size: var(--gradient-size);
-    animation: var(--gradient-motion);
-  }
-
-  .score-field-brand.score-field-seam {
-    animation:
-      score-field-seam 11s ease-in-out var(--seam-delay, 0s) infinite alternate,
-      var(--gradient-motion);
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .score-field-seam,
-    .score-field-brand,
-    .score-field-brand.score-field-seam {
-      animation: none;
-    }
+  .brand-field {
+    animation-duration: 18s;
   }
 
   /* Modernist DS: 角丸は常に 0。rounded-* / --radius-* は使わない（設計 §3） */

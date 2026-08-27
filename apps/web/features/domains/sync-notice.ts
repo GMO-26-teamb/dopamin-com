@@ -9,6 +9,9 @@ import { REGISTRY_LABEL } from "./registry-label";
  * Next.js の Page モジュールは `default` と決められたメタデータ以外を export できないため
  * （`auto-sync.ts` と同じ制約）、純粋関数はここに置いてテストもここから読む。
  *
+ * 語彙: データを取り直す**操作**は「最新化」、その結果として持っている**状態**は「同期」
+ * （最終同期 / 未同期）で統一する。ボタンは「最新化」、メタ・バッジは「同期」。
+ *
  * 見出しと案内は**失敗コードで出し分ける**（#184）。`failures[].code` には
  * `REGISTRY_UNAVAILABLE` 以外（`NOT_FOUND` / `REGISTRY_REJECTED` /
  * `REGISTRY_SPEC_MISMATCH` / `VALIDATION_ERROR` …）も届くので、固定で

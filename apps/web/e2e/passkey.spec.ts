@@ -88,15 +88,15 @@ test.describe("FR-01 パスキー認証", () => {
     const deleteButtons = page.getByRole("button", {
       name: /のパスキーを削除/,
     });
-    // 最後の 1 件だけ aria-label に「（最後の1つは不可）」が付く（passkey-section.tsx）
+    // 最後の 1 件だけ aria-label に「（最後の 1 つは不可）」が付く（passkey-section.tsx）
     const lastPasskeyButton = page.getByRole("button", {
-      name: /最後の1つは不可/,
+      name: /最後の 1 つは不可/,
     });
 
     await test.step("S-01: 表示名を入れてパスキーを作成すると /dashboard に着く", async () => {
       await page.goto("/signup");
       await page.getByLabel("表示名").fill(displayName);
-      await page.getByRole("button", { name: "パスキーを作成する" }).click();
+      await page.getByRole("button", { name: "パスキーを作成" }).click();
       await expect(page).toHaveURL(/\/dashboard$/);
       // dashboard の一覧 API は未実装で Error Card が出るが、AppShell（ナビ）が描かれていれば到達とみなす
       await expect(
@@ -141,7 +141,7 @@ test.describe("FR-01 パスキー認証", () => {
     });
 
     await test.step("D-09: 1 件削除すると残り 1 件の削除ボタンが Disabled に戻る", async () => {
-      // 一覧の並びは API が保証しない（listPasskeys に orderBy なし）ので、どちらを消すかは問わない
+      // 一覧は作成日昇順で返る（#221）。先頭 = 先に作ったパスキーを消す
       await deleteButtons.first().click();
       const dialog = page.getByRole("dialog", {
         name: "パスキーを削除しますか？",

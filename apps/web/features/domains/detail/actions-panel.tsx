@@ -2,6 +2,7 @@
 
 import {
   ArrowLeftRight,
+  CalendarPlus,
   Check,
   Pencil,
   RefreshCw,
@@ -39,9 +40,9 @@ export interface ActionsPanelProps {
   countdownExpired: boolean;
   /** 承認 / 拒否の対象となる移管が特定できているか。 */
   transferActionable: boolean;
-  /** 対象を特定できていないときの再取得（#212）。 */
+  /** 対象を特定できていないときの最新化（#212）。 */
   onRetryTransfers: () => void;
-  /** 再取得の実行中。 */
+  /** 最新化の実行中。 */
   retryingTransfers: boolean;
 }
 
@@ -91,7 +92,7 @@ export function ActionsPanel({
           </div>
           <p className="w-full text-label-sm text-warn">
             {countdownExpired
-              ? "状態を確認中…"
+              ? "最新化しています…"
               : `自動承認まで ${countdownLabel}`}
           </p>
           {transferActionable ? null : (
@@ -99,7 +100,7 @@ export function ActionsPanel({
             // 押せない理由と、その場で解決する手段を並べる（#212）
             <div className="flex w-full flex-col items-start gap-1.5">
               <p className="w-full text-caption text-muted">
-                申請の内容をまだ取得できていません。
+                申請の内容をまだ読み込めていません。
               </p>
               <Button
                 leadingIcon={<RefreshCw />}
@@ -108,17 +109,18 @@ export function ActionsPanel({
                 size="sm"
                 variant="outline"
               >
-                {retryingTransfers ? "取得中…" : "申請を取得"}
+                {retryingTransfers ? "最新化中…" : "申請を最新化"}
               </Button>
             </div>
           )}
         </>
       ) : null}
 
+      {/* RefreshCw は「最新化 / 再試行」の記号なので、課金を伴う renew には使わない */}
       <OperationButton
         domain={domain}
-        icon={<RefreshCw />}
-        label="有効期限を延長"
+        icon={<CalendarPlus />}
+        label="更新"
         onClick={onRenew}
         op="renew"
       />

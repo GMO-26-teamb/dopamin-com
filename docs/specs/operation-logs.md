@@ -90,8 +90,11 @@ sequenceDiagram
 
 ## 3. 画面・UI
 
-なし（閲覧 API `GET /logs/operations` と `/logs` 画面の接続は #64。
-ローカルは SQL / Drizzle Studio、本番は Vercel の関数ログで閲覧する）。
+本 spec の範囲では無し（記録側だけを扱う）。閲覧 API `GET /logs/operations` と `/logs` 画面の
+接続は #64 / #187 で完了しており、設計は [`docs/specs/logs-api.md`](logs-api.md) が持つ。
+`/logs` は開発者向けの画面で、`/settings` の「開発者向け」からのみ到達する
+（requirements v0.1.27）。画面を経由せずに見るならローカルは SQL / Drizzle Studio、
+本番は Vercel の関数ログ。
 
 ## 4. API 契約
 
@@ -146,3 +149,4 @@ NOT NULL 違反で落ち、フォールバック console にしか残らない�
 | v0.1 | 2026-08-26 | 初版（FR-15 実装と同時に作成） |
 | v0.2 | 2026-08-26 | レビュー反映: マスクを部分一致に、INSERT の 3 秒上限と console.error の出力方針（§2）、kitaq transferQuery = info と waitUntil の余地（§8） |
 | v0.3 | 2026-08-27 | 実装との乖離を修正: mock も `hello` / `contact_create` / `contact_update` を記録する（持たないのは `host_info` / `host_create` のみ）ことを §2 / §8 に反映 |
+| v0.4 | 2026-08-28 | §3 を現状に更新。閲覧 API と `/logs` 画面の接続は #64 / #187 で完了済み（設計は `logs-api.md`）。`/logs` が `/settings` の「開発者向け」からのみ到達することを追記 |

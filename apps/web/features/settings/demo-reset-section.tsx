@@ -1,5 +1,6 @@
 "use client";
 
+import { Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardKicker } from "@/components/ui/card";
@@ -54,6 +55,7 @@ export function DemoResetSection({
           各状態のサンプルを再投入
         </p>
         <Button
+          leadingIcon={<Trash2 />}
           onClick={() => {
             onNotify(null);
             demoReset.reset();
@@ -62,7 +64,7 @@ export function DemoResetSection({
           size="sm"
           variant="danger"
         >
-          リセット実行
+          デモデータをリセット
         </Button>
       </div>
 

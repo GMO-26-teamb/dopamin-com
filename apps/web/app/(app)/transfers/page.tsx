@@ -5,17 +5,17 @@
  *
  * Figma: S-50 `85:5523` / S-51 `85:5760` / S-52 `85:5888` / S-53 `93:7717` / D-08 `85:6029`
  *
- * - S-50 一覧: Page Header（件数・「状態を更新」）+ 移管 IN フォーム + 3 セクション
+ * - S-50 一覧: Page Header（件数・「最新化」）+ 移管 IN フォーム + 3 セクション
  * - S-51 0 件: フォーム + Empty State
  * - S-52 申請エラー（AC-12-2）: フォーム下に Error Card（再試行なし）
  * - S-53 更新エラー（FR-18）: Banner Warn + キャッシュ表示、承認 / 拒否 / 取消 / 申請は Disabled
- *   （「状態を確認」＝再照会は残す）
+ *   （「最新化」＝再照会は残す）
  * - D-08 取消ダイアログ、D-06 同型の承認（再入力）/ 拒否ダイアログ
  *
  * 60 日ルールは UI で強制しない（要件 FR-12「移管可否は EPP ステータスのみで判定する」）。
  */
 
-import { ArrowRight, RefreshCw } from "lucide-react";
+import { ArrowLeftRight, ArrowRight, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
@@ -123,7 +123,7 @@ function TransfersView() {
     refresh.error ?? (transfers.data === undefined ? null : transfers.error);
   const busy = refresh.isPending || request.isPending || action.isPending;
   // S-53 で Disabled にするのは承認 / 拒否 / 取消 / 申請だけ。
-  // 「状態を確認」＝再照会は、更新に失敗しているときこそ必要なので残す。
+  // 「最新化」＝再照会は、更新に失敗しているときこそ必要なので残す。
   const updateFailed = updateError !== null;
   const submitDisabled = busy || updateFailed;
 
@@ -225,7 +225,7 @@ function TransfersView() {
             size="sm"
             variant="outline"
           >
-            {refresh.isPending ? "更新中…" : "状態を更新"}
+            {refresh.isPending ? "最新化中…" : "最新化"}
           </Button>
         }
         meta={meta}
@@ -258,6 +258,7 @@ function TransfersView() {
           action={
             <Button
               disabled={refresh.isPending}
+              leadingIcon={<RefreshCw />}
               onClick={() => runRefresh(null)}
               size="sm"
               variant="outline"
@@ -308,6 +309,7 @@ function TransfersView() {
       {transfers.data !== undefined && transfers.data.length === 0 ? (
         <EmptyState
           body="他社のドメインは上のフォームから持ち込めます。受信した申請もここに出ます。"
+          icon={<ArrowLeftRight />}
           secondary={
             <Button asChild size="sm" variant="outline">
               <Link href="/dashboard">保有ドメインを見る</Link>

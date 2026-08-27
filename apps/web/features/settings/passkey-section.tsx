@@ -1,7 +1,7 @@
 "use client";
 
 import { type PasskeySummary, passkeyNameSchema } from "@dopamin/shared";
-import { KeyRound, Pencil, Plus } from "lucide-react";
+import { KeyRound, Pencil, Plus, Trash2 } from "lucide-react";
 import {
   type FormEvent,
   type KeyboardEvent,
@@ -155,8 +155,9 @@ export function PasskeySection({ onNotify }: PasskeySectionProps) {
       ) : passkeys.data.length === 0 ? (
         <EmptyState
           body="パスキーを追加すると、次回から生体認証や PIN だけでログインできます。"
+          icon={<KeyRound />}
           primary={addButton}
-          title="パスキーがありません"
+          title="パスキーはまだありません"
         />
       ) : (
         <>
@@ -238,7 +239,7 @@ function PasskeyRow({
   const name = passkeyName(passkey);
   // 同名の「削除」が並ぶので名前で区別する。Disabled の理由も読み上げに残す
   const label = isLast
-    ? `${name} のパスキーを削除（最後の1つは不可）`
+    ? `${name} のパスキーを削除（最後の 1 つは不可）`
     : `${name} のパスキーを削除`;
 
   if (editing) {
@@ -271,6 +272,7 @@ function PasskeyRow({
       <Button
         aria-label={label}
         disabled={isLast || busy}
+        leadingIcon={<Trash2 />}
         onClick={onDelete}
         size="sm"
         variant="outline"
@@ -324,10 +326,10 @@ function PasskeyNameEditor({
 
   return (
     <form className="flex w-full items-start gap-2" onSubmit={handleSubmit}>
-      <KeyRound
-        aria-hidden="true"
-        className="mt-[11px] size-3.5 shrink-0 text-ink"
-      />
+      {/* Input（h-control-md）の高さで揃えるので、行のアイコンだけ余白を足さない */}
+      <span className="flex h-control-md shrink-0 items-center">
+        <KeyRound aria-hidden="true" className="size-3.5 text-ink" />
+      </span>
       <Input
         aria-label="パスキーの名前"
         disabled={saving}

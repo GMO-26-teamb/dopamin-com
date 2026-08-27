@@ -47,6 +47,23 @@ export interface DomainUpdateInput {
   clientStatuses?: { add?: ClientStatus[]; remove?: ClientStatus[] };
 }
 
+/**
+ * `DomainService.register` の入力（要件 §10.1 の `POST /domains`）。
+ *
+ * NS とコンタクトは S-25 の折りたたみを開いたときだけ載せる**任意**の項目。
+ * 省略したときの挙動は今までと同じ（NS はレジストリ既定のまま、
+ * コンタクトは既定の登録者プロファイル）。
+ */
+export interface DomainRegisterInput {
+  name: string;
+  /** 登録期間（年）。1〜10。 */
+  period: number;
+  /** 登録時に設定する NS（2〜13 件）。空なら送らない。 */
+  nameservers?: string[];
+  /** 登録者コンタクト（S-25 で編集したときだけ）。 */
+  contacts?: DomainContactsInput;
+}
+
 export interface AuthService {
   isSupported(): boolean;
   signup(displayName: string): Promise<AuthUser>;
@@ -68,8 +85,8 @@ export interface DomainService {
   get(name: string): Promise<DomainDetail>;
   /** POST /domains/check */
   check(input: DomainCheckRequest): Promise<SearchResult[]>;
-  /** POST /domains */
-  register(input: { name: string; period: number }): Promise<DomainDetail>;
+  /** POST /domains（FR-06。nameservers / contacts は S-25 の任意入力） */
+  register(input: DomainRegisterInput): Promise<DomainDetail>;
   renew(name: string, input: { period: number }): Promise<DomainDetail>;
   /** PATCH /domains/:name（FR-09。contacts は S-39 の再実行、clientStatuses はロック） */
   update(name: string, input: DomainUpdateInput): Promise<DomainDetail>;

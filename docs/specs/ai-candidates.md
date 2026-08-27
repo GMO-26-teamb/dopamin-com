@@ -31,8 +31,11 @@
 | Web（モック） | `apps/web/lib/api/mock/mock-services.ts` | 実装済み（`NEXT_PUBLIC_API_MODE=mock` の既定経路。`ai-timeout` / `partial-failure` シナリオ付き） |
 | **Web（実 API）** | `apps/web/lib/api/http/http-services.ts` | **`candidates.generate` が `NOT_IMPLEMENTED` を投げていた** ← 本書 §3 で配線 |
 
-- 実 API モードでスコアが出るのは #158（実 Tranco コーパス投入）以降。`POST /domains/check` の
-  `uniqueness` は available な行にのみ付く（§10.4）。
+- 比較コーパスは実 Tranco（#158 で投入済み。`packages/shared/src/uniqueness/corpusTranco.ts`）で、
+  ビルドに同梱されるので実 API モードでもそのままスコアが出る（ADR-0003）。
+  `uniqueness` が `null` になるのは (a) `availability: "unavailable"` の行、(b) 未対応 TLD、
+  (c) スコア算出自体が例外になったときの 3 つだけで、**レジストリ障害の行にはスコアが付く**
+  （AC-05-2。`docs/specs/registry-api.md` §1）。
 - AI を実際に呼ぶにはプロバイダのキーが要る。キーが 1 本も無い環境では
   `AI_UNAVAILABLE`（503）になる（#186 で緩和を提案中。`docs/specs/ai-gateway.md`）。
 
@@ -228,3 +231,4 @@ S-23 でレジストリ向けの文言が出てしまう。
 | v0.2.1 | 2026-08-27 | §2.5「プロバイダ別の味付け」を追加。#193 の実装（`PROVIDER_FLAVOR` / `buildDomainCandidatesInstructions`）が §2.5 を正として参照していたが節が存在しなかった。#196 |
 | v0.3 | 2026-08-27 | §2.5 を追加。`xai`（Grok）選択時だけシステムプロンプトにユーモアの個性付けを足す方針（候補名は意外性重視、`reason` は基本が大げさな持ち上げで毎回ちょうど 1 件だけを皮肉枠にする）。出力契約・件数・§13.2 の制約・10 秒予算は不変で、`google` / `anthropic` のプロンプトには一切影響しないこと、下品・攻撃的・人格攻撃を禁じること、皮肉枠の件数は契約では担保しないこと、フォールバック時は選択プロバイダの味付けのままにすることを明記。#193 |
 | v0.4 | 2026-08-27 | `AI_CALL_TIMEOUT_MS` が 10 → 20 秒になったことに追随（requirements v0.1.22 / AC-04-2「20 秒以内」）。定数は FR-13 と共有で、緩和の主因はサブドメイン提案側。§2.3 の予算配分の考え方（1 リクエスト合計・残り予算を再生成に渡す）は不変 |
+| v0.4.1 | 2026-08-28 | §1 の注記を実態に合わせた。実 Tranco コーパスは #158 で投入済みで実 API モードでもスコアが出る。`uniqueness` が `null` になる条件を「available な行にのみ付く」から実装どおり 3 条件（unavailable / 未対応 TLD / 算出例外）に訂正した（レジストリ障害の行にはスコアが付く。AC-05-2）|

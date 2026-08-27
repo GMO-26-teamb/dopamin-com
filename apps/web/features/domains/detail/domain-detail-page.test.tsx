@@ -52,7 +52,7 @@ async function payThroughRenewDialog(
   const dialog = await screen.findByRole("dialog");
   await user.click(within(dialog).getByRole("button", { name: "お支払いへ" }));
   await user.click(
-    within(dialog).getByRole("button", { name: /を支払って延長する/ }),
+    within(dialog).getByRole("button", { name: /を支払って更新する/ }),
   );
 }
 
@@ -102,9 +102,7 @@ describe("DomainDetailPage", () => {
     expect(screen.getByText("基本情報")).toBeInTheDocument();
 
     const panel = actionsPanel();
-    expect(
-      within(panel).getByRole("button", { name: "有効期限を延長" }),
-    ).toBeEnabled();
+    expect(within(panel).getByRole("button", { name: "更新" })).toBeEnabled();
     expect(
       within(panel).getByRole("button", { name: "情報修正" }),
     ).toBeEnabled();
@@ -130,16 +128,11 @@ describe("DomainDetailPage", () => {
 
     expect(await screen.findByText("キャッシュを表示中")).toBeInTheDocument();
     const panel = actionsPanel();
-    for (const label of [
-      "有効期限を延長",
-      "情報修正",
-      "他社へ移管する",
-      "廃止",
-    ]) {
+    for (const label of ["更新", "情報修正", "他社へ移管する", "廃止"]) {
       expect(within(panel).getByRole("button", { name: label })).toBeDisabled();
     }
     // 理由はラベルに連結せず、ボタンの下に別の行として出す
-    expect(within(panel).getAllByText("再同期が必要")).toHaveLength(4);
+    expect(within(panel).getAllByText("最新化が必要")).toHaveLength(4);
   });
 
   it("S-32: 移管申請の受信は承認 / 拒否とカウントダウンを出し、他操作を止める", async () => {
@@ -158,9 +151,7 @@ describe("DomainDetailPage", () => {
       within(panel).getByText(/自動承認まで \d+:\d{2}/),
     ).toBeInTheDocument();
     expect(screen.getAllByText(/自動承認まで \d+:\d{2}/)).toHaveLength(1);
-    expect(
-      within(panel).getByRole("button", { name: "有効期限を延長" }),
-    ).toBeDisabled();
+    expect(within(panel).getByRole("button", { name: "更新" })).toBeDisabled();
   });
 
   it("S-32: /transfers が落ちても再取得から承認 / 拒否に進める（#212）", async () => {
@@ -186,19 +177,21 @@ describe("DomainDetailPage", () => {
     const panel = actionsPanel();
     await waitFor(() => {
       expect(
-        within(panel).getByText("申請の内容をまだ取得できていません。"),
+        within(panel).getByText("申請の内容をまだ読み込めていません。"),
       ).toBeInTheDocument();
     });
     expect(within(panel).getByRole("button", { name: "承認" })).toBeDisabled();
 
     // 再取得が通れば、詳細画面から応答できるようになる
     failing = false;
-    await user.click(within(panel).getByRole("button", { name: "申請を取得" }));
+    await user.click(
+      within(panel).getByRole("button", { name: "申請を最新化" }),
+    );
     await waitFor(() => {
       expect(within(panel).getByRole("button", { name: "承認" })).toBeEnabled();
     });
     expect(
-      within(panel).queryByText("申請の内容をまだ取得できていません。"),
+      within(panel).queryByText("申請の内容をまだ読み込めていません。"),
     ).toBeNull();
   }, 20_000);
 
@@ -209,14 +202,12 @@ describe("DomainDetailPage", () => {
     // 猶予期限（fixtures は 18 日後）から残日数を出す。0 日と丸めない（#211）
     expect(
       screen.getByText(
-        "残り 18 日。「復旧」で Active に戻せます。期間を過ぎると完全に削除されます。",
+        "残 18 日。「復旧」で Active に戻せます。期間を過ぎると完全に削除されます。",
       ),
     ).toBeInTheDocument();
     const panel = actionsPanel();
     expect(within(panel).getByRole("button", { name: "復旧" })).toBeEnabled();
-    expect(
-      within(panel).getByRole("button", { name: "有効期限を延長" }),
-    ).toBeDisabled();
+    expect(within(panel).getByRole("button", { name: "更新" })).toBeDisabled();
   });
 
   it("S-33: 猶予期限が分からないときは残日数を出さない（#211）", async () => {
@@ -233,7 +224,7 @@ describe("DomainDetailPage", () => {
         "「復旧」で Active に戻せます。期間を過ぎると完全に削除されます。",
       ),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/残り \d+ 日/)).toBeNull();
+    expect(screen.queryByText(/残 \d+ 日/)).toBeNull();
   });
 
   it("S-34: 移管済みは操作パネルを出さない", async () => {
@@ -248,7 +239,7 @@ describe("DomainDetailPage", () => {
     renderPage("pending-delete.example");
 
     expect(await screen.findByText("完全削除の処理中")).toBeInTheDocument();
-    expect(screen.getByText(/^残り \d+ 日。/)).toBeInTheDocument();
+    expect(screen.getByText(/^残 \d+ 日。/)).toBeInTheDocument();
     expect(screen.queryByText("操作")).toBeNull();
     expect(screen.queryByRole("button", { name: "復旧" })).toBeNull();
   });
@@ -260,9 +251,7 @@ describe("DomainDetailPage", () => {
       await screen.findByText("停止中（名前解決されません）"),
     ).toBeInTheDocument();
     const panel = actionsPanel();
-    expect(
-      within(panel).getByRole("button", { name: "有効期限を延長" }),
-    ).toBeEnabled();
+    expect(within(panel).getByRole("button", { name: "更新" })).toBeEnabled();
     expect(
       within(panel).getByRole("button", { name: "情報修正" }),
     ).toBeEnabled();
@@ -285,7 +274,7 @@ describe("DomainDetailPage", () => {
     expect(screen.getByText("未移行")).toBeInTheDocument();
     // 直し方はカードの中にも置く（バナーまで戻らなくていい）
     expect(
-      screen.getByRole("button", { name: "登録者情報を変更" }),
+      screen.getByRole("button", { name: "登録者の情報修正" }),
     ).toBeInTheDocument();
   });
 
@@ -301,15 +290,13 @@ describe("DomainDetailPage", () => {
     expect(screen.getByRole("button", { name: "再試行" })).toBeInTheDocument();
   }, 25_000);
 
-  it("D-01 → D-11: お支払いを経て延長すると Banner Ok が出る（AC-19-2）", async () => {
+  it("D-01 → D-11: お支払いを経て更新すると Banner Ok が出る（AC-19-2）", async () => {
     const user = userEvent.setup();
     renderPage("takutaku.com");
 
-    await user.click(
-      await screen.findByRole("button", { name: "有効期限を延長" }),
-    );
+    await user.click(await screen.findByRole("button", { name: "更新" }));
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText("有効期限を延長")).toBeInTheDocument();
+    expect(within(dialog).getByText("有効期限を更新")).toBeInTheDocument();
     await user.click(
       within(dialog).getByRole("button", { name: "お支払いへ" }),
     );
@@ -325,13 +312,13 @@ describe("DomainDetailPage", () => {
       formatJpy((quote as OrderQuote).total),
     );
     await user.click(
-      within(dialog).getByRole("button", { name: /を支払って延長する/ }),
+      within(dialog).getByRole("button", { name: /を支払って更新する/ }),
     );
 
     expect(
       await screen.findByText(
         new RegExp(
-          `takutaku.com の有効期限を延長しました（お支払い ${formatJpy((quote as OrderQuote).total)}`,
+          `takutaku.com の有効期限を更新しました（お支払い ${formatJpy((quote as OrderQuote).total)}`,
         ),
       ),
     ).toBeInTheDocument();
@@ -342,9 +329,7 @@ describe("DomainDetailPage", () => {
     const renew = vi.fn(() => Promise.reject(new Error("呼ばれてはいけない")));
     renderPage("takutaku.com", "default", { renew });
 
-    await user.click(
-      await screen.findByRole("button", { name: "有効期限を延長" }),
-    );
+    await user.click(await screen.findByRole("button", { name: "更新" }));
     const dialog = await screen.findByRole("dialog");
     await user.click(
       within(dialog).getByRole("button", { name: "お支払いへ" }),
@@ -354,7 +339,7 @@ describe("DomainDetailPage", () => {
     await user.clear(numberInput);
     await user.type(numberInput, DECLINED_CARD_NUMBER);
     await user.click(
-      within(dialog).getByRole("button", { name: /を支払って延長する/ }),
+      within(dialog).getByRole("button", { name: /を支払って更新する/ }),
     );
 
     expect(
@@ -396,7 +381,9 @@ describe("DomainDetailPage", () => {
     const first = await within(dialog).findByText(/^MOCK-TAKUTAKU-\d+$/);
     const firstCode = first.textContent;
 
-    await user.click(within(dialog).getByRole("button", { name: "再発行" }));
+    await user.click(
+      within(dialog).getByRole("button", { name: "再発行する" }),
+    );
     await waitFor(() => {
       expect(
         within(dialog).getByText(/^MOCK-TAKUTAKU-\d+$/).textContent,
@@ -445,9 +432,7 @@ describe("DomainDetailPage", () => {
     );
     renderPage("takutaku.com", "default", { renew });
 
-    await user.click(
-      await screen.findByRole("button", { name: "有効期限を延長" }),
-    );
+    await user.click(await screen.findByRole("button", { name: "更新" }));
     await payThroughRenewDialog(user);
 
     // ダイアログは閉じ、メイン先頭に Error Card（FR-18 の 1 文つき）
@@ -464,7 +449,7 @@ describe("DomainDetailPage", () => {
     // 「再試行」はエラーを消すだけでなく D-01 を開き直す
     await user.click(screen.getByRole("button", { name: "再試行" }));
     const reopened = await screen.findByRole("dialog");
-    expect(within(reopened).getByText("有効期限を延長")).toBeInTheDocument();
+    expect(within(reopened).getByText("有効期限を更新")).toBeInTheDocument();
     expect(renew).toHaveBeenCalledTimes(1);
   });
 
@@ -481,9 +466,7 @@ describe("DomainDetailPage", () => {
     );
     renderPage("takutaku.com", "default", { renew });
 
-    await user.click(
-      await screen.findByRole("button", { name: "有効期限を延長" }),
-    );
+    await user.click(await screen.findByRole("button", { name: "更新" }));
     await payThroughRenewDialog(user);
 
     expect(

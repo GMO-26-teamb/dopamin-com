@@ -91,6 +91,22 @@ describe.each(implementations)("ensureRegistryContact（%s）", (_l, create) => 
     expect(adapter.peekContact(first)).toEqual(OTHER_PROFILE);
   });
 
+  it("プロファイルを省略したら既存の中身を変えない（登録のたびに既定へ戻さない）", async () => {
+    // 情報修正（FR-09）で登録者を変えたあと、登録（FR-06）を既定のまま通す流れ。
+    // コンタクトはユーザー × レジストリで 1 件を共有するので、ここで既定に
+    // 戻すと同じ ID を参照している既存ドメインの登録者まで巻き添えで戻る
+    const first = await ensureRegistryContact(
+      userId,
+      adapter,
+      "registrant",
+      OTHER_PROFILE,
+    );
+    const second = await ensureRegistryContact(userId, adapter, "registrant");
+
+    expect(second).toBe(first);
+    expect(adapter.peekContact(first)).toEqual(OTHER_PROFILE);
+  });
+
   it("ロールが違えば別のコンタクトになる", async () => {
     const registrant = await ensureRegistryContact(
       userId,

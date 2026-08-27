@@ -22,7 +22,7 @@ import { startAuthSession } from "./session";
 export const DISPLAY_NAME_MIN = 1;
 export const DISPLAY_NAME_MAX = 32;
 
-export const DISPLAY_NAME_ERROR = `表示名は ${DISPLAY_NAME_MIN}〜${DISPLAY_NAME_MAX} 文字で入力してください。`;
+export const DISPLAY_NAME_ERROR = `表示名は ${DISPLAY_NAME_MIN}〜${DISPLAY_NAME_MAX} 文字で入力してください`;
 
 /** クライアント側の表示名バリデーション。問題なければ `null`。 */
 export function validateDisplayName(value: string): string | null {
