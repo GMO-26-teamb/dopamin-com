@@ -11,7 +11,6 @@ import { health } from "./routes/health";
 import { logs } from "./routes/logs";
 import { registry } from "./routes/registry";
 import { settings } from "./routes/settings";
-import { subdomainPlan } from "./routes/subdomain-plan";
 import { transfers } from "./routes/transfers";
 import { uniqueness } from "./routes/uniqueness";
 import type { AppEnv } from "./types";
@@ -24,9 +23,9 @@ const app = new Hono<AppEnv>()
   .use(originCheck)
   .route("/health", health)
   .route("/auth", auth)
+  // FR-13（routes/subdomain-plan.ts）は domains の中にネストしてある。
+  // 同じ /domains に 2 本重ねると requireSession が 2 回走る（#166）
   .route("/domains", domains)
-  // FR-13 は関心が違うので別ファイルにし、同じ /domains に重ねてマウントする
-  .route("/domains", subdomainPlan)
   // FR-05 の未認証プレビュー（S-00 のお試しスコア）。認証・レジストリを通らない
   .route("/uniqueness", uniqueness)
   .route("/settings", settings)
