@@ -8,6 +8,7 @@
 import type { AppType } from "@dopamin/api";
 import {
   domainAvailabilitySchema,
+  domainCandidatesResponseSchema,
   domainListResponseSchema,
   type domainSummarySchema,
   domainSyncResponseSchema,
@@ -20,7 +21,7 @@ import {
 } from "@dopamin/shared";
 import { hc } from "hono/client";
 import { z } from "zod";
-import { ApiClientError, toApiClientError } from "../errors";
+import { ApiClientError, type ErrorOrigin, toApiClientError } from "../errors";
 
 /** 同一オリジン（`""`）の `/api/v1/*` を叩く RPC クライアント。 */
 export const apiClient = hc<AppType>("");
@@ -28,22 +29,27 @@ export const apiClient = hc<AppType>("");
 /**
  * 応答を受け取り、エラーなら `ApiClientError`、成功ならスキーマ検証済みの JSON を返す。
  * fetch 自体の失敗は `NETWORK`、成功応答のスキーマ不一致は `INTERNAL` にする。
+ *
+ * `origin` は「失敗した相手」（AI ルートなら `"ai"`）。`REGISTRY_TIMEOUT` /
+ * `REGISTRY_UNAVAILABLE` は AI 呼び出しでも返るため、文言の出し分けに使う。
  */
 export async function unwrap<T>(
   request: Promise<Response>,
   schema: z.ZodType<T>,
+  origin?: ErrorOrigin,
 ): Promise<T> {
   let response: Response;
   try {
     response = await request;
   } catch (e) {
-    throw toApiClientError(e);
+    throw toApiClientError(e, origin);
   }
 
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     throw toApiClientError(
       body ?? new Error(`HTTP ${response.status} が返りました。`),
+      origin,
     );
   }
 
@@ -100,6 +106,12 @@ export const checkResponseSchema = z.object({
     }),
   ),
 });
+
+/**
+ * `POST /ai/domain-candidates` の応答（FR-04 / §10.1）。
+ * スキーマは packages/shared が SSOT（3 層のうちクライアント向けの応答層）。
+ */
+export const candidatesResponseSchema = domainCandidatesResponseSchema;
 
 /**
  * `POST /transfers` の応答（FR-12 / §10.1）。
