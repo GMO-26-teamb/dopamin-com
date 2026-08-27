@@ -184,7 +184,7 @@ describe("AI_GATEWAY_API_KEY（Vercel AI Gateway。#179）", () => {
     const providers = enabledAiProviders(
       envWith({ AI_GATEWAY_API_KEY: "vck_gateway" }),
     );
-    expect(providers.map((p) => p.id)).toEqual(["google", "anthropic"]);
+    expect(providers.map((p) => p.id)).toEqual(["google", "anthropic", "xai"]);
   });
 
   it("gateway キーがあれば ANTHROPIC_API_KEY 無しでも anthropic を実効値にできる", () => {
@@ -203,11 +203,49 @@ describe("AI_GATEWAY_API_KEY（Vercel AI Gateway。#179）", () => {
         AI_GATEWAY_API_KEY: "vck_gateway",
       }),
     );
-    expect(providers.map((p) => p.id)).toEqual(["google", "anthropic"]);
+    expect(providers.map((p) => p.id)).toEqual(["google", "anthropic", "xai"]);
   });
 
   it("どのキーも無ければ従来どおり AI_PROVIDER だけが選択肢", () => {
     const providers = enabledAiProviders(envWith({ AI_PROVIDER: "anthropic" }));
     expect(providers.map((p) => p.id)).toEqual(["anthropic"]);
+  });
+});
+
+describe("xai（Grok）— Gateway 専用プロバイダ（#187）", () => {
+  it("gateway キーが無ければ選択肢に出ない（直叩きの口を作っていないため）", () => {
+    const providers = enabledAiProviders(
+      envWith({ GOOGLE_GENERATIVE_AI_API_KEY: "g" }),
+    );
+    expect(providers.map((p) => p.id)).toEqual(["google"]);
+  });
+
+  it("固有キーがどれも無い環境でも xai は選択肢に出ない（AI_PROVIDER への倒れ込み）", () => {
+    const providers = enabledAiProviders(envWith({}));
+    expect(providers.map((p) => p.id)).toEqual(["google"]);
+  });
+
+  it("gateway キーがあれば 3 プロバイダすべてが有効になる", () => {
+    const providers = enabledAiProviders(
+      envWith({ AI_GATEWAY_API_KEY: "vck_gateway" }),
+    );
+    expect(providers.map((p) => p.id)).toEqual(["google", "anthropic", "xai"]);
+  });
+
+  it("xai の既定モデルは速度優先の grok-4.1-fast-non-reasoning（10 秒予算）", () => {
+    const settings = resolveAiSettings(
+      { aiProvider: "xai", aiModel: null },
+      envWith({ AI_GATEWAY_API_KEY: "vck_gateway" }),
+    );
+    expect(settings.provider).toBe("xai");
+    expect(settings.model).toBe("grok-4.1-fast-non-reasoning");
+  });
+
+  it("gateway キーが外れたら保存済みの xai は既定に倒れる（壊れない）", () => {
+    const settings = resolveAiSettings(
+      { aiProvider: "xai", aiModel: "grok-4.6" },
+      envWith({ GOOGLE_GENERATIVE_AI_API_KEY: "g" }),
+    );
+    expect(settings.provider).toBe("google");
   });
 });

@@ -258,7 +258,8 @@ describe("defaultModelFactory の gateway 経路（#179）", () => {
       AI_MODEL: "claude-haiku-4-5",
       AI_GATEWAY_API_KEY: "vck_gateway",
     });
-    expect(modelIdOf(resolveModel())).toBe("anthropic/claude-haiku-4-5");
+    // anthropic はカタログがドット表記なので読み替えも効く（#187 / §2.7）
+    expect(modelIdOf(resolveModel())).toBe("anthropic/claude-haiku-4.5");
   });
 
   it("AI_MODEL が既にスラッシュ付きなら二重に前置しない", () => {
@@ -618,5 +619,73 @@ describe("runStructured のタイムアウト（§13.1 10 秒）", () => {
 
     await expect(pending).resolves.toEqual({ names: ["dopamin.dev"] });
     expect(factory).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("Gateway の ID 変換表（#187）", () => {
+  beforeEach(() => {
+    setAiModelFactoryForTesting(null);
+  });
+
+  it("xai は Gateway 上の接頭辞 spacexai に読み替える", () => {
+    envWith({
+      AI_PROVIDER: "google",
+      AI_GATEWAY_API_KEY: "vck_gateway",
+    });
+    expect(
+      modelIdOf(
+        resolveModel({
+          aiProvider: "xai",
+          aiModel: "grok-4.1-fast-non-reasoning",
+        }),
+      ),
+    ).toBe("spacexai/grok-4.1-fast-non-reasoning");
+  });
+
+  it("gateway 経由の anthropic はドット表記に読み替える（カタログに合わせる）", () => {
+    envWith({
+      AI_PROVIDER: "google",
+      AI_GATEWAY_API_KEY: "vck_gateway",
+    });
+    expect(
+      modelIdOf(
+        resolveModel({ aiProvider: "anthropic", aiModel: "claude-sonnet-4-5" }),
+      ),
+    ).toBe("anthropic/claude-sonnet-4.5");
+  });
+
+  it("固有キーで直叩きする anthropic はハイフンのまま（Anthropic API の ID）", () => {
+    envWith({
+      AI_PROVIDER: "anthropic",
+      AI_MODEL: "claude-sonnet-4-5",
+      ANTHROPIC_API_KEY: "a-key",
+      AI_GATEWAY_API_KEY: "vck_gateway",
+    });
+    expect(modelIdOf(resolveModel())).toBe("claude-sonnet-4-5");
+  });
+
+  it("読み替え表に無いモデルはそのまま前置するだけ", () => {
+    envWith({
+      AI_PROVIDER: "google",
+      AI_MODEL: "gemini-2.5-pro",
+      AI_GATEWAY_API_KEY: "vck_gateway",
+    });
+    expect(modelIdOf(resolveModel())).toBe("google/gemini-2.5-pro");
+  });
+});
+
+describe("3 プロバイダでのフォールバック（#187 / §13.1）", () => {
+  it("プロバイダが 3 つでも試行は最大 2 回で、本命以外の先頭が候補になる", () => {
+    const env = envWith({ AI_GATEWAY_API_KEY: "vck_gateway" });
+    const settings = resolveAiSettings(
+      { aiProvider: "google", aiModel: null },
+      env,
+    );
+    // AI_PROVIDERS の順（google → anthropic → xai）がフォールバック先の優先順
+    expect(settings.providers.map((p) => p.id)).toEqual([
+      "google",
+      "anthropic",
+      "xai",
+    ]);
   });
 });
