@@ -4,9 +4,11 @@ import { ApiException } from "../../src/lib/errors";
 import {
   fetchRepoSummary,
   GithubUnavailableError,
+  MAX_REQUESTS_PER_SUMMARY,
   parseRepoUrl,
   README_EXCERPT_BYTES,
   repoSummarySchema,
+  resetGithubTokenWarningForTesting,
   toGithubApiException,
 } from "../../src/lib/github";
 
@@ -26,6 +28,8 @@ beforeEach(() => {
     delete process.env[key];
   }
   resetApiEnvCacheForTesting();
+  resetGithubTokenWarningForTesting();
+  vi.spyOn(console, "log").mockImplementation(() => {});
 });
 
 afterEach(() => {
@@ -125,6 +129,7 @@ describe("fetchRepoSummary（GITHUB_MODE=mock）", () => {
 });
 
 describe("fetchRepoSummary（GITHUB_MODE=real）", () => {
+  // ツリーを返さないスタブなので contents 経路（フォールバック）を通る
   it("説明・トピック・言語・README・構造ヒント・マニフェストを集める", async () => {
     useRealMode();
     stubFetch({
@@ -170,6 +175,91 @@ describe("fetchRepoSummary（GITHUB_MODE=real）", () => {
     expect(summary.manifests).toEqual([
       { path: "package.json", excerpt: '{"name":"demo"}' },
     ]);
+  });
+
+  it("ツリー 1 回でルート直下と構造ヒントを作る（#168 のリクエスト削減）", async () => {
+    useRealMode("ghp_secret");
+    const spy = stubFetch({
+      "/git/trees/main?recursive=1": () =>
+        jsonResponse({
+          truncated: false,
+          tree: [
+            { path: "apps", type: "tree" },
+            { path: "apps/web", type: "tree" },
+            { path: "apps/api", type: "tree" },
+            // 2 段目より深いものは構造ヒントにしない
+            { path: "apps/web/src", type: "tree" },
+            { path: "docs", type: "tree" },
+            { path: "docs/specs", type: "tree" },
+            { path: "package.json", type: "blob" },
+            { path: "README.md", type: "blob" },
+            { path: "vendor", type: "commit" },
+          ],
+        }),
+      "/contents/package.json": () =>
+        jsonResponse({
+          content: base64('{"name":"demo"}'),
+          encoding: "base64",
+        }),
+      "/readme": () =>
+        jsonResponse({ content: base64("# demo"), encoding: "base64" }),
+      "/languages": () => jsonResponse({ TypeScript: 900 }),
+      "/repos/dopamin/demo": () =>
+        jsonResponse({
+          name: "demo",
+          owner: { login: "dopamin" },
+          default_branch: "main",
+        }),
+    });
+
+    const summary = await fetchRepoSummary("https://github.com/dopamin/demo");
+
+    expect(repoSummarySchema.safeParse(summary).success).toBe(true);
+    // 並びは STRUCTURE_DIRS の順（apps → packages → docs → api）
+    expect(summary.structureHints).toEqual([
+      "apps/web",
+      "apps/api",
+      "docs/specs",
+    ]);
+    expect(summary.rootEntries).toEqual([
+      { name: "apps", type: "dir" },
+      { name: "docs", type: "dir" },
+      { name: "package.json", type: "file" },
+      { name: "README.md", type: "file" },
+      { name: "vendor", type: "other" },
+    ]);
+    expect(summary.manifests).toEqual([
+      { path: "package.json", excerpt: '{"name":"demo"}' },
+    ]);
+    // ルート一覧も構造ディレクトリも contents では引かない
+    const urls = spy.mock.calls.map((call) => String(call[0]));
+    expect(urls.filter((url) => url.endsWith("/contents"))).toEqual([]);
+    expect(urls.filter((url) => url.endsWith("/contents/apps"))).toEqual([]);
+    expect(urls.length).toBeLessThanOrEqual(MAX_REQUESTS_PER_SUMMARY);
+  });
+
+  it("ツリーが打ち切られたら contents 経路に落ちる（#168）", async () => {
+    useRealMode("ghp_secret");
+    const spy = stubFetch({
+      "/git/trees/HEAD?recursive=1": () =>
+        jsonResponse({
+          truncated: true,
+          // 打ち切られた応答はルート直下すら欠け得るので使わない
+          tree: [{ path: "apps", type: "tree" }],
+        }),
+      "/contents/apps": () => jsonResponse([{ name: "web", type: "dir" }]),
+      "/contents": () => jsonResponse([{ name: "apps", type: "dir" }]),
+      "/languages": () => jsonResponse({}),
+      "/repos/dopamin/demo": () =>
+        jsonResponse({ name: "demo", owner: { login: "dopamin" } }),
+    });
+
+    const summary = await fetchRepoSummary("https://github.com/dopamin/demo");
+
+    expect(summary.rootEntries).toEqual([{ name: "apps", type: "dir" }]);
+    expect(summary.structureHints).toEqual(["apps/web"]);
+    const urls = spy.mock.calls.map((call) => String(call[0]));
+    expect(urls.some((url) => url.endsWith("/contents"))).toBe(true);
   });
 
   it("GITHUB_TOKEN があれば Authorization を付ける（無ければ付けない）", async () => {
@@ -301,6 +391,65 @@ describe("fetchRepoSummary（GITHUB_MODE=real）", () => {
     );
 
     expect((error as GithubUnavailableError).reason).toBe("unreachable");
+  });
+});
+
+describe("GITHUB_TOKEN 未設定の警告（#168）", () => {
+  /** 最小構成のスタブ（repo だけ返して残りは 404 = 解析は続く）。 */
+  function stubMinimalRepo() {
+    return stubFetch({
+      "/repos/dopamin/demo": () =>
+        jsonResponse({ name: "demo", owner: { login: "dopamin" } }),
+    });
+  }
+
+  function warningLines(spy: { mock: { calls: unknown[][] } }): string[] {
+    return spy.mock.calls
+      .map((call) => (typeof call[0] === "string" ? call[0] : ""))
+      .filter((line) => line.includes("github_token_missing"));
+  }
+
+  it("real でトークンが無ければ構造化ログに 1 回だけ警告し、機能は落とさない", async () => {
+    useRealMode();
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    stubMinimalRepo();
+
+    // 例外は投げない。未認証でも公開リポは読める（§17）
+    const summary = await fetchRepoSummary("https://github.com/dopamin/demo");
+    await fetchRepoSummary("https://github.com/dopamin/demo");
+
+    expect(summary.repo).toBe("demo");
+    const lines = warningLines(logSpy);
+    // 2 回呼んでも警告は 1 回だけ（ログを同じ行で埋めない）
+    expect(lines).toHaveLength(1);
+    const line = JSON.parse(lines[0] ?? "{}") as {
+      level: string;
+      rateLimitPerHour: number;
+      maxRequestsPerSummary: number;
+      message: string;
+    };
+    expect(line.level).toBe("warn");
+    expect(line.rateLimitPerHour).toBe(60);
+    expect(line.maxRequestsPerSummary).toBe(MAX_REQUESTS_PER_SUMMARY);
+    expect(line.message).toContain("GITHUB_TOKEN");
+  });
+
+  it("トークンがあれば警告しない", async () => {
+    useRealMode("ghp_secret");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    stubMinimalRepo();
+
+    await fetchRepoSummary("https://github.com/dopamin/demo");
+
+    expect(warningLines(logSpy)).toEqual([]);
+  });
+
+  it("GITHUB_MODE=mock では警告しない（既定の環境に無関係な警告を出さない）", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await fetchRepoSummary("https://github.com/dopamin/demo");
+
+    expect(warningLines(logSpy)).toEqual([]);
   });
 });
 

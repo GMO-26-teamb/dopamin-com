@@ -73,9 +73,21 @@ sequenceDiagram
 
 - 集めるもの: 説明 / トピック / 言語（バイト数の降順）/ README 先頭 8KB / ルート直下 /
   `apps` `packages` `docs` `api` の直下 1 段（構造ヒント）/ ルートのマニフェスト最大 2 件。
+- 取り方: リポジトリ本体 1 回 + README / **再帰ツリー** / 言語の 3 回 + マニフェスト最大 2 回で、
+  **1 提案あたり最大 6 リクエスト**（`MAX_REQUESTS_PER_SUMMARY`）。ルート直下と構造ヒントは
+  `GET /git/trees/<default_branch>?recursive=1` **1 回**から作る。`contents` を辿ると
+  「ルート 1 回 + `apps` `packages` `docs` `api` の各 1 回」で最大 5 回掛かり、
+  未認証（60 req/h）だと 1 時間に 6 提案で 429 に達していた（#168）。
+  ツリーが読めない場合（`truncated` = 10 万エントリ超 / 空リポで 404）だけ従来の `contents` 経路に
+  落ちる（このときは最大 11 回）。打ち切られた応答はルート直下すら欠け得るので使わない。
 - **実キー前提にしない**。`GITHUB_MODE`（既定 `mock`）でネットワークに出ないフェイク応答へ切り替えられる。
   失敗系は `GITHUB_MOCK_FAIL_MODE`（`not_found` / `rate_limited` / `unreachable`）で再現する。
-  `GITHUB_TOKEN` は `real` でも任意で、未設定なら未認証で叩く（レート制限の緩和用。§17）。
+  ただし `GITHUB_TOKEN` は **`real` では実質必須**（§17 / #168）。未設定でも公開リポは読めるので
+  例外は投げないが、未認証は 60 req/h ＝ 1 時間に約 10 提案で `RATE_LIMITED` に達し、
+  `getJson` がレート制限だけは任意の呼び出しでも投げ直すため以降の提案が全滅する。
+  `GITHUB_MODE=real` かつ未設定なら、最初の実呼び出しで構造化ログに 1 回だけ警告を出す
+  （`{"level":"warn","type":"github_token_missing",…}`。起動時に出さないのは、
+  既定の `mock` 環境に無関係な警告を出さないため）。
 - 失敗の分類: 404 / 403 は `NOT_FOUND`「取得できません」、429 と
   `x-ratelimit-remaining: 0` の 403 は `RATE_LIMITED`（§10.3 は GitHub のレート制限を
   `RATE_LIMITED` に寄せている）。README / マニフェストの 404 は解析を止めない。
@@ -232,7 +244,7 @@ Error Card で返るだけ、という割れ方をしていた（#187 で表面�
 | 種別 | 内容 |
 |---|---|
 | unit | `packages/shared/src/subdomains.test.ts`（差分・反映状態・手順テキスト・AI 出力の項目ごと検証 `pickValidSubdomainItems`）、`packages/db` のスキーマ制約は `apps/api/test/db/subdomain-schema.test.ts` |
-| 契約 / 統合 | `apps/api/test/lib/github.test.ts`（mock / real 両経路、失敗の分類、8KB 切り出し）、`test/routes/subdomain-plan-generate.test.ts`（不正な 1 項目だけ落として残りを返す / 落とした結果 3 件未満は 503 / `www` 欠落は 503 / 落とした項目の構造化ログ）、`test/routes/subdomain-plan-save.test.ts`、`test/routes/subdomain-plan-apply.test.ts` |
+| 契約 / 統合 | `apps/api/test/lib/github.test.ts`（mock / real 両経路、失敗の分類、8KB 切り出し、ツリー 1 回の構造取得と `truncated` のフォールバック、トークン未設定の警告）、`test/routes/subdomain-plan-generate.test.ts`（不正な 1 項目だけ落として残りを返す / 落とした結果 3 件未満は 503 / `www` 欠落は 503 / 落とした項目の構造化ログ）、`test/routes/subdomain-plan-save.test.ts`、`test/routes/subdomain-plan-apply.test.ts` |
 | 契約（web） | `apps/web/lib/api/http/http-services.test.ts`: `subdomains` の 5 メソッド（写像・未保存の 404 → null・提案の失敗の相手分け・apply 後の取り直し） |
 | unit（web） | `apps/web/features/subdomains/validate.test.ts`: 欄ごとの検証と、通った設計が `savedSubdomainProposalSchema` も通ること |
 | 統合（web） | `apps/web/features/subdomains/subdomains-screen.test.tsx`: 追加直後の保存を止める / 埋めれば保存できる / 全消し / 上限で追加不可 |
@@ -257,3 +269,4 @@ Error Card で返るだけ、という割れ方をしていた（#187 で表面�
 | v0.4 | 2026-08-27 | リポジトリ解析の時間制限を 2 倍に緩和。`GITHUB_FETCH_TIMEOUT_MS` 4 → 8 秒、`AI_CALL_TIMEOUT_MS` 10 → 20 秒とし、§2.2 / §2 の図・AC-13-1 の内訳を「GitHub 8 秒 + AI 20 秒 = 30 秒以内」に更新（requirements v0.1.22）。上限が厳しく解析を通せない公開リポジトリが実在したため。#199（thinking を絞って 10 秒予算を守る案）とは別方針で、上限そのものを引き上げている |
 | v0.5 | 2026-08-28 | ドメイン詳細（`GET /domains/:name`）に `subdomainPlan: { hosts, applied } \| null` が載ったことを §2.3 / §4 に追記（#217 / requirements v0.1.27）。設計を保存しても S-30 が「未作成」のままだった原因が web の固定値ではなく契約に件数が無かったことだったため。反映済みの判定は `GET /subdomain-plan` と同じ `subdomainApplyState` を使い、2 画面で件数が食い違わないようにしている |
 | v0.6 | 2026-08-28 | §2 / §2.5 / §7: **AI 出力の検証を 2 段構えにした**（#167）。`generateObject` には形だけの `subdomainProposalOutputSchema` を渡し、受け取ってから項目ごとに `subdomainItemSchema` で検証して**不正な項目だけ落とし**、残った集合に `subdomainProposalSchema`（`www` 必須 / 3〜8 件 / ホスト重複なし）を掛ける。集合として成立しなければ従来どおり `AI_UNAVAILABLE`（503）で、勝手な補完はしない。#66（FR-04）と揃えた部分（生スキーマ + 項目ごと再検証・文字数超過は切り詰め）と、揃えていない部分（FR-13 の提案は構造制約を持つ 1 つの設計なので集合制約は救済しない）を明記。落とした項目は `subdomain_plan_items_dropped` の構造化ログに残す（NFR-06）|
+| v0.7 | 2026-08-28 | §2.2 / §7: GitHub 解析のリクエスト数を **1 提案あたり最大 10 → 6** に減らし、`GITHUB_TOKEN` を `real` では実質必須として扱うことにした（#168 / requirements v0.1.29）。ルート直下と構造ヒントは再帰ツリー 1 回から作り、`contents` 経路（最大 5 回）は `truncated` / 404 のときのフォールバックに退けた。トークン未設定の `real` は初回呼び出しで `github_token_missing` の構造化ログを 1 回だけ出す（例外は投げず機能は落とさない）|

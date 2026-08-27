@@ -104,7 +104,12 @@ const apiEnvSchema = z.object({
   GITHUB_MOCK_FAIL_MODE: z
     .enum(["none", "not_found", "rate_limited", "unreachable"])
     .default("none"),
-  /** 公開リポ取得のレート制限緩和（読み取りのみのスコープ）。`GITHUB_MODE=real` でも任意。 */
+  /**
+   * 公開リポ取得のレート制限緩和（読み取りのみのスコープ）。
+   * `GITHUB_MODE=real` では**実質必須**（未設定だと 60 req/h ＝ 1 時間に約 10 提案で
+   * 429 に達する。#168）。未設定でも公開リポは読めるので必須にはせず、
+   * `lib/github.ts` が初回呼び出しで警告する。
+   */
   GITHUB_TOKEN: optionalString,
 
   /** true で FR-16（デモデータリセット）を有効化する。 */

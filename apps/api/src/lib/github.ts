@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { getApiEnv } from "./env";
 import { ApiException } from "./errors";
+import { getRequestContext } from "./operation-log-context";
 
 /**
  * GitHub 公開リポジトリの解析（docs/requirements.md FR-13 / §13.2 / NFR-05）。
@@ -12,6 +13,13 @@ import { ApiException } from "./errors";
  * `GITHUB_MODE=mock`（既定）ではネットワークに出ず、リポジトリ URL から決まる
  * フェイク応答を返す（`packages/registry` の mock と同じ思想）。実キーが無い環境でも
  * FR-13 の導線を最後まで通せるようにするためで、失敗系は `GITHUB_MOCK_FAIL_MODE` で再現する。
+ *
+ * `GITHUB_MODE=real` では `GITHUB_TOKEN` を**実質必須**として扱う（#168 / §17）。
+ * 未設定でも公開リポは読めるので例外は投げないが、未認証は
+ * {@link UNAUTHENTICATED_RATE_LIMIT_PER_HOUR} req/h しかなく、1 提案が最大
+ * {@link MAX_REQUESTS_PER_SUMMARY} リクエストなので数時間で 429 に達する。
+ * 起動時ではなく最初の実呼び出しで警告するのは、`GITHUB_MODE=mock` の環境
+ * （既定・テスト・デモ）に無関係な警告を出さないため。
  */
 
 /**
@@ -44,6 +52,17 @@ const STRUCTURE_DIRS = ["apps", "packages", "docs", "api"] as const;
 
 /** マニフェストは多くても 2 件まで読む（上限時間の配分）。 */
 const MAX_MANIFESTS = 2;
+
+/**
+ * 1 提案あたりに投げる GitHub リクエストの上限（#168）。
+ * repo 1 + README / ツリー / 言語 3 + マニフェスト最大 2。
+ * ツリーが読めない（巨大リポで truncated / 空リポ）ときだけ `contents` 経路に落ち、
+ * 最大 11 まで増える（{@link fetchStructure}）。
+ */
+export const MAX_REQUESTS_PER_SUMMARY = 6;
+
+/** 未認証で叩けるリクエスト数（GitHub REST の既定。1 時間あたり）。 */
+export const UNAUTHENTICATED_RATE_LIMIT_PER_HOUR = 60;
 
 const GITHUB_API_ORIGIN = "https://api.github.com";
 
@@ -87,6 +106,8 @@ const repoResponseSchema = z.object({
   topics: z.array(z.string()).default([]),
   private: z.boolean().default(false),
   owner: z.object({ login: z.string() }),
+  /** ツリーを引く ref。空リポなどで欠けたら `HEAD` で試す。 */
+  default_branch: z.string().default("HEAD"),
 });
 
 const readmeResponseSchema = z.object({
@@ -100,6 +121,15 @@ const contentsResponseSchema = z.array(
 
 /** `{ "TypeScript": 12345, ... }`。値はバイト数。 */
 const languagesResponseSchema = z.record(z.string(), z.number());
+
+/**
+ * `GET /repos/:o/:r/git/trees/:ref?recursive=1`。
+ * `truncated: true` は 100k エントリ / 7MB を超えて打ち切られたことを表す（このときは信用しない）。
+ */
+const treeResponseSchema = z.object({
+  truncated: z.boolean().default(false),
+  tree: z.array(z.object({ path: z.string(), type: z.string() })),
+});
 
 const fileContentResponseSchema = z.object({
   content: z.string(),
@@ -193,6 +223,45 @@ function reasonForStatus(
   return "unreachable";
 }
 
+/**
+ * トークン未設定の警告を出したか。1 プロセスに 1 回だけ出す
+ * （提案のたびに出すと Vercel のログが同じ行で埋まる）。
+ */
+let warnedMissingToken = false;
+
+/** テスト専用: 警告済みフラグを戻す。本番コードからは呼ばない。 */
+export function resetGithubTokenWarningForTesting(): void {
+  warnedMissingToken = false;
+}
+
+/**
+ * `GITHUB_MODE=real` なのに `GITHUB_TOKEN` が無いことを構造化ログで警告する（#168 / NFR-06）。
+ *
+ * 未認証の GitHub REST は IP あたり 60 req/h で、1 提案が最大
+ * {@link MAX_REQUESTS_PER_SUMMARY} リクエストなので**1 時間に 10 提案ほどで 429 に達し、
+ * 以降の提案が全滅する**（`getJson` は任意の呼び出しでも rate_limited だけは投げ直す）。
+ * ただし例外は投げない。トークン無しでも公開リポは読めるので、
+ * 機能を落とさず「運用が危ない」ことだけを知らせる（§17）。
+ */
+function warnIfTokenMissing(): void {
+  if (warnedMissingToken || getApiEnv().GITHUB_TOKEN !== undefined) {
+    return;
+  }
+  warnedMissingToken = true;
+  const { requestId } = getRequestContext();
+  console.log(
+    JSON.stringify({
+      level: "warn",
+      type: "github_token_missing",
+      requestId,
+      githubMode: "real",
+      maxRequestsPerSummary: MAX_REQUESTS_PER_SUMMARY,
+      rateLimitPerHour: UNAUTHENTICATED_RATE_LIMIT_PER_HOUR,
+      message: `GITHUB_MODE=real ですが GITHUB_TOKEN が未設定です。未認証の GitHub REST は ${UNAUTHENTICATED_RATE_LIMIT_PER_HOUR} req/h で、1 提案あたり最大 ${MAX_REQUESTS_PER_SUMMARY} リクエスト投げるため、1 時間に約 ${Math.floor(UNAUTHENTICATED_RATE_LIMIT_PER_HOUR / MAX_REQUESTS_PER_SUMMARY)} 提案で RATE_LIMITED（429）に達します。読み取り専用のトークンを設定してください。`,
+    }),
+  );
+}
+
 /** 認証ヘッダ。トークンはレート制限の緩和用で、公開リポの取得には必須ではない（§17）。 */
 function requestHeaders(): Record<string, string> {
   const token = getApiEnv().GITHUB_TOKEN;
@@ -274,41 +343,79 @@ function decodeContent(
 }
 
 // ---------------------------------------------------------------------------
-// 解析本体
+// 構造（ルート直下と構造ヒント）
 // ---------------------------------------------------------------------------
 
-async function fetchRealRepoSummary(
-  ref: RepoRef,
+/** ルート直下のエントリと構造ヒント。取得元（ツリー / contents）によらず同じ形にする。 */
+interface RepoStructure {
+  rootEntries: RepoSummary["rootEntries"];
+  structureHints: string[];
+}
+
+function toEntryType(value: string): "file" | "dir" | "other" {
+  if (value === "file" || value === "blob") {
+    return "file";
+  }
+  if (value === "dir" || value === "tree") {
+    return "dir";
+  }
+  return "other";
+}
+
+/**
+ * ツリー 1 回でルート直下と構造ヒントを両方作る（#168 のリクエスト削減）。
+ *
+ * `contents` 経路は「ルート 1 回 + `apps` `packages` `docs` `api` の各 1 回」で最大 5 回
+ * 掛かるが、再帰ツリーなら同じ情報が 1 回で取れる。打ち切られた（`truncated`）応答は
+ * ルート直下すら欠けている可能性があるので使わず、null を返して `contents` 経路に落とす。
+ */
+async function fetchTreeStructure(
+  base: string,
+  branch: string,
   signal: AbortSignal,
-): Promise<RepoSummary> {
-  const base = `/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}`;
-  // リポジトリ本体だけは必須。ここが 404 / 403 なら「取得できません」（AC-13-2）
-  const repo = await getJson(base, repoResponseSchema, signal);
-  if (repo === null) {
-    throw new GithubUnavailableError("not_found");
+): Promise<RepoStructure | null> {
+  const tree = await getJson(
+    `${base}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
+    treeResponseSchema,
+    signal,
+    { optional: true },
+  );
+  if (tree === null || tree.truncated) {
+    return null;
   }
-  // GITHUB_TOKEN に private の読み取り権があっても対象は公開リポのみ（§17 / AC-13-2）。
-  // 未認証・権限なしの 404 と同じ「取得できません」に倒し、存在も明かさない
-  if (repo.private) {
-    throw new GithubUnavailableError("not_found");
-  }
+  const rootEntries = tree.tree
+    .filter((entry) => !entry.path.includes("/"))
+    .map((entry) => ({ name: entry.path, type: toEntryType(entry.type) }));
+  // 直下 1 段のディレクトリだけ。並び順は STRUCTURE_DIRS に合わせる（プロンプトを安定させる）
+  const childDirs = tree.tree.filter(
+    (entry) => toEntryType(entry.type) === "dir" && entry.path.includes("/"),
+  );
+  const structureHints = STRUCTURE_DIRS.flatMap((dir) =>
+    childDirs
+      .filter((entry) => entry.path.split("/").length === 2)
+      .filter((entry) => entry.path.startsWith(`${dir}/`))
+      .map((entry) => entry.path),
+  );
+  return { rootEntries, structureHints };
+}
 
-  const [readme, rootContents, languages] = await Promise.all([
-    getJson(`${base}/readme`, readmeResponseSchema, signal, { optional: true }),
-    getJson(`${base}/contents`, contentsResponseSchema, signal, {
-      optional: true,
-    }),
-    getJson(`${base}/languages`, languagesResponseSchema, signal, {
-      optional: true,
-    }),
-  ]);
-
+/**
+ * `contents` を辿る従来の経路（ツリーが読めないときのフォールバック）。
+ * ルート 1 回 + 構造ディレクトリ最大 4 回。
+ */
+async function fetchContentsStructure(
+  base: string,
+  signal: AbortSignal,
+): Promise<RepoStructure> {
+  const rootContents = await getJson(
+    `${base}/contents`,
+    contentsResponseSchema,
+    signal,
+    { optional: true },
+  );
   const rootEntries = (rootContents ?? []).map((entry) => ({
     name: entry.name,
-    type:
-      entry.type === "file" || entry.type === "dir"
-        ? (entry.type as "file" | "dir")
-        : ("other" as const),
+    type: toEntryType(entry.type),
   }));
   const rootNames = new Set(rootEntries.map((entry) => entry.name));
 
@@ -331,6 +438,51 @@ async function fetchRealRepoSummary(
       }),
     )
   ).flat();
+  return { rootEntries, structureHints };
+}
+
+/** ツリー 1 回で済ませ、読めなければ `contents` 経路に落とす。 */
+async function fetchStructure(
+  base: string,
+  branch: string,
+  signal: AbortSignal,
+): Promise<RepoStructure> {
+  return (
+    (await fetchTreeStructure(base, branch, signal)) ??
+    (await fetchContentsStructure(base, signal))
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 解析本体
+// ---------------------------------------------------------------------------
+
+async function fetchRealRepoSummary(
+  ref: RepoRef,
+  signal: AbortSignal,
+): Promise<RepoSummary> {
+  const base = `/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}`;
+  // リポジトリ本体だけは必須。ここが 404 / 403 なら「取得できません」（AC-13-2）
+  const repo = await getJson(base, repoResponseSchema, signal);
+  if (repo === null) {
+    throw new GithubUnavailableError("not_found");
+  }
+  // GITHUB_TOKEN に private の読み取り権があっても対象は公開リポのみ（§17 / AC-13-2）。
+  // 未認証・権限なしの 404 と同じ「取得できません」に倒し、存在も明かさない
+  if (repo.private) {
+    throw new GithubUnavailableError("not_found");
+  }
+
+  const [readme, structure, languages] = await Promise.all([
+    getJson(`${base}/readme`, readmeResponseSchema, signal, { optional: true }),
+    fetchStructure(base, repo.default_branch, signal),
+    getJson(`${base}/languages`, languagesResponseSchema, signal, {
+      optional: true,
+    }),
+  ]);
+
+  const { rootEntries, structureHints } = structure;
+  const rootNames = new Set(rootEntries.map((entry) => entry.name));
 
   const manifests = (
     await Promise.all(
@@ -427,6 +579,8 @@ export async function fetchRepoSummary(
   if (getApiEnv().GITHUB_MODE === "mock") {
     return mockRepoSummary(ref);
   }
+  // real の最初の 1 回だけ、トークン未設定なら警告する（#168。機能は落とさない）
+  warnIfTokenMissing();
   const controller = new AbortController();
   const timer = setTimeout(
     () => controller.abort(),
