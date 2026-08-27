@@ -1,4 +1,5 @@
 import {
+  type AiProvider,
   DOMAIN_CANDIDATE_COUNT,
   DOMAIN_CANDIDATE_REASON_MAX_LENGTH,
   type DomainCandidatesRequest,
@@ -25,6 +26,41 @@ export const DOMAIN_CANDIDATES_INSTRUCTIONS = `あなたはドメイン名のネ
 - 除外リストに挙がった名前（および同じ SLD）は提案しない。
 - reason は日本語で ${DOMAIN_CANDIDATE_REASON_MAX_LENGTH} 字以内。なぜその名前が良いかを一言で書く。
 - 既存の有名サービスやブランドと紛らわしい名前は避ける。`;
+
+/**
+ * プロバイダ別の味付け（`docs/specs/ai-candidates.md` §2.5）。
+ *
+ * 文体だけに効かせる追加指示で、上の制約を上書きしない。ここに無いプロバイダは
+ * 味付け無し = 従来と完全に同じプロンプトになる（`google` / `anthropic` は意図的に空）。
+ */
+const PROVIDER_FLAVOR: Partial<Record<AiProvider, string>> = {
+  // Grok を選ぶ動機は「無難な候補ではなく思わず笑える名前が欲しい」なので、
+  // プロバイダの選択をそのまま作風の選択として扱う
+  xai: `作風（上の制約はすべてそのまま守ったうえで、文体だけこう振る舞う）:
+- 候補名は無難な組み合わせより「なんでそれ!?」と言いたくなる意外性を優先する。
+  覚えやすい造語、遊び心のある接尾辞（例: inu を付ける）、語呂やダジャレを歓迎する。
+- reason はユーモア文体の短い 1 文にする。軽い皮肉か、大げさな持ち上げのどちらか。
+  例（トーンの参考。そのまま使わない）:
+  「ふわふわ可愛いあなたにぴったり！」
+  「会社の犬なあなたにそっくりな名前。」
+- 下品な表現、攻撃的な表現、人を傷つける表現は使わない。
+  誰かに見せている画面にそのまま出ても問題ない範囲に収める。`,
+};
+
+/**
+ * システムプロンプト。`provider` を渡すとそのプロバイダの味付けが付く（§2.5）。
+ *
+ * 味付けを持たないプロバイダ（`google` / `anthropic`）では
+ * {@link DOMAIN_CANDIDATES_INSTRUCTIONS} と**文字列として完全に同一**になる。
+ */
+export function buildDomainCandidatesInstructions(
+  provider?: AiProvider,
+): string {
+  const flavor = provider === undefined ? undefined : PROVIDER_FLAVOR[provider];
+  return flavor === undefined
+    ? DOMAIN_CANDIDATES_INSTRUCTIONS
+    : `${DOMAIN_CANDIDATES_INSTRUCTIONS}\n\n${flavor}`;
+}
 
 /** 候補生成のユーザープロンプト（入力を JSON ではなく箇条書きで渡す）。 */
 export function buildDomainCandidatesPrompt(input: {
