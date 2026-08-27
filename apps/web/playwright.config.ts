@@ -42,8 +42,15 @@ function resolveDatabaseUrl(): string {
 
 const DATABASE_URL = resolveDatabaseUrl();
 
-const WEB_ORIGIN = "http://localhost:3000";
-const API_ORIGIN = "http://localhost:8787";
+/**
+ * ポートは既定 3000 / 8787（CI もこのまま）。`pnpm dev` を止めずにローカルで回したいときだけ
+ * `E2E_WEB_PORT` / `E2E_API_PORT` で退避させる。WebAuthn の RP ID は `localhost` 固定で
+ * ポートの影響を受けないが、`WEBAUTHN_ORIGIN` はポート込みで web と一致させる必要がある。
+ */
+const WEB_PORT = process.env.E2E_WEB_PORT ?? "3000";
+const API_PORT = process.env.E2E_API_PORT ?? "8787";
+const WEB_ORIGIN = `http://localhost:${WEB_PORT}`;
+const API_ORIGIN = `http://localhost:${API_PORT}`;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -73,7 +80,7 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 60_000,
       env: {
-        PORT: "8787",
+        PORT: API_PORT,
         REGISTRY_MODE: "mock",
         DATABASE_URL,
         WEBAUTHN_RP_ID: "localhost",
@@ -85,7 +92,7 @@ export default defineConfig({
       // NEXT_PUBLIC_API_MODE はビルド時定数（apps/web/lib/api/mode.ts）なので build にも渡す。
       // Next は既に設定済みの環境変数を .env.local で上書きしないため、
       // 開発者の .env.local に NEXT_PUBLIC_API_MODE=mock があってもここが勝つ。
-      command: "pnpm exec next build && pnpm exec next start --port 3000",
+      command: `pnpm exec next build && pnpm exec next start --port ${WEB_PORT}`,
       url: `${WEB_ORIGIN}/login`,
       reuseExistingServer: !isCi,
       timeout: 300_000,
