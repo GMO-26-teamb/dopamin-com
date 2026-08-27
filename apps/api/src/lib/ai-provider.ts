@@ -31,7 +31,7 @@ import { getRequestContext } from "./operation-log-context";
  * 生成 AI のプロバイダ抽象化（docs/requirements.md §13.1 / §13.4 / FR-14 / NFR-05）。
  *
  * - 生成は `generateObject`（zod スキーマ必須）だけ。自由文生成は行わない。
- * - 上限時間は 1 呼び出しあたり合計 10 秒。失敗したら残り予算がある限り 1 回だけ
+ * - 上限時間は 1 呼び出しあたり合計 20 秒。失敗したら残り予算がある限り 1 回だけ
  *   別プロバイダにフォールバックする（両方有効な場合）。
  * - 出力は必ず zod で再検証してから返す（AI 出力は信用しない）。
  * - 呼び出しは成功・失敗を問わず `ai_logs` に記録する（AC-14-1）。プロンプト全文は保存しない（AC-14-2）。
@@ -42,12 +42,15 @@ import { getRequestContext } from "./operation-log-context";
  */
 
 /**
- * `runStructured` 1 回でプロバイダを待つ合計時間の上限（§13.1「タイムアウト 10 秒」）。
- * 本命とフォールバックの合計で、API の応答が 20 秒になるのを避ける
- * （#66 も「10 秒超で AI_UNAVAILABLE」を前提にしている）。
+ * `runStructured` 1 回でプロバイダを待つ合計時間の上限（§13.1「タイムアウト 20 秒」）。
+ * 本命とフォールバックの合計で、API の応答が 40 秒になるのを避ける
+ * （#66 の「上限超で AI_UNAVAILABLE」はこの合計に対して効く）。
  * `ai_logs` の書き込み待ち（`AI_LOG_WRITE_TIMEOUT_MS`）はこの予算に含めない。
+ *
+ * 10 秒では thinking を使うモデル（Gemini 2.5 系）が毎回超過し、
+ * FR-13 の解析が通らないリポジトリが残るため 2 倍にした。
  */
-export const AI_CALL_TIMEOUT_MS = 10_000;
+export const AI_CALL_TIMEOUT_MS = 20_000;
 
 /**
  * 残り予算がこれ未満ならフォールバックしない。
@@ -352,7 +355,7 @@ async function callProvider<T>(
         abortSignal: controller.signal,
         ...(providerOptions === undefined ? {} : { providerOptions }),
         // 再試行は AI SDK 内部ではなく本関数のフォールバック 1 回だけに寄せる
-        // （SDK の既定 2 回は 10 秒の予算をプロバイダ 1 つで使い切ってしまう）
+        // （SDK の既定 2 回は 20 秒の予算をプロバイダ 1 つで使い切ってしまう）
         maxRetries: 0,
       }),
       timeout,

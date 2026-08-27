@@ -50,9 +50,9 @@ import { canAddHost, hostFieldErrors, validatePlan } from "./validate";
 
 const S40_TITLE = "リポジトリを解析して構成を提案します";
 const S40_BODY =
-  "README・ディレクトリ構成・マニフェストから www / api / docs などのホストを提案します（15 秒以内）。非公開リポの場合はプロジェクト概要のテキストでも提案できます。";
+  "README・ディレクトリ構成・マニフェストから www / api / docs などのホストを提案します（30 秒以内）。非公開リポの場合はプロジェクト概要のテキストでも提案できます。";
 const S41_NOTE =
-  "解析中… GitHub からリポジトリ情報を取得し、AI が構成を提案しています（最大 15 秒）";
+  "解析中… GitHub からリポジトリ情報を取得し、AI が構成を提案しています（最大 30 秒）";
 const S42_TITLE = "リポジトリを取得できません";
 const S42_BODY =
   "存在しないか非公開です（GitHub 404）。代わりにプロジェクトの概要を入力すると、そこから構成を提案します。";

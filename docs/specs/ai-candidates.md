@@ -23,10 +23,10 @@
 | 層 | 置き場所 | 状態 |
 |---|---|---|
 | ルート | `apps/api/src/routes/ai.ts` | 実装済み（`POST /ai/domain-candidates`、`requireSession` で認証必須） |
-| サービス | `apps/api/src/services/candidates.service.ts` | 実装済み（`CandidateBucket` の採否・1 回だけの再生成・合計 10 秒予算） |
+| サービス | `apps/api/src/services/candidates.service.ts` | 実装済み（`CandidateBucket` の採否・1 回だけの再生成・合計 20 秒予算） |
 | プロンプト | `apps/api/src/prompts/domain-candidates.ts` | 実装済み（§13.2 の制約を列挙。few-shot は未配置） |
 | 契約 | `packages/shared/src/ai-candidates.ts` | 実装済み（3 層。§2.1） |
-| AI 基盤 | `apps/api/src/lib/ai-provider.ts` | 実装済み（`runStructured`: 上限 10 秒・1 回のフォールバック・zod 再検証・`ai_logs` 記録）。詳細は `docs/specs/ai-logs.md` |
+| AI 基盤 | `apps/api/src/lib/ai-provider.ts` | 実装済み（`runStructured`: 上限 20 秒・1 回のフォールバック・zod 再検証・`ai_logs` 記録）。詳細は `docs/specs/ai-logs.md` |
 | 空き確認 + スコア | `apps/api/src/services/check.service.ts` | 実装済み（独自性スコアは `packages/shared` の純粋関数。`docs/specs/uniqueness/`） |
 | Web（モック） | `apps/web/lib/api/mock/mock-services.ts` | 実装済み（`NEXT_PUBLIC_API_MODE=mock` の既定経路。`ai-timeout` / `partial-failure` シナリオ付き） |
 | **Web（実 API）** | `apps/web/lib/api/http/http-services.ts` | **`candidates.generate` が `NOT_IMPLEMENTED` を投げていた** ← 本書 §3 で配線 |
@@ -81,8 +81,8 @@ flowchart TD
 
 ### 2.3 上限時間
 
-AC-04-2 は「AI 応答は 10 秒以内」。再生成があるので、**1 リクエスト合計**で
-`AI_CALL_TIMEOUT_MS`（10 秒）に収める。経過時間を引いた残り予算を 2 回目に渡し、
+AC-04-2 は「AI 応答は 20 秒以内」。再生成があるので、**1 リクエスト合計**で
+`AI_CALL_TIMEOUT_MS`（20 秒）に収める。経過時間を引いた残り予算を 2 回目に渡し、
 残りが `AI_FALLBACK_MIN_BUDGET_MS` 未満なら 2 回目を始めない。
 実効 AI 設定（FR-17）は 1 リクエストで 1 回だけ引き、両方の試行で使い回す。
 
@@ -112,7 +112,7 @@ Grok を選ぶ動機は「無難な候補ではなく、思わず笑える名前
 | 出力契約（§2.1 の 3 層スキーマ） | 不変。`rawDomainCandidateSchema` → `domainCandidateSchema` の再検証もそのまま |
 | 件数（`DOMAIN_CANDIDATE_COUNT`） | 不変 |
 | §13.2 の制約（RFC 1035 / 許可 TLD / 重複禁止 / 除外リスト / `reason` 40 字） | **厳守**。味付けは制約の上書きではなく追加 |
-| 10 秒予算（§2.3） | 不変 |
+| 20 秒予算（§2.3） | 不変 |
 | `google` / `anthropic` のプロンプト | **一切変えない**（味付け文は xai の分岐内に閉じる） |
 
 **禁止**: 下品・攻撃的・人格攻撃・人を傷つける表現。発表デモでそのまま見せられるラインを守らせる。
@@ -195,7 +195,7 @@ S-23 でレジストリ向けの文言が出てしまう。
 ## 6. 受け入れ条件
 
 - [x] AC-04-1: 候補は 6 件・重複なし・バリデーション通過のみ
-- [x] AC-04-2: 上限 10 秒。超過は `AI_UNAVAILABLE`
+- [x] AC-04-2: 上限 20 秒。超過は `AI_UNAVAILABLE`
 - [x] AC-04-3: 成功・失敗とも `ai_logs` に記録される（試行ごとに 1 行）
 - [x] AC-05-2: レジストリ障害時も候補と独自性スコアは返る
 
@@ -227,3 +227,4 @@ S-23 でレジストリ向けの文言が出てしまう。
 | v0.2 | 2026-08-27 | §1 を API 実装済みの実態に更新。§3 に Web 配線（`candidates.generate` → `POST /ai/domain-candidates`、`toCheckedFields` の検索経路との共有、`"ai"` origin によるエラー文言の出し分け、本番の `NEXT_PUBLIC_API_MODE=http`）を追記。§7 に Web の契約テスト行を追加。#185 |
 | v0.2.1 | 2026-08-27 | §2.5「プロバイダ別の味付け」を追加。#193 の実装（`PROVIDER_FLAVOR` / `buildDomainCandidatesInstructions`）が §2.5 を正として参照していたが節が存在しなかった。#196 |
 | v0.3 | 2026-08-27 | §2.5 を追加。`xai`（Grok）選択時だけシステムプロンプトにユーモアの個性付けを足す方針（候補名は意外性重視、`reason` は基本が大げさな持ち上げで毎回ちょうど 1 件だけを皮肉枠にする）。出力契約・件数・§13.2 の制約・10 秒予算は不変で、`google` / `anthropic` のプロンプトには一切影響しないこと、下品・攻撃的・人格攻撃を禁じること、皮肉枠の件数は契約では担保しないこと、フォールバック時は選択プロバイダの味付けのままにすることを明記。#193 |
+| v0.4 | 2026-08-27 | `AI_CALL_TIMEOUT_MS` が 10 → 20 秒になったことに追随（requirements v0.1.22 / AC-04-2「20 秒以内」）。定数は FR-13 と共有で、緩和の主因はサブドメイン提案側。§2.3 の予算配分の考え方（1 リクエスト合計・残り予算を再生成に渡す）は不変 |

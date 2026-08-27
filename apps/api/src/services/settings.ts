@@ -25,7 +25,7 @@ import { ApiException } from "../lib/errors";
 const KNOWN_MODELS: Record<AiProvider, readonly [string, ...string[]]> = {
   google: ["gemini-2.5-flash", "gemini-2.5-pro"],
   anthropic: ["claude-sonnet-4-5", "claude-haiku-4-5"],
-  // Gateway 専用。10 秒予算（§13.1）に対して余裕が無いので速い順に並べる
+  // Gateway 専用。20 秒予算（§13.1）に対して余裕が大きくないので速い順に並べる
   // （docs/specs/ai-gateway.md §2.8）
   xai: ["grok-4.1-fast-non-reasoning", "grok-4.1-fast-reasoning", "grok-4.6"],
 };
