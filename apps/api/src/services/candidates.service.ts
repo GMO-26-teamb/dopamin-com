@@ -23,8 +23,8 @@ import {
 import { getDb } from "../lib/db";
 import { getApiEnv } from "../lib/env";
 import {
+  buildDomainCandidatesInstructions,
   buildDomainCandidatesPrompt,
-  DOMAIN_CANDIDATES_INSTRUCTIONS,
 } from "../prompts/domain-candidates";
 import { checkDomains } from "./check.service";
 import { getAiSettingsForUser } from "./settings";
@@ -156,7 +156,9 @@ export async function generateDomainCandidates(
           tlds,
           exclude: bucket.excludeList,
         },
-        instructions: DOMAIN_CANDIDATES_INSTRUCTIONS,
+        // 味付けは「ユーザーが選んだプロバイダ」で決める。runStructured が別プロバイダへ
+        // フォールバックしても切り替えない（作風は選択に紐づく。§2.5）
+        instructions: buildDomainCandidatesInstructions(settings.provider),
         settings,
         timeoutMs: remainingMs,
         db,

@@ -27,7 +27,7 @@ describe("AI enum", () => {
   });
 
   it("プロバイダは FR-17 の 2 種", () => {
-    expect(AI_PROVIDERS).toEqual(["google", "anthropic"]);
+    expect(AI_PROVIDERS).toEqual(["google", "anthropic", "xai"]);
     expect(aiProviderSchema.safeParse("openai").success).toBe(false);
   });
 

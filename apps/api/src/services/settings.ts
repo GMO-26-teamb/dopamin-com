@@ -25,6 +25,9 @@ import { ApiException } from "../lib/errors";
 const KNOWN_MODELS: Record<AiProvider, readonly [string, ...string[]]> = {
   google: ["gemini-2.5-flash", "gemini-2.5-pro"],
   anthropic: ["claude-sonnet-4-5", "claude-haiku-4-5"],
+  // Gateway 専用。10 秒予算（§13.1）に対して余裕が無いので速い順に並べる
+  // （docs/specs/ai-gateway.md §2.8）
+  xai: ["grok-4.1-fast-non-reasoning", "grok-4.1-fast-reasoning", "grok-4.6"],
 };
 
 /** 内部用: `models` が空でないことを型で保証した選択肢（`AiProviderOption` に代入可能）。 */
@@ -47,6 +50,11 @@ export function aiProviderApiKey(
       return env.GOOGLE_GENERATIVE_AI_API_KEY;
     case "anthropic":
       return env.ANTHROPIC_API_KEY;
+    case "xai":
+      // Gateway 経由専用（直叩きの口を作らない）。常に undefined を返すことで、
+      // hasApiKey が「gateway キーがあるときだけ真」になる
+      // （docs/specs/ai-gateway.md §2.6）
+      return undefined;
   }
 }
 

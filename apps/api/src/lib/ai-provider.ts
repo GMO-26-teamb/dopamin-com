@@ -82,11 +82,38 @@ export interface AiUserSettings {
 export type AiModelFactory = (attempt: AiAttempt) => LanguageModel;
 
 /**
+ * 内部のプロバイダ ID → Gateway の接頭辞。
+ * Grok は Gateway のカタログ上 `spacexai`（`docs/specs/ai-gateway.md` §2.7）。
+ * 内部・DB・UI の語彙は `xai` のままにし、変換はこの境界だけで行う。
+ */
+const GATEWAY_PREFIX: Record<AiProvider, string> = {
+  google: "google",
+  anthropic: "anthropic",
+  xai: "spacexai",
+};
+
+/**
+ * Gateway のカタログとモデル ID が食い違うものの読み替え（§2.7）。
+ *
+ * Anthropic は**直接叩くときはハイフンが正**（`claude-sonnet-4-5` が Anthropic API の ID）で、
+ * ドットになるのは Gateway のカタログだけ。そのため変換は gateway 経路にだけ効かせる。
+ * これが無いと gateway 経由の anthropic フォールバックが必ず失敗する。
+ */
+const GATEWAY_MODEL_ALIAS: Record<string, string> = {
+  "anthropic/claude-sonnet-4-5": "anthropic/claude-sonnet-4.5",
+  "anthropic/claude-haiku-4-5": "anthropic/claude-haiku-4.5",
+};
+
+/**
  * Gateway に渡すモデル ID。Vercel AI Gateway は `<provider>/<model>` で宛先を決める。
- * `AI_MODEL` に既にスラッシュ付きで設定されている場合は二重に前置しない。
+ * `AI_MODEL` に既にスラッシュ付きで設定されている場合は二重に前置しない（運用側の指定が正）。
  */
 function gatewayModelId(provider: AiProvider, model: string): string {
-  return model.includes("/") ? model : `${provider}/${model}`;
+  if (model.includes("/")) {
+    return model;
+  }
+  const id = `${GATEWAY_PREFIX[provider]}/${model}`;
+  return GATEWAY_MODEL_ALIAS[id] ?? id;
 }
 
 const defaultModelFactory: AiModelFactory = ({ provider, model }) => {
