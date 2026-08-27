@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.1.23（2026-08-27） |
+| 版 | v0.1.24（2026-08-27） |
 | プロダクト | ドパ民.com / dopamin.com — Z世代向けドメイン管理プラットフォーム（疑似レジストラ） |
 | チーム | チームドパ民（Team B）: 佐々木 琢登・星 はるか・上原 拓也 |
 | 位置づけ | GMO Internet Internship in kitaQ Webアプリケーションコース（2026/08/24–28）成果物 |
@@ -1208,6 +1208,11 @@ FR-05 は埋め込みを使わない（§14）。他に埋め込みを必要と�
     1. マイグレーションを含む PR を **`main` にマージする**
     2. ローカルで `main` を pull する
     3. 本番 DB の接続文字列を渡して `DIRECT_DATABASE_URL='<本番の接続文字列>' pnpm db:migrate` を実行する（`packages/db/drizzle.config.ts` は `.env` を読まないので環境変数で渡す）
+       - ⚠️ **直結ホスト（`db.<project-ref>.supabase.co`）は IPv6 でしか公開されていない**。IPv4 しか出られない回線からは `drizzle-kit migrate` が「applying migrations...」のまま失敗する（2026-08-27 に実際に踏んだ）。**Supavisor session mode（ポート 5432）の URL を使うこと**（§16.3）。`DATABASE_URL`（transaction mode / ポート 6543）のポートを 5432 に変えたものがそのまま使える:
+         ```sh
+         DIRECT_DATABASE_URL='postgresql://postgres.<project-ref>:<password>@aws-<n>-<region>.pooler.supabase.com:5432/postgres' pnpm db:migrate
+         ```
+       - 到達性は先に `nc -z <host> 5432` で確かめられる。`dig +short A <host>` が空で `AAAA` だけ返るホストは IPv6 専用
     4. 適用後に `drizzle.__drizzle_migrations` の件数が `packages/db/drizzle/meta/_journal.json` のエントリ数と一致することを確認する
   - **マージ前のブランチから当ててはいけない**。drizzle は `drizzle.__drizzle_migrations` の最新 `created_at` **より新しい** journal エントリだけを 1 トランザクションで適用する（判定はハッシュではなくタイムスタンプ）ため、当てたあとに `db:generate` をやり直して `_journal.json` の `when` が変わると、同じ DDL が二重適用されて落ちる。当ててしまった場合は、当てた SQL と `_journal.json` の内容をそのままマージすること。
   - スキーマ変更を含む PR は、**マージ後の適用が終わるまで本番が古いスキーマのまま**になる。API のデプロイは先に完了するので、後方互換のない変更は適用を待ってからデプロイをやり直す（空 commit を push するか Vercel で Redeploy）。
@@ -1217,7 +1222,7 @@ FR-05 は埋め込みを使わない（§14）。他に埋め込みを必要と�
 
 - プロジェクト 1 つ（Free）。拡張の追加有効化は不要（`vector` は ADR-0003 で不採用。§7 / §14。すでに有効化済みでも使用しないためそのままでよい）。
 - 接続文字列: 実行時は Supavisor（transaction mode, ポート 6543）、マイグレーションは直結（`db.<project-ref>.supabase.co`, ポート 5432）または Supavisor（session mode, ポート 5432）。どちらもプリペアドステートメントと DDL が使える。
-  - マイグレーションはローカルから手で当てる運用（§16.2）なので、`DIRECT_DATABASE_URL` は**直結の URL でよい**。IPv6 で到達できない環境（GitHub Actions ランナーが該当。直結ホストは IPv6 のみで公開されている）から当てる場合だけ Supavisor session mode の URL（`postgresql://postgres.<project-ref>:<password>@aws-<n>-<region>.pooler.supabase.com:5432/postgres`）を使う。
+  - マイグレーションはローカルから手で当てる運用（§16.2）なので、`DIRECT_DATABASE_URL` は**直結の URL でよい**。IPv6 で到達できない環境から当てる場合は Supavisor session mode の URL（`postgresql://postgres.<project-ref>:<password>@aws-<n>-<region>.pooler.supabase.com:5432/postgres`）を使う。**直結ホストは IPv6 のみで公開されている**ため、GitHub Actions ランナーだけでなく **IPv4 しか出られない一般的な回線からも直結では届かない**（2026-08-27 に実際に踏んだ）。迷ったら session mode を使えばよい（DDL もプリペアドステートメントも使えるので、直結でできることは一通りできる）。
 - Supabase Auth / RLS / Storage / Edge Functions は使わない。
 
 ### 16.4 環境
@@ -1461,3 +1466,4 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | v0.1.21 | 2026-08-27 | §11.2: 運営アナウンス（8/27 16:00〜のメンテナンス）による **`.org` / `.info` の管轄移管（kitaqsign → kitaqnic）** を反映。kitaqsign は `.com` `.net` の 2 種、kitaqnic は 20 種に（計 22 種は不変）。`REGISTRY_TLDS` / fixture / `specVersion`（`v2 (2026-08-27)`）を更新し、既存 `.org` / `.info` 行の `domains.registry` / `transfers.registry` を付け替えるデータマイグレーションを追加。§21.2 #2 に追記。#195（採番が衝突していたため v0.1.20 から採り直した）|
 | v0.1.22 | 2026-08-27 | §16.1 / §16.4 / §17: **参照されていない環境変数を削除**。`NEXT_PUBLIC_APP_ORIGIN`（「表示・OGP 用」として §17 に載っていたが、`apps/web` のコードから一度も読まれていなかった。Vercel の web プロジェクトと `.env.example` / `playwright.config.ts` / README からも削除）。GitHub Secrets の `DIRECT_DATABASE_URL` も、v0.1.13 で `migrate` ジョブを外して以降どのワークフローからも参照されていないため削除した（`ci.yml` の `e2e` は Secret ではなくリテラル値を使う。本番 DB への適用は §16.2 のとおりローカルから手で当てる）。Vercel の api プロジェクトからも同変数を削除（ランタイムでは未使用で、`packages/db/drizzle.config.ts` がローカルで読むだけ） |
 | v0.1.23 | 2026-08-27 | FR-13 / FR-04 の AI 解析まわりの時間制限を 2 倍に緩和。上限が厳しく解析を通せない公開リポジトリが実在したため、`GITHUB_FETCH_TIMEOUT_MS` を 4 → 8 秒、`AI_CALL_TIMEOUT_MS` を 10 → 20 秒に変更した。追随して AC-13-1「15 秒以内」→「30 秒以内」（内訳は GitHub 解析 8 秒 + AI 20 秒）、AC-04-2「10 秒以内」→「20 秒以内」、§13.1「タイムアウト 10 秒」→「20 秒」。`AI_CALL_TIMEOUT_MS` は FR-04 と FR-13 で共有のため、AC-04-2 も同時に緩む。#199（Gemini の thinking を絞って 10 秒予算を守る案）とは方針が異なり、本件は上限そのものを引き上げる判断（#199 の受け入れ条件「配分は変えない」を上書きする）（採番が衝突していたため v0.1.22 から採り直した。#200 の thinking budget 対応と併用する: #200 が既定の所要時間を約 5 秒に下げ、本件が上限を引き上げて遅いリポジトリぶんの余裕を作る）|
+| v0.1.24 | 2026-08-27 | §16.2 / §16.3: マイグレーションの手動適用で**直結ホスト（`db.<project-ref>.supabase.co`）が IPv6 でしか公開されておらず、IPv4 しか出られない回線からは届かない**ことを明記（`drizzle-kit migrate` が無言で失敗する。2026-08-27 に実際に踏んだ）。Supavisor session mode（ポート 5432）の URL を使う具体的な手順と、`nc` / `dig` での到達性の確かめ方を §16.2 の手順 3 に追記。§16.3 の「GitHub Actions ランナーが該当」という限定を外した |
