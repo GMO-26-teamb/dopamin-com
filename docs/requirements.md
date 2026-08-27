@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.1.22（2026-08-27） |
+| 版 | v0.1.23（2026-08-27） |
 | プロダクト | ドパ民.com / dopamin.com — Z世代向けドメイン管理プラットフォーム（疑似レジストラ） |
 | チーム | チームドパ民（Team B）: 佐々木 琢登・星 はるか・上原 拓也 |
 | 位置づけ | GMO Internet Internship in kitaQ Webアプリケーションコース（2026/08/24–28）成果物 |
@@ -1178,7 +1178,7 @@ FR-05 は埋め込みを使わない（§14）。他に埋め込みを必要と�
 | `dopamin-api` | `apps/api` | Hono（Vercel の Hono プリセット、なければ `hono/vercel` の `handle(app)` を `api/index.ts` で export） | Node.js 22 ランタイム |
 
 - Git 連携は使わない（組織リポジトリ + Hobby プランの制約）。GitHub Actions から Vercel CLI でデプロイする。
-- 本番ドメイン: Web `dopamin.ut42tech.com` / API `dopamin-api.ut42tech.com`（`*.vercel.app` も併存）。ドメイン変更時は `WEBAUTHN_RP_ID` / `WEBAUTHN_ORIGIN` / `API_ORIGIN` / `NEXT_PUBLIC_APP_ORIGIN` を更新する。
+- 本番ドメイン: Web `dopamin.ut42tech.com` / API `dopamin-api.ut42tech.com`（`*.vercel.app` も併存）。ドメイン変更時は `WEBAUTHN_RP_ID` / `WEBAUTHN_ORIGIN` / `API_ORIGIN` を更新する。
 
 ### 16.2 GitHub Actions
 
@@ -1236,7 +1236,6 @@ FR-05 は埋め込みを使わない（§14）。他に埋め込みを必要と�
 | 変数 | 用途 |
 |---|---|
 | `API_ORIGIN` | rewrites 先（`https://dopamin-api.ut42tech.com`）。サーバー専用 |
-| `NEXT_PUBLIC_APP_ORIGIN` | 表示・OGP 用 |
 | `NEXT_PUBLIC_API_MODE` | `http` = 実 API / `mock`（未設定時の既定）= ブラウザ内モック。**ビルド時に静的置換されるので、変更したら再デプロイが必要**。`mock` では `proxy.ts` の認証チェックも素通しになるため、**本番は必ず `http` を明示設定する**（§16.4） |
 
 **Vercel の Sensitive 属性を付けてよいのはサーバー専用の秘密だけ**。`NEXT_PUBLIC_*` はビルド時にクライアント JS へ静的置換される値で、Sensitive を付けると `vercel pull` / `vercel build` に復号されずリテラル `[SENSITIVE]` が渡り、ビルドが落ちるか黙って壊れた本番が出来上がる（2026-08-27 に `NEXT_PUBLIC_API_MODE` で実際に発生し、本番が mock モードのまま約 20 時間固着した）。`dopamin-web` プロジェクトは「既定で Sensitive」ポリシーが有効なので、追加は必ず `vercel env add <NAME> production --no-sensitive` を使う。`deploy.yml` の `web` ジョブは `vercel pull` の直後にこれを検証して落とす（§16.2）。`API_ORIGIN` はサーバー専用だが `next.config.ts` の rewrites がビルド時に読むため、同じ理由で Sensitive を付けてはいけない。
@@ -1267,7 +1266,7 @@ FR-05 は埋め込みを使わない（§14）。他に埋め込みを必要と�
 
 `VERCEL_TOKEN` `VERCEL_ORG_ID` `VERCEL_PROJECT_ID_WEB` `VERCEL_PROJECT_ID_API`
 
-`DIRECT_DATABASE_URL` は v0.1.13 で `deploy.yml` から `migrate` ジョブを外したため、**Secret としては参照するワークフローが無い**（本番 DB への適用はローカルから手で当てる。§16.2）。登録済みの Secret は消さなくてよい。ただし `ci.yml` の `e2e` ジョブは、使い捨ての postgres service コンテナ向けに**リテラル値の `DIRECT_DATABASE_URL` を job-level env で渡して `pnpm --filter @dopamin/db migrate` を実行する**（Secret は使わず、本番 DB には触れない）。自動適用に戻すときは Supavisor session mode（5432）の URL を `production` environment の Secrets に置く（`VERCEL_*` はリポジトリ Secrets。全ジョブが `environment: production` なのでどちらでも解決される）。
+`DIRECT_DATABASE_URL` は v0.1.13 で `deploy.yml` から `migrate` ジョブを外したため、**Secret としては参照するワークフローが無い**（本番 DB への適用はローカルから手で当てる。§16.2）。**登録済みの Secret は 2026-08-27 に削除した**（参照が無く、残しておくと「CI が本番 DB を触る」という誤解を招くため）。ただし `ci.yml` の `e2e` ジョブは、使い捨ての postgres service コンテナ向けに**リテラル値の `DIRECT_DATABASE_URL` を job-level env で渡して `pnpm --filter @dopamin/db migrate` を実行する**（Secret は使わず、本番 DB には触れない）。自動適用に戻すときは Supavisor session mode（5432）の URL を `production` environment の Secrets に**登録し直す**（`VERCEL_*` はリポジトリ Secrets。全ジョブが `environment: production` なのでどちらでも解決される）。
 
 ローカルは `.env.example` を各 app に置き、`.env.local` は git 管理外。
 
@@ -1460,4 +1459,5 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | v0.1.19 | 2026-08-27 | §2.2: サブドメイン設計の反映先を「アプリ内の疑似 DNS ゾーン」にした判断を `docs/adr/0004-pseudo-dns-zone.md` として残し、本文から参照を張った（要件の内容は変えていない。外部 DNS プロバイダへ反映しない理由・NS 切替だけは実レジストリに効く理由・却下案を記録）。#16 |
 | v0.1.20 | 2026-08-27 | AI プロバイダ周りをチーム決定に合わせて追記（実装は #186 / #193）。§17: `AI_GATEWAY_API_KEY`（Vercel AI Gateway）を環境変数表に追加。プロバイダ固有キーが無いときだけ使われ、1 本で全プロバイダに出せる。§13.1: 実効モデルの解決を「固有キーがあれば直接 → 無ければ Gateway 経由 → どちらも無ければ `AI_UNAVAILABLE`」に更新し、`xai`（Grok）は Gateway 経由専用であること、Gateway のモデル ID 体系の読み替えは `apps/api` の境界で吸収することを明記。FR-17: 選択肢に `xai` を追加し、有効判定を「固有キーまたは Gateway キー」に。`xai` は Gateway キーが無い環境では選択肢に出ない。§9.1: `users.ai_provider` の値に `xai` を追加（列は `text` のままで制約を持たせない = migration 不要） |
 | v0.1.21 | 2026-08-27 | §11.2: 運営アナウンス（8/27 16:00〜のメンテナンス）による **`.org` / `.info` の管轄移管（kitaqsign → kitaqnic）** を反映。kitaqsign は `.com` `.net` の 2 種、kitaqnic は 20 種に（計 22 種は不変）。`REGISTRY_TLDS` / fixture / `specVersion`（`v2 (2026-08-27)`）を更新し、既存 `.org` / `.info` 行の `domains.registry` / `transfers.registry` を付け替えるデータマイグレーションを追加。§21.2 #2 に追記。#195（採番が衝突していたため v0.1.20 から採り直した）|
-| v0.1.22 | 2026-08-27 | FR-13 / FR-04 の AI 解析まわりの時間制限を 2 倍に緩和。上限が厳しく解析を通せない公開リポジトリが実在したため、`GITHUB_FETCH_TIMEOUT_MS` を 4 → 8 秒、`AI_CALL_TIMEOUT_MS` を 10 → 20 秒に変更した。追随して AC-13-1「15 秒以内」→「30 秒以内」（内訳は GitHub 解析 8 秒 + AI 20 秒）、AC-04-2「10 秒以内」→「20 秒以内」、§13.1「タイムアウト 10 秒」→「20 秒」。`AI_CALL_TIMEOUT_MS` は FR-04 と FR-13 で共有のため、AC-04-2 も同時に緩む。#199（Gemini の thinking を絞って 10 秒予算を守る案）とは方針が異なり、本件は上限そのものを引き上げる判断（#199 の受け入れ条件「配分は変えない」を上書きする） |
+| v0.1.22 | 2026-08-27 | §16.1 / §16.4 / §17: **参照されていない環境変数を削除**。`NEXT_PUBLIC_APP_ORIGIN`（「表示・OGP 用」として §17 に載っていたが、`apps/web` のコードから一度も読まれていなかった。Vercel の web プロジェクトと `.env.example` / `playwright.config.ts` / README からも削除）。GitHub Secrets の `DIRECT_DATABASE_URL` も、v0.1.13 で `migrate` ジョブを外して以降どのワークフローからも参照されていないため削除した（`ci.yml` の `e2e` は Secret ではなくリテラル値を使う。本番 DB への適用は §16.2 のとおりローカルから手で当てる）。Vercel の api プロジェクトからも同変数を削除（ランタイムでは未使用で、`packages/db/drizzle.config.ts` がローカルで読むだけ） |
+| v0.1.23 | 2026-08-27 | FR-13 / FR-04 の AI 解析まわりの時間制限を 2 倍に緩和。上限が厳しく解析を通せない公開リポジトリが実在したため、`GITHUB_FETCH_TIMEOUT_MS` を 4 → 8 秒、`AI_CALL_TIMEOUT_MS` を 10 → 20 秒に変更した。追随して AC-13-1「15 秒以内」→「30 秒以内」（内訳は GitHub 解析 8 秒 + AI 20 秒）、AC-04-2「10 秒以内」→「20 秒以内」、§13.1「タイムアウト 10 秒」→「20 秒」。`AI_CALL_TIMEOUT_MS` は FR-04 と FR-13 で共有のため、AC-04-2 も同時に緩む。#199（Gemini の thinking を絞って 10 秒予算を守る案）とは方針が異なり、本件は上限そのものを引き上げる判断（#199 の受け入れ条件「配分は変えない」を上書きする）（採番が衝突していたため v0.1.22 から採り直した。#200 の thinking budget 対応と併用する: #200 が既定の所要時間を約 5 秒に下げ、本件が上限を引き上げて遅いリポジトリぶんの余裕を作る）|
