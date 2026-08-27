@@ -30,6 +30,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import type { ApiClientError } from "@/lib/api/errors";
 import { usePreviewUniqueness } from "@/lib/api/hooks";
 import type { UniquenessPreview } from "@/lib/api/types";
+import { ScoreField } from "./score-field";
 
 /** 類似候補は上位 3 件まで（Figma と同じ）。 */
 const NEAREST_LIMIT = 3;
@@ -78,6 +79,8 @@ export function TrialScore() {
 
   return (
     <section className="flex flex-col justify-center gap-4 px-6 py-10 md:px-10 lg:py-14 xl:px-14">
+      <ScoreField placement="top" />
+
       <div className="flex flex-col gap-1">
         <label className="text-label text-ink" htmlFor={inputId}>
           ためしてみる
@@ -125,6 +128,7 @@ export function TrialScore() {
         result={preview.data ?? null}
       />
 
+      <ScoreField placement="bottom" />
     </section>
   );
 }
