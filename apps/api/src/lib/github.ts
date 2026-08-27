@@ -284,6 +284,11 @@ async function fetchRealRepoSummary(
   if (repo === null) {
     throw new GithubUnavailableError("not_found");
   }
+  // GITHUB_TOKEN に private の読み取り権があっても対象は公開リポのみ（§17 / AC-13-2）。
+  // 未認証・権限なしの 404 と同じ「取得できません」に倒し、存在も明かさない
+  if (repo.private) {
+    throw new GithubUnavailableError("not_found");
+  }
 
   const [readme, rootContents, languages] = await Promise.all([
     getJson(`${base}/readme`, readmeResponseSchema, signal, { optional: true }),

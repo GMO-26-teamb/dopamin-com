@@ -239,6 +239,29 @@ describe("fetchRepoSummary（GITHUB_MODE=real）", () => {
     }
   });
 
+  it("private: true のリポは 200 で読めても not_found に倒す（§17: 対象は公開リポのみ）", async () => {
+    // GITHUB_TOKEN に private の読み取り権があると API は 200 を返すが、
+    // 要件は公開リポのみ（AC-13-2）。存在も明かさず 404 相当に落とす
+    useRealMode("ghp_private_scope");
+    stubFetch({
+      "/repos/dopamin/secret": () =>
+        jsonResponse({
+          name: "secret",
+          private: true,
+          owner: { login: "dopamin" },
+        }),
+    });
+
+    const error = await fetchRepoSummary(
+      "https://github.com/dopamin/secret",
+    ).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(GithubUnavailableError);
+    expect((error as GithubUnavailableError).reason).toBe("not_found");
+  });
+
   it("429 とレート制限の 403 は rate_limited", async () => {
     useRealMode();
     stubFetch({
