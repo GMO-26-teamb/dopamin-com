@@ -18,7 +18,7 @@ import {
 } from "@dopamin/shared";
 import { ApiClientError, type ErrorOrigin } from "../errors";
 import { createMockPaymentService } from "../payments/mock-gateway";
-import type { Services } from "../services";
+import type { DomainUpdateInput, Services } from "../services";
 import type {
   Candidate,
   DnsDiff,
@@ -153,6 +153,26 @@ function requireDomain(store: MockStore, name: string): DomainDetail {
     fail("NOT_FOUND", `${name} は見つかりませんでした。`);
   }
   return domain;
+}
+
+/**
+ * D-02 のロックトグル（`clientStatuses`）を EPP ステータス一覧に反映する（FR-09 / #205）。
+ * レジストリと同じく解除 → 付与の順に適用し、重複は畳む。
+ */
+function applyClientStatuses(
+  statuses: readonly string[],
+  change: DomainUpdateInput["clientStatuses"],
+): string[] {
+  if (change === undefined) {
+    return [...statuses];
+  }
+  const removed = new Set<string>(change.remove ?? []);
+  return [
+    ...new Set([
+      ...statuses.filter((status) => !removed.has(status)),
+      ...(change.add ?? []),
+    ]),
+  ];
 }
 
 function patchDomain(
@@ -614,10 +634,11 @@ export function createMockServices(
         const store = getMockStore();
         const current = requireDomain(store, name);
         const nameservers = input.nameservers ?? current.nameservers;
-        const statuses =
+        const nsStatuses =
           nameservers.length === 0
             ? [...new Set([...current.statuses, "inactive"])]
             : current.statuses.filter((s) => s !== "inactive");
+        const statuses = applyClientStatuses(nsStatuses, input.clientStatuses);
         // コンタクトを差し替えたら「移行済み」になる（S-39 の解消）
         const registrant =
           input.contacts === undefined

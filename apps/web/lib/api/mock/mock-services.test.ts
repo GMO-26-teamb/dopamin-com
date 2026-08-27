@@ -88,6 +88,32 @@ describe("createMockServices - domains", () => {
     const { failures } = await services("default").domains.sync();
     expect(failures).toEqual([]);
   });
+
+  it("update は移管ロックの付与・解除を反映する（D-02 のトグル・#205）", async () => {
+    const api = services("default");
+
+    const locked = await api.domains.update("takutaku.com", {
+      clientStatuses: { add: ["clientTransferProhibited"] },
+    });
+    expect(locked.statuses).toContain("clientTransferProhibited");
+
+    const unlocked = await api.domains.update("takutaku.com", {
+      clientStatuses: { remove: ["clientTransferProhibited"] },
+    });
+    expect(unlocked.statuses).not.toContain("clientTransferProhibited");
+  });
+
+  it("update は渡されなかった項目を変えない（NS・登録者・ロック）", async () => {
+    const api = services("default");
+    const before = await api.domains.get("takutaku.com");
+
+    const after = await api.domains.update("takutaku.com", {
+      clientStatuses: { add: ["clientTransferProhibited"] },
+    });
+
+    expect(after.nameservers).toEqual(before.nameservers);
+    expect(after.registrant).toEqual(before.registrant);
+  });
 });
 
 describe("createMockServices - subdomains", () => {

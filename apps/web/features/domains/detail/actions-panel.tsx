@@ -134,7 +134,7 @@ export function ActionsPanel({
         <span className="inline-flex items-center gap-1 text-body-sm text-muted">
           移管ロック
           <HelpTip
-            content="ON のあいだは他社への移管を受け付けません。レジストリ側の状態が優先されるため、できない操作はボタンに理由が出ます。"
+            content="ON のあいだは他社への移管を受け付けません。切り替えは「情報修正」から行います。レジストリ側の状態が優先されるため、できない操作はボタンに理由が出ます。"
             label="移管ロックとは"
           />
         </span>

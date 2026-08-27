@@ -12,14 +12,29 @@ export interface ContactCardProps {
   domain: DomainDetail;
 }
 
+/**
+ * レジストリの `info` は登録者をコンタクト ID でしか返さないので、アプリが
+ * そのコンタクトを持っていないと中身が分からない（API の `registrantProfile` が null）。
+ * ID を氏名として出しても読めないため、空のまま「未取得」と書く。
+ */
+function contactValue(value: string): string {
+  return value.length === 0 ? "未取得" : value;
+}
+
 export function ContactCard({ domain }: ContactCardProps) {
   return (
     <Card
       emphasis={domain.registrant.migrated ? "default" : "warn"}
       kicker="コンタクト"
     >
-      <KeyValueRow label="登録者" value={domain.registrant.name} />
-      <KeyValueRow label="メール" value={domain.registrant.email} />
+      <KeyValueRow
+        label="登録者"
+        value={contactValue(domain.registrant.name)}
+      />
+      <KeyValueRow
+        label="メール"
+        value={contactValue(domain.registrant.email)}
+      />
       {domain.registrant.migrated ? null : (
         <div className="flex w-full items-center pt-0.5">
           <Badge tone="warn">未移行</Badge>

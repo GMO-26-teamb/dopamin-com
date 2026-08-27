@@ -108,6 +108,41 @@ function apiSummary(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/**
+ * `GET /domains/:name` などの詳細エンベロープ（packages/shared の
+ * `domainDetailResponseSchema` と同じ形）。`domain.registrant` は
+ * レジストリのコンタクト ID で、画面に出す氏名・メールは `registrantProfile` から取る。
+ */
+function apiDetail(overrides: Record<string, unknown> = {}) {
+  return {
+    domain: {
+      name: "example.com",
+      registry: "kitaqsign",
+      statuses: ["ok"],
+      registrant: "C-1",
+      contacts: {},
+      nameservers: ["ns1.example.com", "ns2.example.com"],
+      registeredAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: null,
+      expiresAt: "2027-08-01T00:00:00.000Z",
+      lastTransferAt: null,
+      sponsoringRegistrarId: null,
+      rgpStatuses: [],
+    },
+    summary: apiSummary(),
+    registrantProfile: {
+      name: "Taro Test",
+      email: "taro.test@example.com",
+      street: "N/A",
+      city: "N/A",
+      countryCode: "JP",
+    },
+    stale: false,
+    syncedAt: "2026-08-26T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   calls.length = 0;
@@ -304,29 +339,17 @@ describe("domains.sync（POST /domains/sync）", () => {
 
 describe("domains.get（GET /domains/:name）", () => {
   it("summary から所有権・同期時刻・stale を取る（一覧と表示がずれない）", async () => {
-    stubFetch(200, {
-      domain: {
-        name: "example.com",
-        registry: "kitaqsign",
-        statuses: ["ok"],
-        registrant: "C-1",
-        contacts: {},
-        nameservers: ["ns1.example.com", "ns2.example.com"],
-        registeredAt: "2026-08-01T00:00:00.000Z",
-        updatedAt: null,
-        expiresAt: "2027-08-01T00:00:00.000Z",
-        lastTransferAt: null,
-        // 両レジストリの info に clID が無いため当面は null（§11.1 / ADR-0002 決定 4）
-        sponsoringRegistrarId: null,
-        rgpStatuses: [],
-      },
-      summary: apiSummary({
+    stubFetch(
+      200,
+      apiDetail({
+        summary: apiSummary({
+          stale: true,
+          syncedAt: "2026-08-25T12:00:00.000Z",
+        }),
         stale: true,
         syncedAt: "2026-08-25T12:00:00.000Z",
       }),
-      stale: true,
-      syncedAt: "2026-08-25T12:00:00.000Z",
-    });
+    );
 
     const detail = await services().domains.get("example.com");
 
@@ -340,6 +363,80 @@ describe("domains.get（GET /domains/:name）", () => {
     });
     // 移管可能日は登録日 + 60 日（参考表示）
     expect(detail.transferableFrom).toBe("2026-09-30T00:00:00.000Z");
+  });
+});
+
+describe("domains.update（PATCH /domains/:name。FR-09）", () => {
+  it("コンタクトを body に載せる（住所は D-02 に入力欄が無いので既定値で埋める・#172）", async () => {
+    stubFetch(200, apiDetail());
+
+    await services().domains.update("example.com", {
+      nameservers: ["ns1.example.com", "ns2.example.com"],
+      contacts: {
+        registrant: { name: "Hanako Test", email: "hanako.test@example.net" },
+      },
+    });
+
+    expect(calls[0]?.method).toBe("PATCH");
+    expect(JSON.parse(calls[0]?.body ?? "null")).toEqual({
+      nameservers: ["ns1.example.com", "ns2.example.com"],
+      contacts: {
+        registrant: {
+          name: "Hanako Test",
+          email: "hanako.test@example.net",
+          street: "N/A",
+          city: "N/A",
+          countryCode: "JP",
+        },
+      },
+    });
+  });
+
+  it("ロックの付与を clientStatuses.add で送る（#205）", async () => {
+    stubFetch(200, apiDetail());
+
+    await services().domains.update("example.com", {
+      nameservers: ["ns1.example.com", "ns2.example.com"],
+      clientStatuses: { add: ["clientTransferProhibited"] },
+    });
+
+    expect(JSON.parse(calls[0]?.body ?? "null")).toEqual({
+      nameservers: ["ns1.example.com", "ns2.example.com"],
+      clientStatuses: { add: ["clientTransferProhibited"] },
+    });
+  });
+
+  it("渡されなかった項目は body に載せない（解除だけの要求を unlockOnly 経路に乗せる・#205）", async () => {
+    stubFetch(200, apiDetail());
+
+    await services().domains.update("example.com", {
+      clientStatuses: { remove: ["clientTransferProhibited"] },
+    });
+
+    expect(JSON.parse(calls[0]?.body ?? "null")).toEqual({
+      clientStatuses: { remove: ["clientTransferProhibited"] },
+    });
+  });
+
+  it("登録者は registrantProfile から取る（domain.registrant はコンタクト ID・#172）", async () => {
+    stubFetch(200, apiDetail());
+
+    const detail = await services().domains.update("example.com", {
+      nameservers: ["ns1.example.com", "ns2.example.com"],
+    });
+
+    expect(detail.registrant).toMatchObject({
+      name: "Taro Test",
+      email: "taro.test@example.com",
+    });
+  });
+
+  it("registrantProfile が null なら氏名・メールは空にする（中身を知らない・S-39）", async () => {
+    stubFetch(200, apiDetail({ registrantProfile: null }));
+
+    const detail = await services().domains.get("example.com");
+
+    expect(detail.registrant).toMatchObject({ name: "", email: "" });
   });
 });
 

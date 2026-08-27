@@ -13,6 +13,7 @@ import type {
   DisplayStatus,
   ErrorCode,
   OrderQuote,
+  RegistrantProfile,
 } from "@dopamin/shared";
 
 export type Ownership = "owned" | "transferred_out";
@@ -89,10 +90,13 @@ export interface SyncResult {
  * 登録者（Registrant）のみを扱う。技術（Technical）は FR-09 上は任意だが
  * {@link DomainDetail} に保持先が無いため、この ViewModel では扱わない。
  * 値はレジストリが許可するダミー PII のみ（`RegistrantProfile`）。
+ * `street` / `city` / `countryCode` は D-02 に入力欄が無いので HTTP 実装が
+ * `DEFAULT_REGISTRANT_PROFILE` から補う（#172）。
  * S-39（移管 IN 後のコンタクト未移行）の再実行はこの入力で行う。
  */
 export interface DomainContactsInput {
-  registrant: { name: string; email: string };
+  /** 氏名は許可された 8 種のダミー値のみ（`ALLOWED_CONTACT_NAMES`）。 */
+  registrant: { name: RegistrantProfile["name"]; email: string };
 }
 
 export interface UniquenessScore {

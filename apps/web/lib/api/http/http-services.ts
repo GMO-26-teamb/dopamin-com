@@ -2,8 +2,6 @@
  * HTTP 実装（fe-ui 設計 §4.6）。`NEXT_PUBLIC_API_MODE=http` のときに使う。
  *
  * 各メソッドの上に docs/requirements.md §10.1 のルートを書く。
- * まだ API が無い入力（`PATCH /domains/:name` の `contacts`）だけが
- * `NOT_IMPLEMENTED` を投げ、画面側は `toErrorCopy` の文言でその旨を出す。
  */
 
 import {
@@ -11,11 +9,13 @@ import {
   type DnsRecord as ApiDnsRecord,
   aiSettingsResponseSchema,
   aiTokenTotal,
+  DEFAULT_REGISTRANT_PROFILE,
   type DesiredDnsRecord,
   type DnsZoneResponse,
   type DomainCheckRequest,
   type DomainCheckResult,
   type DomainSyncResponse,
+  type DomainUpdateRequest,
   deriveDisplayStatus,
   meResponseSchema,
   type OperationLogItem,
@@ -42,12 +42,11 @@ import { transferEligibleAt } from "../derive";
 import {
   ApiClientError,
   type ClientErrorCode,
-  notImplemented,
   toApiClientError,
   withErrorOrigin,
 } from "../errors";
 import { createMockPaymentService } from "../payments/mock-gateway";
-import type { Services } from "../services";
+import type { DomainUpdateInput, Services } from "../services";
 import type {
   AiLog,
   ApplyStatus,
@@ -107,22 +106,66 @@ function toDomainSummaryVm(summary: ApiDomainSummary): DomainSummary {
  * 詳細応答（`{ domain, summary }`）を画面用の `DomainDetail` に写像する。
  *
  * 所有権・同期時刻・stale・移管バッジは `summary`（一覧と同じ要約）から取るので、
- * 一覧と詳細で表示がずれない。まだ API が返さない値は暫定のままにする:
- * - `registrant`: `info` はコンタクト ID しか返さない（コンタクト取得 API 待ち）
+ * 一覧と詳細で表示がずれない。登録者は `registrantProfile` から取る
+ * （`info` はコンタクト ID しか返さないため API が中身を添える。#172）。
+ * まだ API が返さない値は暫定のままにする:
  * - `gracePeriods`: `info` は猶予期限を返さない（§11.4 の目安計算は未実装）
  * - `subdomainPlan`: 設計 API（FR-13）未実装
  */
-function toDomainDetail({ domain, summary }: DomainEnvelope): DomainDetail {
+function toDomainDetail({
+  domain,
+  summary,
+  registrantProfile,
+}: DomainEnvelope): DomainDetail {
   return {
     ...toDomainSummaryVm(summary),
     nameservers: domain.nameservers,
-    registrant: { name: domain.registrant, email: "", migrated: true },
+    // `domain.registrant` はレジストリのコンタクト ID なので画面には出さない。
+    // 中身を知らない（= アプリのコンタクトを参照していない）ときは空にする。
+    registrant: {
+      name: registrantProfile?.name ?? "",
+      email: registrantProfile?.email ?? "",
+      // S-39 の判定は要確認 #14（非スポンサーの `contact info` 可否）が決まるまで保留
+      migrated: true,
+    },
     gracePeriods: [],
     transferableFrom: transferEligibleAt(
       domain.registeredAt,
       domain.lastTransferAt,
     ),
     subdomainPlan: null,
+  };
+}
+
+/**
+ * `DomainService.update` の入力（ViewModel）→ `PATCH /domains/:name` の body（FR-09）。
+ *
+ * 渡された項目だけを載せる。未変更の項目まで送ると、ロック解除だけの要求が
+ * API の `unlockOnly` 経路（`clientUpdateProhibited` 中でも解除を通す）から外れる。
+ *
+ * `street` / `city` / `countryCode` は D-02 に入力欄が無いので
+ * `DEFAULT_REGISTRANT_PROFILE`（レジストリが許可するダミー値）で埋める。
+ * この 3 つを画面から編集させる予定は無いため、往復で保つ必要も無い。
+ */
+function toDomainUpdateBody(input: DomainUpdateInput): DomainUpdateRequest {
+  return {
+    ...(input.nameservers === undefined
+      ? {}
+      : { nameservers: input.nameservers }),
+    ...(input.contacts === undefined
+      ? {}
+      : {
+          contacts: {
+            registrant: {
+              ...DEFAULT_REGISTRANT_PROFILE,
+              name: input.contacts.registrant.name,
+              email: input.contacts.registrant.email,
+            },
+          },
+        }),
+    ...(input.clientStatuses === undefined
+      ? {}
+      : { clientStatuses: input.clientStatuses }),
   };
 }
 
@@ -597,16 +640,11 @@ export function createHttpServices(): Services {
 
       /** PATCH /domains/:name（FR-09） */
       async update(name, input) {
-        if (input.contacts !== undefined) {
-          // 要件 §10.1 の PATCH は `contacts` を受け取る想定だが、
-          // `domainUpdateRequestSchema`（packages/shared）にはまだ無い（要確認 #14）。
-          throw notImplemented("PATCH /domains/:name（contacts）");
-        }
         return toDomainDetail(
           await unwrap(
             apiClient.api.v1.domains[":name"].$patch({
               param: { name },
-              json: { nameservers: input.nameservers },
+              json: toDomainUpdateBody(input),
             }),
             domainEnvelopeSchema,
           ),

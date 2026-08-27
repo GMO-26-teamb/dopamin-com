@@ -10,6 +10,7 @@ import {
   isOperationAllowed,
   isRestorable,
   REGISTRY_CONTACT_KEY,
+  type RegistrantProfile,
   type UpdateInput,
 } from "@dopamin/shared";
 import { Hono } from "hono";
@@ -22,7 +23,10 @@ import { withReadRetry } from "../lib/retry";
 import { jsonValidator } from "../lib/validator";
 import { requireSession } from "../middleware/session";
 import { checkDomains } from "../services/check.service";
-import { ensureRegistryContact } from "../services/contact.service";
+import {
+  ensureRegistryContact,
+  getContactStore,
+} from "../services/contact.service";
 import {
   listDomainSummaries,
   pendingTransfersByDomain,
@@ -58,10 +62,50 @@ function assertRenewWithinLimit(
   }
 }
 
+/** 要求した NS 全量が info に出ているか。 */
+function areNameserversReflected(
+  after: DomainInfo,
+  desired: readonly string[],
+): boolean {
+  const wanted = new Set(desired);
+  const actual = new Set(after.nameservers.map((ns) => ns.toLowerCase()));
+  return (
+    wanted.size === actual.size && [...wanted].every((ns) => actual.has(ns))
+  );
+}
+
 /**
- * AC-18-2 の照合条件: 要求した NS 全量が info に反映されているか。
- * clientStatuses はレジストリが成功応答のまま反映しない既知制約があるため照合対象にせず、
- * status 変更だけの要求は結果を確認できないものとして扱う。
+ * 要求したロックの付与・解除が info に出ているか。
+ * 付け外しを 1 件も要求していなければ「照合材料が無い」= false。
+ */
+function areClientStatusesReflected(
+  after: DomainInfo,
+  change: { add?: string[]; remove?: string[] } | undefined,
+): boolean {
+  const add = change?.add ?? [];
+  const remove = change?.remove ?? [];
+  if (add.length === 0 && remove.length === 0) {
+    return false;
+  }
+  const statuses = new Set(after.statuses);
+  return (
+    add.every((status) => statuses.has(status)) &&
+    remove.every((status) => !statuses.has(status))
+  );
+}
+
+/**
+ * AC-18-2 の照合条件: 要求した変更が info に反映されているか。
+ *
+ * EPP の `update` は 1 コマンドなので、**`info` から確かめられる項目が 1 つでも
+ * 反映されていれば全体が成立している**。逆に確かめられる項目が 1 つも無ければ
+ * 偽の成功にせず 504 のままにする。
+ *
+ * - NS: 全量が一致するか
+ * - ロック: 2026-08-27 の運営修正で `info` に出るようになった（spec-notes §3 #10）ので
+ *   照合できる。ロックだけの要求（D-02 のトグル単体・#205）もこれで確定する。
+ *   kitaqsign は未実測なので、NS が確認できていれば status は問わない
+ * - コンタクト: `info` は ID しか返さず、変更前後で同じ ID を使い回すため照合材料にならない
  */
 function isUpdateReflected(
   after: DomainInfo,
@@ -70,20 +114,13 @@ function isUpdateReflected(
     clientStatuses?: { add?: string[]; remove?: string[] };
   },
 ): boolean {
-  if (body.nameservers === undefined) {
-    return false;
+  if (
+    body.nameservers !== undefined &&
+    areNameserversReflected(after, body.nameservers)
+  ) {
+    return true;
   }
-  const desired = new Set(body.nameservers);
-  const actual = new Set(after.nameservers.map((ns) => ns.toLowerCase()));
-  if (desired.size !== actual.size) {
-    return false;
-  }
-  for (const ns of desired) {
-    if (!actual.has(ns)) {
-      return false;
-    }
-  }
-  return true;
+  return areClientStatusesReflected(after, body.clientStatuses);
 }
 
 /**
@@ -101,25 +138,48 @@ function isTransportFailure(err: RegistryError): boolean {
 
 /**
  * 詳細レスポンス（FR-07。契約は `domainDetailResponseSchema`）。
- * `domain` は正規化済み `info`、`summary` は一覧と同じ要約。
+ * `domain` は正規化済み `info`、`summary` は一覧と同じ要約、
+ * `registrantProfile` は登録者コンタクトの中身（{@link registrantProfileFor}）。
  * `stale = true` はレジストリに繋がらず DB キャッシュを返したことを示し（AC-07-2）、
  * `error` にその理由が入る。
  */
-function detailResponse(
+async function detailResponse(
   record: DomainRecord,
   stale: boolean,
   options: {
     transfer?: TransferRecord;
     error?: DomainDetailResponse["error"];
   } = {},
-): DomainDetailResponse {
+): Promise<DomainDetailResponse> {
   return {
     domain: record.info,
     summary: toDomainSummary(record, stale, options.transfer),
+    registrantProfile: await registrantProfileFor(record),
     stale,
     syncedAt: record.syncedAt.toISOString(),
     ...(options.error ? { error: options.error } : {}),
   };
+}
+
+/**
+ * `domain.registrant`（レジストリのコンタクト ID）が指す登録者プロファイル（FR-07 / FR-09）。
+ *
+ * `info` は ID しか返さないので、画面が氏名・メールを出すにはアプリが `contacts` に
+ * 持っている中身を添える必要がある。参照先がアプリのコンタクトでなければ中身を知らないため
+ * `null` にする（移管 IN 直後は相手レジストラの ID を参照したまま。推測で自分のものを出さない）。
+ */
+async function registrantProfileFor(
+  record: DomainRecord,
+): Promise<RegistrantProfile | null> {
+  const contact = await getContactStore().find(
+    record.userId,
+    record.registry,
+    "registrant",
+  );
+  return contact !== null &&
+    contact.registryContactId === record.info.registrant
+    ? contact.profile
+    : null;
 }
 
 /** 詳細で返す移管バッジ用に、そのドメインの進行中の移管を引く（FR-12 / AC-07-3）。 */
@@ -196,7 +256,7 @@ export const domains = new Hono<AuthedEnv>()
     );
     // AC-06-1: 成功時点で DB に write-through し、一覧（FR-02）に即時反映する
     const record = await upsertDomainFromInfo(c.get("user").id, domain);
-    return c.json(detailResponse(record, false), 201);
+    return c.json(await detailResponse(record, false), 201);
   })
 
   /** FR-07: ドメイン詳細。info で最新化し、失敗時はキャッシュを stale で返す（AC-07-2）。 */
@@ -214,13 +274,13 @@ export const domains = new Hono<AuthedEnv>()
     // さらに `upsertDomainFromInfo` は常に `ownership = 'owned'` で書くため、
     // 部分一意インデックス（保有中の行のみ）をすり抜けて保有行が復活してしまう。
     if (cached.ownership !== "owned") {
-      return c.json(detailResponse(cached, false, { transfer }));
+      return c.json(await detailResponse(cached, false, { transfer }));
     }
 
     try {
       const info = await withReadRetry(() => adapter.info(name));
       const record = await upsertDomainFromInfo(userId, info);
-      return c.json(detailResponse(record, false, { transfer }));
+      return c.json(await detailResponse(record, false, { transfer }));
     } catch (err) {
       if (!(err instanceof RegistryError) || !isTransportFailure(err)) {
         throw err;
@@ -237,7 +297,7 @@ export const domains = new Hono<AuthedEnv>()
         }),
       );
       return c.json(
-        detailResponse(cached, true, {
+        await detailResponse(cached, true, {
           transfer,
           error: { code: err.code, message: registryErrorMessage(err) },
         }),
@@ -293,7 +353,7 @@ export const domains = new Hono<AuthedEnv>()
       },
     );
     const record = await upsertDomainFromInfo(userId, domain);
-    return c.json(detailResponse(record, false));
+    return c.json(await detailResponse(record, false));
   })
 
   /** FR-09: 情報修正（NS・クライアントステータス）。NS は全量指定を差分（add/rem）に変換する。 */
@@ -377,7 +437,7 @@ export const domains = new Hono<AuthedEnv>()
       input.contacts !== undefined;
     if (!hasChanges) {
       const unchanged = await upsertDomainFromInfo(userId, current);
-      return c.json(detailResponse(unchanged, false));
+      return c.json(await detailResponse(unchanged, false));
     }
 
     // AC-18-2: タイムアウト時は info で要求した変更がすべて反映されたかを照合する
@@ -389,7 +449,7 @@ export const domains = new Hono<AuthedEnv>()
       },
     );
     const record = await upsertDomainFromInfo(userId, domain);
-    return c.json(detailResponse(record, false));
+    return c.json(await detailResponse(record, false));
   })
 
   /** FR-10: 廃止。削除ロック中は実行しない（AC-10-2）。 */
@@ -446,13 +506,13 @@ export const domains = new Hono<AuthedEnv>()
       if (err instanceof RegistryError && isTransportFailure(err)) {
         // 繋がらないだけ。廃止は成立しているのに行を消すと RGP 中のドメインが
         // 一覧から消えて復旧導線（FR-11）を失うため、キャッシュを stale で返す
-        return c.json(detailResponse(owned, true));
+        return c.json(await detailResponse(owned, true));
       }
       throw err;
     }
     // AC-10-1: RGP バッジを一覧に出すため削除後の状態も write-through する
     const record = await upsertDomainFromInfo(userId, domain);
-    return c.json(detailResponse(record, false));
+    return c.json(await detailResponse(record, false));
   })
 
   /** FR-11: 復旧（RGP restore）。redemptionPeriod 中のみ実行できる（AC-11-2）。 */
@@ -483,7 +543,7 @@ export const domains = new Hono<AuthedEnv>()
       },
     );
     const record = await upsertDomainFromInfo(userId, domain);
-    return c.json(detailResponse(record, false));
+    return c.json(await detailResponse(record, false));
   })
 
   /**

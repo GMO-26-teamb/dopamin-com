@@ -112,8 +112,12 @@ result code ごとの**ユーザー向け理由文**は `packages/shared/src/reg
 7. タイムアウト: 参照系 5 秒 / 更新系 15 秒（`AbortSignal.timeout`）。更新系の自動再試行はしない（NFR-02）。
 8. **`domain:update` の NS 追加はホストオブジェクトの事前作成が必須**（実測: 未作成は 2303）。
    アダプタの `ensureHosts` が `host:info` → 無ければ `host:create` で自動作成してから update を送る。
-9. **`add.statuses`（ロックトグル）は実測でレジストリに反映されない**（成功応答のまま無視。
-   spec-notes【要確認】10）。API はコマンドを送るが、運営確認まで UI 側のロックトグル実装は保留する。
+9. **`add.statuses` / `rem.statuses`（ロックトグル）は 2026-08-27 の運営修正で反映されるようになった**
+   （spec-notes §3 #10 で解決。kitaqnic 実測。kitaqsign はメンテナンス中で未実測）。
+   `add.statuses: ["clientTransferProhibited"]` が `domain:info` に出て、ロック中の
+   `transfer/request` は 2304 で拒否される。保留していた UI 側のトグルも D-02 に実装済み（#205）。
+   解除だけの要求は `clientUpdateProhibited` 中でも通す（`isOperationAllowed` の `unlockOnly`）ため、
+   web は**変更した項目だけ**を `PATCH` に載せる。
 10. **移管・Poll の正規化型は ADR-0002 に従う**。`TransferResult.status` は
     `pending / approved / rejected / cancelled / none` の 5 値（`none` は「移管中でない」）で、
     レジストリの生値は `registryStatus` に残す。レジストラ ID は `requestingRegistrarId` /
@@ -177,9 +181,14 @@ result code ごとの**ユーザー向け理由文**は `packages/shared/src/reg
 15. **更新系タイムアウト時は再送せず参照系で結果を照合する**（AC-06-2 / AC-18-2）。
     `apps/api/src/lib/reconcile.ts` の `reconcileOnTimeout` が `REGISTRY_TIMEOUT` を捕捉し、
     `info`（transfer は `transferQuery`）で反映を確認できた場合のみ成功として返す
-    （create=存在確認 / renew=期限延長 / update=要求変更の全反映 / delete=RGP 入りまたは消滅 /
+    （create=存在確認 / renew=期限延長 / update=下記 / delete=RGP 入りまたは消滅 /
     restore=RGP 離脱 / transfer=pendingTransfer）。確認できない場合は元の 504 を返す。
     `rotate-auth-info` は `info` で照合できない（authInfo が resData に含まれない）ため対象外。
+    `update` は 1 コマンドで届くので、**`info` から確かめられる項目が 1 つでも反映されていれば
+    成立**とする（NS 全量の一致、またはロックの付け外し。ロックは 8/27 の運営修正で `info` に
+    出るようになったため #205 で照合対象に加えた。kitaqsign は未実測なので NS が確認できていれば
+    status は問わない）。コンタクトは `info` が ID しか返さず変更前後で同じ ID を使い回すため
+    照合材料にならず、コンタクトだけの要求はタイムアウトすると 504 のままになる。
 16. **参照系だけを自動再試行する**（#60。§11.6 (e) / FR-18）。`apps/api/src/lib/retry.ts` の
     `withReadRetry` が `REGISTRY_TIMEOUT` / `REGISTRY_UNAVAILABLE` のときだけ
     最大 2 回、300ms → 600ms の指数バックオフで再試行する。適用先は
@@ -197,6 +206,11 @@ result code ごとの**ユーザー向け理由文**は `packages/shared/src/reg
     （`packages/shared`）が導出の SSOT。API も計算済みの値を返すと 2 系統になり、
     片方だけ直る事故になる（`domainSummarySchema` が表示ステータスを持たないのと同じ理由）。
     `pendingTransfer` は導出できないので `summary.transfer`（`{ direction, actByAt }`）として返す。
+    導出できない値はもう 1 つあり、**登録者コンタクトの中身**（`registrantProfile`）は
+    `info` が ID しか返さないため API が `contacts` から引いて添える（#172）。
+    `domain.registrant`（ID）がアプリのコンタクトと一致するときだけ値を入れ、
+    移管 IN 直後のように相手レジストラの ID を参照したままなら `null`（中身を知らない。
+    非スポンサーの `contact info` 可否は【要確認 §21.2 #14】）。
 18. **照合できない操作はタイムアウトで確定させない**（#57）。移管の承認 / 拒否 / 取消のうち、
     `transferQuery` + `info` から成立を証明できるのは**承認だけ**（trDate が申請の窓の中で動く）。
     「`pendingTransfer` が消えた」は承認 / 拒否 / 取消・相手の取下げ・サーバ自動承認のどれでも起きるので、

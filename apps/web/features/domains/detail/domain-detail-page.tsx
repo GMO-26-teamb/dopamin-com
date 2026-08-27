@@ -19,7 +19,7 @@ import {
   useTransfers,
   useUpdateDomain,
 } from "@/lib/api/hooks";
-import type { DomainContactsInput } from "@/lib/api/types";
+import type { DomainUpdateInput } from "@/lib/api/services";
 import { useCountdown } from "@/lib/use-countdown";
 import { AuthCodeDialog } from "../dialogs/auth-code-dialog";
 import { DeleteDialog } from "../dialogs/delete-dialog";
@@ -311,10 +311,7 @@ export function DomainDetailPage({ name }: DomainDetailPageProps) {
             closeDialog();
           }
         }}
-        onSubmit={(input: {
-          nameservers: string[];
-          contacts?: DomainContactsInput;
-        }) =>
+        onSubmit={(input: DomainUpdateInput) =>
           update.mutate(
             input,
             settle("ns-edit", `${domain.name} の情報を更新しました`),
