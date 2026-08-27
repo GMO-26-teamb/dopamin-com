@@ -627,7 +627,10 @@ describe("間接プロンプトインジェクション（#169）", () => {
     expect(status).toBe(503);
   });
 
-  it("purpose に長い文章を詰めた出力も弾かれる（100 字の上限）", async () => {
+  it("purpose に長い文章を詰めても、上限を超えた分は出て行かない（100 字）", async () => {
+    // #167 で purpose / policy は「落とす」ではなく「切り詰める」になった
+    // （表示上の制約であって、DNS に届く値ではないため）。守りたい不変条件は
+    // 「注入された文章が丸ごと外に出ない」ことなので、長さで固定する
     const { user, cookie } = await createTestSession(db);
     await seedDomain(user.id);
     setAiModelFactoryForTesting(() =>
@@ -640,13 +643,18 @@ describe("間接プロンプトインジェクション（#169）", () => {
       }),
     );
 
-    const { status } = await post(
+    const { status, json } = await post(
       "demo.com",
       { description: INJECTION },
       cookie,
     );
+    const body = json as SubdomainPlanProposalResponse;
 
-    expect(status).toBe(503);
+    expect(status).toBe(200);
+    for (const item of body.items) {
+      expect(item.purpose.length).toBeLessThanOrEqual(100);
+    }
+    expect(body.policy.length).toBeLessThanOrEqual(120);
   });
 
   it("再検証を通った出力も正規化された値域に収まる", async () => {
