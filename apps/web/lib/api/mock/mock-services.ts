@@ -679,7 +679,7 @@ export function createMockServices(
       async generate(input) {
         await wait();
         if (scenario === "ai-timeout") {
-          failAi("REGISTRY_TIMEOUT", "AI が 10 秒以内に応答しませんでした。");
+          failAi("REGISTRY_TIMEOUT", "AI が 20 秒以内に応答しませんでした。");
         }
         if (isError) {
           failAi("AI_UNAVAILABLE", "AI が利用できません。");
@@ -717,7 +717,7 @@ export function createMockServices(
       async propose(domain, input) {
         await wait();
         if (scenario === "ai-timeout") {
-          failAi("REGISTRY_TIMEOUT", "AI が 15 秒以内に応答しませんでした。");
+          failAi("REGISTRY_TIMEOUT", "AI が 30 秒以内に応答しませんでした。");
         }
         if (isError) {
           // S-42: GitHub のリポジトリが見つからない / 非公開（AC-13-2）

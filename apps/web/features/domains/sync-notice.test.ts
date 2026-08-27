@@ -1,3 +1,4 @@
+import { userMessageForRegistryCode } from "@dopamin/shared";
 import { describe, expect, it } from "vitest";
 import { ApiClientError } from "@/lib/api/errors";
 import type { DomainSummary, SyncFailure } from "@/lib/api/types";
@@ -5,7 +6,8 @@ import { syncNotice } from "./sync-notice";
 
 /**
  * S-13 の Banner 文言（FR-02 / AC-18-1）。
- * 落ちた相手を名指しできるかどうかで見出しが変わる点をここで固定する。
+ * 落ちた相手を名指しできるかどうかで見出しが変わる点と、
+ * 失敗コードごとに見出し・案内が変わる点（#184）をここで固定する。
  */
 
 function domain(overrides: Partial<DomainSummary> = {}): DomainSummary {
@@ -137,5 +139,174 @@ describe("syncNotice", () => {
     const result = notice({ failures: [failure()], domains: [] });
 
     expect(result?.body).toContain("1 件が最新化できませんでした。");
+  });
+
+  // ---- 失敗コード別の出し分け（#184） ----
+
+  it("NOT_FOUND だけなら「応答しません」と言わない（レジストリ障害に見せない）", () => {
+    const result = notice({
+      failures: [
+        failure({
+          name: "gone.com",
+          code: "NOT_FOUND",
+          message: "対象のドメインが見つかりません。",
+          registry: "kitaqsign",
+        }),
+      ],
+    });
+
+    expect(result?.title).toBe(
+      "Kitaqsign に登録が見つかりません — 一覧はキャッシュを表示しています",
+    );
+    expect(result?.title).not.toContain("応答しません");
+  });
+
+  it("NOT_FOUND は再試行の対象外なので「2 回再試行しました」を出さない", () => {
+    const result = notice({
+      failures: [
+        failure({
+          name: "gone.com",
+          code: "NOT_FOUND",
+          message: "対象のドメインが見つかりません。",
+          registry: "kitaqsign",
+        }),
+      ],
+    });
+
+    expect(result?.body).toBe(
+      "1 件が最新化できませんでした。レジストリ側に登録がありません。操作ログで詳細を確認してください。",
+    );
+    expect(result?.body).not.toContain("再試行");
+  });
+
+  it("REGISTRY_REJECTED は registryCode 由来の理由を本文に出す", () => {
+    // API は `registryErrorMessage` が `userMessageForRegistryCode` の理由を message に載せる
+    const reason = userMessageForRegistryCode("2304", "info");
+
+    const result = notice({
+      failures: [
+        failure({
+          name: "locked.com",
+          code: "REGISTRY_REJECTED",
+          message: reason ?? "",
+          registry: "kitaqsign",
+        }),
+      ],
+    });
+
+    expect(result?.title).toBe(
+      "Kitaqsign が最新化を拒否しました — 一覧はキャッシュを表示しています",
+    );
+    expect(result?.body).toBe(
+      "1 件が最新化できませんでした。現在のステータスではこの操作を実行できません。",
+    );
+  });
+
+  it("REGISTRY_REJECTED の理由が 1 つに定まらなければ操作ログへ誘導する", () => {
+    const result = notice({
+      failures: [
+        failure({
+          name: "a.com",
+          code: "REGISTRY_REJECTED",
+          message: "認証情報が正しくありません。",
+          registry: "kitaqsign",
+        }),
+        failure({
+          name: "b.com",
+          code: "REGISTRY_REJECTED",
+          message: "現在のステータスではこの操作を実行できません。",
+          registry: "kitaqsign",
+        }),
+      ],
+    });
+
+    expect(result?.body).toBe(
+      "2 件が最新化できませんでした。操作ログで理由を確認してください。",
+    );
+  });
+
+  it("REGISTRY_SPEC_MISMATCH は仕様変更の可能性と操作ログ導線を出す", () => {
+    const result = notice({
+      failures: [
+        failure({
+          name: "odd.com",
+          code: "REGISTRY_SPEC_MISMATCH",
+          message: "Kitaqsign の応答が想定と異なります。",
+          registry: "kitaqsign",
+        }),
+      ],
+    });
+
+    expect(result?.title).toBe(
+      "Kitaqsign の応答が想定と異なります — レジストリの仕様変更の可能性があります",
+    );
+    // 本文は lib/error-messages.ts の REGISTRY_SPEC_MISMATCH と同じ言い回しに揃える
+    expect(result?.body).toBe(
+      "1 件が最新化できませんでした。応答の形式が想定と異なりました。操作ログを確認してください。",
+    );
+  });
+
+  it("レジストリ由来でないコードはレジストリ障害と言わず、理由をそのまま出す", () => {
+    const result = notice({
+      failures: [
+        failure({
+          name: "a.example",
+          code: "VALIDATION_ERROR",
+          message: "未対応の TLD です。",
+          registry: null,
+        }),
+      ],
+    });
+
+    expect(result?.title).toBe(
+      "一覧を最新化できませんでした — キャッシュを表示しています",
+    );
+    expect(result?.body).toBe(
+      "1 件が最新化できませんでした。未対応の TLD です。",
+    );
+  });
+
+  it("リクエストごとのハード失敗もコードで出し分ける（INTERNAL を障害と言わない）", () => {
+    const result = notice({
+      error: new ApiClientError({
+        code: "INTERNAL",
+        message: "サーバーエラー",
+      }),
+      domains: [domain({ stale: true })],
+    });
+
+    expect(result?.title).toBe(
+      "一覧を最新化できませんでした — キャッシュを表示しています",
+    );
+    expect(result?.body).toBe("時間をおいて「最新化」を押してください。");
+  });
+
+  it("コードが混ざるときは最も重いコードの見出しにし、内訳を本文に出す", () => {
+    const result = notice({
+      failures: [
+        failure({
+          name: "gone1.com",
+          code: "NOT_FOUND",
+          message: "対象のドメインが見つかりません。",
+          registry: "kitaqsign",
+        }),
+        failure({
+          name: "gone2.com",
+          code: "NOT_FOUND",
+          message: "対象のドメインが見つかりません。",
+          registry: "kitaqsign",
+        }),
+        failure({ name: "ng.xyz" }),
+      ],
+    });
+
+    // 疎通障害が 1 件でも混ざっていれば「待って再試行」が最も行動につながる。
+    // 見出しの主語も落ちている Kitaqnic だけにし、「両レジストリ」に薄めない
+    expect(result?.title).toBe(
+      "Kitaqnic が応答しません — 一覧はキャッシュを表示しています",
+    );
+    expect(result?.body).toBe(
+      "3 件が最新化できませんでした（応答なし 1 件・レジストリに未登録 2 件）。参照系は自動で 2 回再試行しました。しばらくして「最新化」を押してください。",
+    );
   });
 });

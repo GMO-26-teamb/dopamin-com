@@ -15,10 +15,13 @@ import { ApiException } from "./errors";
  */
 
 /**
- * 解析全体の上限時間。AC-13-1「提案表示まで 15 秒以内」のうち、AI 呼び出しに
- * {@link import("./ai-provider").AI_CALL_TIMEOUT_MS} の 10 秒を残した配分。
+ * 解析全体の上限時間。AC-13-1「提案表示まで 30 秒以内」のうち、AI 呼び出しに
+ * {@link import("./ai-provider").AI_CALL_TIMEOUT_MS} の 20 秒を残した配分。
+ *
+ * 4 秒では読み切れない（README / ツリー / マニフェストの取得が間に合わない）リポジトリが
+ * 実在したため、#199 の thinking 制御とは別に上限そのものを 2 倍にした。
  */
-export const GITHUB_FETCH_TIMEOUT_MS = 4_000;
+export const GITHUB_FETCH_TIMEOUT_MS = 8_000;
 
 /** README として読む先頭バイト数（FR-13「README（先頭 8KB）」）。 */
 export const README_EXCERPT_BYTES = 8 * 1024;

@@ -112,7 +112,7 @@ export interface GenerateDomainCandidatesOptions {
 /**
  * FR-04: 候補 6 件を生成し、空き確認と独自性スコアを付けて返す。
  *
- * 上限時間は「1 リクエスト合計」で {@link AI_CALL_TIMEOUT_MS}（AC-04-2「10 秒以内」）。
+ * 上限時間は「1 リクエスト合計」で {@link AI_CALL_TIMEOUT_MS}（AC-04-2「20 秒以内」）。
  * 再生成は残り予算の範囲でだけ行い、予算を使い切っていれば 1 回目の結果で確定する。
  * 2 回目も呼べた場合、その `runStructured` の失敗は捕捉していないので、そのまま
  * AI_UNAVAILABLE / RATE_LIMITED として外に出る（1 回目に採用した候補も返らない）。

@@ -81,7 +81,7 @@ async function analyzeRepo(
  *
  * AI 出力は `generateObject` のスキーマ検証とは別に、返す直前で
  * `subdomainProposalSchema` を通す（`runStructured` が同じスキーマで再検証する。§13.1）。
- * 上限は GitHub 解析 4 秒 + AI 10 秒で AC-13-1 の 15 秒に収める。
+ * 上限は GitHub 解析 8 秒 + AI 20 秒で AC-13-1 の 30 秒に収める。
  */
 export async function generateSubdomainPlan(
   user: AuthUser,

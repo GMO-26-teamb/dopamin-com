@@ -984,7 +984,7 @@ describe("candidates.generate（POST /ai/domain-candidates。FR-04）", () => {
     stubFetch(504, {
       error: {
         code: "REGISTRY_TIMEOUT",
-        message: "AI が 10 秒以内に応答しませんでした。",
+        message: "AI が 20 秒以内に応答しませんでした。",
         retryable: true,
       },
     });
@@ -1638,7 +1638,7 @@ describe("logs.ai（GET /logs/ai。FR-14）", () => {
       items: [
         apiAiLog({
           status: "error",
-          errorMessage: "AI が 10 秒以内に応答しませんでした。",
+          errorMessage: "AI が 20 秒以内に応答しませんでした。",
           outputSummary: "（失敗）",
           tokensIn: null,
           tokensOut: null,
