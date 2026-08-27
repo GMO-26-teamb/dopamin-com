@@ -40,10 +40,10 @@ describe("SignupScreen", () => {
     renderSignup();
 
     expect(
-      await screen.findByLabelText("表示名（1〜32文字）"),
+      await screen.findByLabelText("表示名（1〜32 文字）"),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "パスキーを作成する" }),
+      screen.getByRole("button", { name: "パスキーを作成" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "パスキーでログイン" }),
@@ -54,11 +54,11 @@ describe("SignupScreen", () => {
     renderSignup({}, "/domains/new");
 
     await userEvent.type(
-      await screen.findByLabelText("表示名（1〜32文字）"),
+      await screen.findByLabelText("表示名（1〜32 文字）"),
       "たくたく",
     );
     await userEvent.click(
-      screen.getByRole("button", { name: "パスキーを作成する" }),
+      screen.getByRole("button", { name: "パスキーを作成" }),
     );
 
     await waitFor(() => {
@@ -79,11 +79,11 @@ describe("SignupScreen", () => {
     renderSignup({ signup });
 
     await userEvent.click(
-      await screen.findByRole("button", { name: "パスキーを作成する" }),
+      await screen.findByRole("button", { name: "パスキーを作成" }),
     );
 
     expect(
-      await screen.findByText("表示名は 1〜32 文字で入力してください。"),
+      await screen.findByText("表示名は 1〜32 文字で入力してください"),
     ).toBeInTheDocument();
     expect(signup).not.toHaveBeenCalled();
     expect(replace).not.toHaveBeenCalled();
@@ -98,18 +98,18 @@ describe("SignupScreen", () => {
     });
 
     await userEvent.type(
-      await screen.findByLabelText("表示名（1〜32文字）"),
+      await screen.findByLabelText("表示名（1〜32 文字）"),
       "たくたく",
     );
     await userEvent.click(
-      screen.getByRole("button", { name: "パスキーを作成する" }),
+      screen.getByRole("button", { name: "パスキーを作成" }),
     );
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "パスキーを作成できませんでした",
     );
     expect(
-      screen.getByRole("button", { name: "パスキーを作成する" }),
+      screen.getByRole("button", { name: "パスキーを作成" }),
     ).toBeEnabled();
   });
 
@@ -124,10 +124,10 @@ describe("SignupScreen", () => {
         ),
     });
 
-    const input = await screen.findByLabelText("表示名（1〜32文字）");
+    const input = await screen.findByLabelText("表示名（1〜32 文字）");
     await userEvent.type(input, "たくたく");
     await userEvent.click(
-      screen.getByRole("button", { name: "パスキーを作成する" }),
+      screen.getByRole("button", { name: "パスキーを作成" }),
     );
 
     await waitFor(() => {

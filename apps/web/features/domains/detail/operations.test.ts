@@ -57,7 +57,7 @@ describe("operationState", () => {
 
     const update = operationState(target, "update");
     expect(update.allowed).toBe(false);
-    expect(update.reason).toBe("変更ロック中");
+    expect(update.reason).toBe("情報修正ロック中");
     expect(update.blockedBy).toEqual(["serverUpdateProhibited"]);
     expect(operationState(target, "renew").allowed).toBe(true);
     expect(operationState(target, "delete").allowed).toBe(true);
@@ -107,7 +107,7 @@ describe("operationState", () => {
     ] as const) {
       expect(operationState(target, op)).toEqual({
         allowed: false,
-        reason: "再同期が必要",
+        reason: "最新化が必要",
         blockedBy: [],
       });
     }
@@ -153,14 +153,14 @@ describe("maxRenewPeriod / renewedExpiry", () => {
     expect(maxRenewPeriod(new Date(NOW + 330 * DAY).toISOString(), NOW)).toBe(
       9,
     );
-    // 残り 9 年強 → 最大 0 年（延長できない）
+    // 残り 9 年強 → 最大 0 年（更新できない）
     expect(
       maxRenewPeriod(new Date(NOW + 9.5 * 365 * DAY).toISOString(), NOW),
     ).toBe(0);
     expect(maxRenewPeriod(null, NOW)).toBe(0);
   });
 
-  it("延長後の有効期限を YYYY-MM-DD で返す", () => {
+  it("更新後の有効期限を YYYY-MM-DD で返す", () => {
     expect(renewedExpiry("2027-08-25T00:00:00.000Z", 1)).toBe("2028-08-25");
     expect(renewedExpiry("2027-08-25T00:00:00.000Z", 3)).toBe("2030-08-25");
     expect(renewedExpiry(null, 1)).toBe("—");

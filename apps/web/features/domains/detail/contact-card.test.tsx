@@ -50,13 +50,13 @@ describe("ContactCard（S-30）", () => {
     expect(screen.getByText("taro.test@example.com")).toBeInTheDocument();
   });
 
-  it("プロファイルが未取得なら空欄ではなく「未取得」を出す（#172）", () => {
+  it("プロファイルが未取得なら空欄ではなく「未設定」を出す（#172）", () => {
     render(
       <ContactCard
         domain={buildDomain({ name: "", email: "", migrated: true })}
       />,
     );
 
-    expect(screen.getAllByText("未取得")).toHaveLength(2);
+    expect(screen.getAllByText("未設定")).toHaveLength(2);
   });
 });

@@ -15,7 +15,7 @@ import { NameserverBadge } from "./nameserver-badge";
  * S-43「DNS 反映」。ツリー / 編集パネルの下に置く全体セクション。
  * ここが画面唯一の Primary（`components/ui/button.tsx`「Primary は 1 画面 1 つ」）。
  *
- * ボタンのラベルは常に動作名にする。押せない理由（未保存 / 差分の取得失敗 / 差分なし）は
+ * ボタンのラベルは常に動作名にする。押せない理由（未保存 / 差分の読み込み失敗 / 差分なし）は
  * ボタンではなく「反映状況」行と補足の 1 文で伝える。
  * 反映先はアプリ内の疑似 DNS ゾーンで、実インターネットの名前解決には関与しない（FR-13）。
  */
@@ -23,7 +23,7 @@ import { NameserverBadge } from "./nameserver-badge";
 const APPLY_NOTE = "反映先はアプリ内の DNS ゾーンです。";
 const DIRTY_NOTE = "未保存の変更があります。先に設計を保存してください。";
 const PENDING_NOTE = "差分を確認しています。";
-const FAILED_NOTE = "差分を取得できませんでした。";
+const FAILED_NOTE = "差分を読み込めませんでした。";
 
 export interface ApplySectionProps {
   counts: ApplyCounts;

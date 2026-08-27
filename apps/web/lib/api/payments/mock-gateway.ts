@@ -70,7 +70,7 @@ export function createMockPaymentService(
   };
 }
 
-/** 領収の摘要（例 `takutaku.com 新規登録 2 年`）。 */
+/** 領収の摘要（例: `takutaku.com 新規登録 2 年`）。 */
 function describeQuote(quote: PaymentChargeInput["quote"]): string {
   const kind = quote.kind === "register" ? "新規登録" : "更新";
   return `${quote.domain} ${kind} ${quote.years} 年`;

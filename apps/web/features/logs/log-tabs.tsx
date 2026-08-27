@@ -1,5 +1,6 @@
 "use client";
 
+import { ScrollText, Sparkles } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/app/page-header";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -55,10 +56,18 @@ export function LogTabs() {
       />
       <Tabs onValueChange={selectTab} value={tab}>
         <TabsList>
-          <TabsTrigger count={operations.data?.length} value={OPERATIONS_TAB}>
+          <TabsTrigger
+            count={operations.data?.length}
+            icon={<ScrollText />}
+            value={OPERATIONS_TAB}
+          >
             操作ログ
           </TabsTrigger>
-          <TabsTrigger count={ai.data?.length} value={AI_TAB}>
+          <TabsTrigger
+            count={ai.data?.length}
+            icon={<Sparkles />}
+            value={AI_TAB}
+          >
             AI ログ
           </TabsTrigger>
         </TabsList>

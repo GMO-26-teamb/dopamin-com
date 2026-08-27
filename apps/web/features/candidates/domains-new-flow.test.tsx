@@ -655,7 +655,7 @@ describe("/domains/new", () => {
       await screen.findByText(`${name} は取得できませんでした`),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "代替候補を見る" }),
+      screen.getByRole("button", { name: "代替を見る" }),
     ).toBeInTheDocument();
   });
 

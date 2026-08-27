@@ -80,7 +80,7 @@ export function RegisterSuccessDialog({
           <span className="block text-caption">{nameservers}</span>
           <span className="block text-caption">
             お支払い {formatJpy(receipt.amount)}（{receipt.brand} ••••{" "}
-            {receipt.last4}）・受付 {receipt.id}
+            {receipt.last4}） · 受付 {receipt.id}
           </span>
         </>
       }
@@ -127,7 +127,7 @@ export function RegisterConflictDialog({
         </DialogDescription>
         {alternatives.length === 0 ? null : (
           <p className="w-full text-body-sm text-ink">
-            {alternatives.join("・")}
+            {alternatives.join(" / ")}
           </p>
         )}
         <DialogFooter>
@@ -139,7 +139,7 @@ export function RegisterConflictDialog({
             trailingIcon={<ArrowRight />}
             variant="solid"
           >
-            代替候補を見る
+            代替を見る
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -228,7 +228,7 @@ export function RegisterTimeoutDialog({
           登録の要求がタイムアウトしました。二重登録を避けるため再送はせず、結果だけを確認します。
           {copy.body}
         </DialogDescription>
-        <p className="w-full text-code text-muted">{meta.join("・")}</p>
+        <p className="w-full text-code text-muted">{meta.join(" · ")}</p>
         {reconcile.error === null ? null : (
           <ErrorCard
             error={reconcile.error}

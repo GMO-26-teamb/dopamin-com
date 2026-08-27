@@ -24,7 +24,11 @@ export interface DeleteDialogProps {
   onSubmit: () => void;
 }
 
-/** AGP 内 / 外の文言（D-03）。テストから直接検証できるよう純関数にしておく。 */
+/**
+ * AGP 内 / 外の文言（D-03）。テストから直接検証できるよう純関数にしておく。
+ *
+ * 実行中も動作名を残す（「実行中…」だと何が走っているのか読み取れない）。
+ */
 export function deleteCopy(name: string, withinAgp: boolean) {
   return withinAgp
     ? {
@@ -32,12 +36,14 @@ export function deleteCopy(name: string, withinAgp: boolean) {
         subtitle: `登録から ${ADD_GRACE_PERIOD_DAYS} 日以内のため、無課金で取消扱いになります（Add Grace Period）。`,
         note: "復旧猶予（RGP）に入れば「復旧」から戻せます。即時に削除された場合は元に戻せません。",
         primaryLabel: "取り消す",
+        busyLabel: "取消中…",
       }
     : {
         title: `${name} を廃止しますか？`,
         subtitle: `登録から ${ADD_GRACE_PERIOD_DAYS} 日を過ぎているため、30 日間の復旧猶予（RGP）の後に完全に削除されます。`,
         note: "復旧猶予の間は「復旧」から戻せます（復旧費用はダミー表示）。",
         primaryLabel: "廃止する",
+        busyLabel: "廃止中…",
       };
 }
 
@@ -60,7 +66,7 @@ export function DeleteDialog({
       onOpenChange={onOpenChange}
       onPrimary={onSubmit}
       open={open}
-      primaryLabel={busy ? "実行中…" : copy.primaryLabel}
+      primaryLabel={busy ? copy.busyLabel : copy.primaryLabel}
       subtitle={copy.subtitle}
       title={copy.title}
     />

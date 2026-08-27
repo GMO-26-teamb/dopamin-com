@@ -872,7 +872,7 @@ export function createHttpServices(): Services {
       list() {
         return fetchTransfers();
       },
-      /** S-50「状態を更新」。GET /transfers 自体が Poll 消化 + 再照会を伴う（§10.1） */
+      /** S-50「最新化」。GET /transfers 自体が Poll 消化 + 再照会を伴う（§10.1） */
       refresh() {
         return fetchTransfers();
       },

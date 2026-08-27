@@ -27,13 +27,13 @@ export interface StateBannerProps {
 }
 
 /**
- * 「残り n 日。」。期限が分からないときは空文字（#211）。
+ * 「残 n 日。」。期限が分からないときは空文字（#211）。
  * `rgpUntil` はレジストリが猶予期限を返さない限り null なので、
- * `remainingDays` に渡して 0 に丸めると「残り 0 日」と断定してしまう。
+ * `remainingDays` に渡して 0 に丸めると「残 0 日」と断定してしまう。
  */
 function remainingSentence(until: string | null, now: number): string {
   const days = daysUntil(until, now);
-  return days === null || days < 0 ? "" : `残り ${days} 日。`;
+  return days === null || days < 0 ? "" : `残 ${days} 日。`;
 }
 
 export function StateBanner({
@@ -51,7 +51,7 @@ export function StateBanner({
   if (domain.stale) {
     return (
       <Banner
-        body={`最終同期 ${formatRelativeTime(domain.syncedAt, now)} の内容です。「再同期」に成功すると操作できます。`}
+        body={`最終同期 ${formatRelativeTime(domain.syncedAt, now)} の内容です。「最新化」に成功すると操作できます。`}
         title="キャッシュを表示中"
         tone="warn"
       />
