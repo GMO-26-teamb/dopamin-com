@@ -1,4 +1,8 @@
-import { createRegistrySet, MockRegistryAdapter } from "@dopamin/registry";
+import {
+  createRegistrySet,
+  MockRegistryAdapter,
+  RegistryError,
+} from "@dopamin/registry";
 import {
   type ApiError,
   apiErrorSchema,
@@ -6,6 +10,8 @@ import {
   type PollConsumeResult,
   type PollMessage,
   pollConsumeResultSchema,
+  type RegistryId,
+  type TransferResult,
   type TransfersListResponse,
   transfersListResponseSchema,
 } from "@dopamin/shared";
@@ -31,6 +37,7 @@ import {
   clearTestSession,
   installTestSession,
   SESSION_COOKIE_HEADER,
+  TEST_USER,
 } from "../helpers/session";
 
 /**
@@ -41,6 +48,73 @@ import {
 let kitaqsign: MockRegistryAdapter;
 let domainStore: DomainStore;
 let transferStore: TransferStore;
+
+/** Poll の途中障害・ack 障害をピンポイントで再現するテスト用アダプタ。 */
+class PollFaultAdapter extends MockRegistryAdapter {
+  pollCalls = 0;
+  failOnPollCall: number | null = null;
+  failNextAck = false;
+  failNextTransferQuery = false;
+  keepMessageAfterAck = false;
+
+  constructor(id: RegistryId) {
+    super({ id });
+  }
+
+  private unavailable(command: string): RegistryError {
+    return new RegistryError({
+      code: "REGISTRY_UNAVAILABLE",
+      registry: this.id,
+      message: `${command}: メンテナンス中です（テスト用）`,
+      httpStatus: 503,
+    });
+  }
+
+  override async poll(): Promise<PollMessage | null> {
+    this.pollCalls += 1;
+    if (this.pollCalls === this.failOnPollCall) {
+      throw this.unavailable("poll");
+    }
+    return super.poll();
+  }
+
+  override async ackMessage(id: string): Promise<void> {
+    if (this.failNextAck) {
+      this.failNextAck = false;
+      throw this.unavailable("ack");
+    }
+    if (this.keepMessageAfterAck) {
+      return;
+    }
+    return super.ackMessage(id);
+  }
+
+  override async transferQuery(name: string): Promise<TransferResult> {
+    if (this.failNextTransferQuery) {
+      this.failNextTransferQuery = false;
+      throw this.unavailable("transferQuery");
+    }
+    return super.transferQuery(name);
+  }
+}
+
+/** 未知種別・対象不明の通知が ack されることを API 境界から確認する。 */
+class SyntheticPollAdapter extends MockRegistryAdapter {
+  private acknowledged = false;
+
+  constructor(private readonly message: PollMessage) {
+    super({ id: "kitaqsign" });
+  }
+
+  override async poll(): Promise<PollMessage | null> {
+    return this.acknowledged ? null : this.message;
+  }
+
+  override async ackMessage(id: string): Promise<void> {
+    expect(id).toBe(this.message.id);
+    this.acknowledged = true;
+  }
+}
 
 /** 放置された申請をその場でサーバ自動承認させるアダプタを組む（§11.1 の遅延評価）。 */
 function installRegistry(options: { autoApproveMs?: number } = {}): void {
@@ -219,10 +293,27 @@ describe("POST /api/v1/registry/poll（FR-12 Poll 消化）", () => {
   });
 
   it("保有していないドメインの申請通知は ack だけして skipped になる", async () => {
-    // 相手レジストラ保有のドメインに、こちらは何も持っていない状態で通知が届く
+    // レジストリ上は自レジストラがスポンサーだが、`domains` に行が無い状態。
+    // 誰の物か決められないので、行は作らず ack だけして次の通知に進む
+    kitaqsign.seedOwnedDomain("stranger.com");
+    kitaqsign.simulateInboundTransferRequest("stranger.com");
+
+    expect(await poll()).toEqual({
+      processed: 1,
+      created: 0,
+      settled: 0,
+      skipped: 1,
+      failures: [],
+    });
+    expect(await transferStore.list(TEST_USER.id)).toEqual([]);
+    // ack 済みなので同じ通知でキューが詰まらない
+    expect(await poll()).toMatchObject({ processed: 0 });
+  });
+
+  it("対応する行が無い承認通知は、保有していなければ取り込まず skipped になる", async () => {
+    // 自分が出した移管 IN の申請を相手が承認 → こちらに approved 通知。
+    // その通知を読む前に行が失われた（別経路で確定済み等）状況を作る
     kitaqsign.seedForeignDomain("stranger.com", "auth-stranger");
-    kitaqsign.simulateInboundTransferRequest;
-    // 自分宛のキューに直接積まれる状況は作れないので、申請 → 取消で通知だけ残す
     expect(
       (
         await sendJson("/transfers", {
@@ -231,15 +322,17 @@ describe("POST /api/v1/registry/poll（FR-12 Poll 消化）", () => {
         })
       ).status,
     ).toBe(202);
-    // 自分が出した申請を相手が承認 → こちらに approved 通知。行は消しておく
     kitaqsign.simulateCounterpartApprove("stranger.com");
     setTransferStoreForTesting(createInMemoryTransferStore());
     // 登録・情報修正はユーザー × レジストリのコンタクトを引く（#72）
     setContactStoreForTesting(createInMemoryContactStore());
 
-    const result = await poll();
-    expect(result.processed).toBe(1);
-    expect(result.settled + result.skipped).toBe(1);
+    expect(await poll()).toMatchObject({
+      processed: 1,
+      created: 0,
+      settled: 0,
+      skipped: 1,
+    });
     // 対応する行が無く保有もしていないので、ドメインは作られない
     const res = await api("/domains");
     expect((await res.json()) as unknown).toEqual({ domains: [] });
@@ -317,6 +410,163 @@ describe("POST /api/v1/registry/poll（FR-12 Poll 消化）", () => {
     expect((await listTransfers()).outbound).toHaveLength(2);
   });
 
+  it("片方のレジストリがメンテナンス中でも、もう片方の通知は消化する（部分失敗）", async () => {
+    const maintenance = new PollFaultAdapter("kitaqsign");
+    maintenance.failOnPollCall = 1;
+    const healthy = new MockRegistryAdapter({ id: "kitaqnic" });
+    setRegistrySetForTesting(
+      createRegistrySet({ mode: "real", adapters: [maintenance, healthy] }),
+    );
+
+    await createDomain("available-during-maintenance.xyz");
+    healthy.simulateInboundTransferRequest("available-during-maintenance.xyz");
+
+    const result = await poll();
+    expect(result).toMatchObject({ processed: 1, created: 1 });
+    expect(result.failures).toEqual([
+      {
+        registry: "kitaqsign",
+        message: "Kitaqsign に接続できません。しばらくして再試行してください。",
+      },
+    ]);
+    expect(await transferStore.list(TEST_USER.id)).toHaveLength(1);
+  });
+
+  it("複数通知の途中でメンテナンスに入っても、ack 済みまでを返し、残りは復旧後に続行する", async () => {
+    const interrupted = new PollFaultAdapter("kitaqsign");
+    setRegistrySetForTesting(
+      createRegistrySet({ mode: "real", adapters: [interrupted] }),
+    );
+    kitaqsign = interrupted;
+
+    await createDomain("before-maintenance.com");
+    await createDomain("after-maintenance.com");
+    interrupted.simulateInboundTransferRequest("before-maintenance.com");
+    interrupted.simulateInboundTransferRequest("after-maintenance.com");
+    interrupted.failOnPollCall = 2;
+
+    const partial = await poll();
+    expect(partial).toMatchObject({ processed: 1, created: 1 });
+    expect(partial.failures).toHaveLength(1);
+    expect(await transferStore.list(TEST_USER.id)).toHaveLength(1);
+
+    const resumed = await poll();
+    expect(resumed).toMatchObject({ processed: 1, created: 1, failures: [] });
+    expect(await transferStore.list(TEST_USER.id)).toHaveLength(2);
+  });
+
+  it("通知の業務処理が失敗したら ack せず、復旧後に同じ通知を再処理する", async () => {
+    const interrupted = new PollFaultAdapter("kitaqsign");
+    setRegistrySetForTesting(
+      createRegistrySet({ mode: "real", adapters: [interrupted] }),
+    );
+    kitaqsign = interrupted;
+
+    await createDomain("retry-unacked.com");
+    interrupted.simulateInboundTransferRequest("retry-unacked.com");
+    interrupted.failNextTransferQuery = true;
+
+    const failed = await poll();
+    expect(failed).toMatchObject({ processed: 0, created: 0 });
+    expect(failed.failures).toHaveLength(1);
+    expect(await transferStore.list(TEST_USER.id)).toEqual([]);
+
+    const recovered = await poll();
+    expect(recovered).toMatchObject({ processed: 1, created: 1, failures: [] });
+    expect(await transferStore.list(TEST_USER.id)).toHaveLength(1);
+  });
+
+  it("業務反映後に ack だけ失敗しても、再処理で transfers 行を重複作成・再計上しない", async () => {
+    const interrupted = new PollFaultAdapter("kitaqsign");
+    setRegistrySetForTesting(
+      createRegistrySet({ mode: "real", adapters: [interrupted] }),
+    );
+    kitaqsign = interrupted;
+
+    await createDomain("ack-retry.com");
+    interrupted.simulateInboundTransferRequest("ack-retry.com");
+    interrupted.failNextAck = true;
+
+    const failed = await poll();
+    expect(failed).toMatchObject({ processed: 0, created: 0 });
+    expect(failed.failures).toHaveLength(1);
+    // ack 前に業務反映は終わっているが、レスポンス上は未処理。行は 1 件だけ存在する
+    expect(await transferStore.list(TEST_USER.id)).toHaveLength(1);
+
+    const recovered = await poll();
+    expect(recovered).toMatchObject({
+      processed: 1,
+      created: 0,
+      settled: 0,
+      skipped: 0,
+      failures: [],
+    });
+    expect(await transferStore.list(TEST_USER.id)).toHaveLength(1);
+  });
+
+  it("ack が成功扱いでも通知が消えない異常時は 50 件で停止し、同じ行を増やさない", async () => {
+    const stuck = new PollFaultAdapter("kitaqsign");
+    stuck.keepMessageAfterAck = true;
+    setRegistrySetForTesting(
+      createRegistrySet({ mode: "real", adapters: [stuck] }),
+    );
+    kitaqsign = stuck;
+
+    await createDomain("stuck-poll.com");
+    stuck.simulateInboundTransferRequest("stuck-poll.com");
+
+    const result = await poll();
+    expect(result).toMatchObject({
+      processed: 50,
+      created: 1,
+      settled: 0,
+      skipped: 0,
+      failures: [],
+    });
+    expect(await transferStore.list(TEST_USER.id)).toHaveLength(1);
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining('"type":"poll_queue_not_drained"'),
+    );
+  });
+
+  it.each([
+    [
+      "未知種別",
+      {
+        id: "9001",
+        count: 1,
+        queuedAt: "2026-08-27T00:00:00.000Z",
+        type: "unknown",
+        domainName: "unknown.com",
+        raw: { msgType: "maintenance_notice" },
+      } satisfies PollMessage,
+    ],
+    [
+      "対象ドメイン不明",
+      {
+        id: "9002",
+        count: 1,
+        queuedAt: "2026-08-27T00:00:00.000Z",
+        type: "transfer_request",
+        raw: { msgType: "domain:transfer" },
+      } satisfies PollMessage,
+    ],
+  ])("%s の通知は落とさず skipped として ack する", async (_label, message) => {
+    const synthetic = new SyntheticPollAdapter(message);
+    setRegistrySetForTesting(
+      createRegistrySet({ mode: "real", adapters: [synthetic] }),
+    );
+
+    expect(await poll()).toEqual({
+      processed: 1,
+      created: 0,
+      settled: 0,
+      skipped: 1,
+      failures: [],
+    });
+    expect(await poll()).toMatchObject({ processed: 0 });
+  });
+
   it("AC-01-3: Cookie 無しは 401 UNAUTHORIZED", async () => {
     const res = await app.request("/api/v1/registry/poll", { method: "POST" });
     expect(res.status).toBe(401);
@@ -389,6 +639,27 @@ describe("POST /api/v1/domains/sync（FR-02 / FR-12 の最新化）", () => {
     await createDomain("keep.com");
     const body = await sync();
     expect(body.domains.map((d) => d.name)).toEqual(["keep.com"]);
+    expect(body.failures).toEqual([]);
+  });
+
+  it("Poll エンドポイントだけがメンテナンス中でも、ドメイン同期は継続して障害内訳を返す", async () => {
+    const interrupted = new PollFaultAdapter("kitaqsign");
+    setRegistrySetForTesting(
+      createRegistrySet({ mode: "real", adapters: [interrupted] }),
+    );
+    kitaqsign = interrupted;
+    await createDomain("sync-during-poll-maintenance.com");
+    interrupted.failOnPollCall = 1;
+
+    const body = await sync();
+    expect(body.pollProcessed).toMatchObject({ processed: 0, created: 0 });
+    expect(body.pollProcessed.failures).toHaveLength(1);
+    expect(body.domains).toEqual([
+      expect.objectContaining({
+        name: "sync-during-poll-maintenance.com",
+        stale: false,
+      }),
+    ]);
     expect(body.failures).toEqual([]);
   });
 });

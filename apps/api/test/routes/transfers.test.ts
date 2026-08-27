@@ -264,6 +264,28 @@ describe("POST /api/v1/transfers（FR-12 移管 IN）", () => {
     expect(text).not.toContain("transfer:request");
   });
 
+  it.each([
+    ["5xx", "5xx", 502, "REGISTRY_UNAVAILABLE", true],
+    ["spec_mismatch", "spec-mismatch", 502, "REGISTRY_SPEC_MISMATCH", false],
+  ] as const)(
+    "レジストリが %s のときは統一エラーを返し、pending 行を作らない",
+    async (failMode, nameSuffix, status, code, retryable) => {
+      const name = `request-${nameSuffix}.com`;
+      const authCode = seedForeignDomain(name);
+      kitaqsign.setFailMode(failMode);
+
+      const res = await sendJson("/transfers", { name, authCode });
+
+      expect(res.status).toBe(status);
+      expect((await parseError(res)).error).toMatchObject({
+        code,
+        retryable,
+        registry: "kitaqsign",
+      });
+      expect(await transferStore.list(TEST_USER.id)).toEqual([]);
+    },
+  );
+
   it("clientTransferProhibited 中の申請は 409 OPERATION_NOT_ALLOWED", async () => {
     // ロックを掛けているのは現スポンサー（相手レジストラ）側
     const authCode = seedForeignDomain("lock.com", {
@@ -339,6 +361,33 @@ describe("GET /api/v1/transfers（FR-12 移管一覧）", () => {
   it("移管が 1 件も無ければ 3 区画とも空", async () => {
     expect(await listTransfers()).toEqual({
       inbound: [],
+      outbound: [],
+      history: [],
+    });
+  });
+
+  it("レジストリがメンテナンス中でも、DB にある移管一覧は 200 で返す", async () => {
+    const authCode = seedForeignDomain("list-during-maintenance.com");
+    const created = await sendJson("/transfers", {
+      name: "list-during-maintenance.com",
+      authCode,
+    });
+    expect(created.status).toBe(202);
+    const record = ((await created.json()) as TransferPayload).record;
+
+    kitaqsign.setFailMode("5xx");
+    const res = await api("/transfers");
+
+    expect(res.status).toBe(200);
+    expect(transfersListResponseSchema.parse(await res.json())).toMatchObject({
+      inbound: [
+        {
+          id: record.id,
+          domainName: "list-during-maintenance.com",
+          direction: "in",
+          status: "pending",
+        },
+      ],
       outbound: [],
       history: [],
     });

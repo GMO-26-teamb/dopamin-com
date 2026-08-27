@@ -33,7 +33,8 @@
     "rules": {
       "preset": "recommended",
       "suspicious": {
-        "noExplicitAny": "error"
+        "noExplicitAny": "error",
+        "noUnusedExpressions": "error"
       }
     },
     "domains": {
