@@ -26,7 +26,7 @@ describe("AI enum", () => {
     expect(aiFeatureSchema.safeParse("subdomain").success).toBe(false);
   });
 
-  it("プロバイダは FR-17 の 2 種", () => {
+  it("プロバイダは FR-17 の 3 種", () => {
     expect(AI_PROVIDERS).toEqual(["google", "anthropic", "xai"]);
     expect(aiProviderSchema.safeParse("openai").success).toBe(false);
   });

@@ -28,7 +28,7 @@ export const aiLogs = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     // packages/shared の AI_FEATURES（domain_candidates / uniqueness / subdomain_plan）が正
     feature: text("feature").notNull(),
-    // packages/shared の AI_PROVIDERS（google / anthropic）が正。フォールバック後は実際に応答した側
+    // packages/shared の AI_PROVIDERS（google / anthropic / xai）が正。フォールバック後は実際に応答した側
     provider: text("provider").notNull(),
     model: text("model").notNull(),
     // 入力の要約（200 字以内。プロンプト全文は保存しない。AC-14-2）

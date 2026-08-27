@@ -93,6 +93,37 @@ AC-04-2 は「AI 応答は 10 秒以内」。再生成があるので、**1 リ�
 `packages/shared/src/api.ts` の `domainCheckResultSchema` に切り出して共有する。
 FR-05 のスコアはインメモリの lexical 計算なのでレジストリ通信と独立して付く（AC-05-2）。
 
+### 2.5 プロバイダ別の味付け
+
+FR-17 で選んだ AI プロバイダを、**作風の選択としても扱う**。
+`apps/api/src/prompts/domain-candidates.ts` の `PROVIDER_FLAVOR` がプロバイダごとの
+追加指示を持ち、`buildDomainCandidatesInstructions(provider)` が
+`DOMAIN_CANDIDATES_INSTRUCTIONS` の末尾に連結する。
+
+**変えないもの**（味付けは文体にだけ効かせ、上の制約を上書きしない）:
+
+- 出力スキーマ（`domainCandidatesOutputSchema`）と件数・重複・除外リストの扱い（§2.1 / §2.2）
+- `reason` の文字数上限（`DOMAIN_CANDIDATE_REASON_MAX_LENGTH`）
+- 「既存の有名サービスやブランドと紛らわしい名前は避ける」
+- 空きチェックと独自性スコアの付け方（§2.4）
+
+| プロバイダ | 味付け |
+|---|---|
+| `google` / `anthropic` | **無し**。`buildDomainCandidatesInstructions()` の戻り値は `DOMAIN_CANDIDATES_INSTRUCTIONS` と**文字列として完全に同一**になる（`domain-candidates.test.ts` が文字列一致で担保） |
+| `xai`（Grok） | 意外性のある造語・遊び心のある接尾辞・語呂を優先し、`reason` はユーモア文体の短い 1 文にする。下品・攻撃的・人を傷つける表現は使わない（誰かに見せている画面にそのまま出ても問題ない範囲） |
+
+xai にだけ味付けを置くのは、Grok を選ぶ動機が「無難な候補ではなく思わず笑える名前が欲しい」
+だから。プロバイダの選択をそのまま作風の選択として扱う。
+
+**フォールバックしても味付けは切り替えない。** `runStructured` が §13.1 のフォールバックで
+別プロバイダに切り替えても、渡す `instructions` は**ユーザーが選んだプロバイダ**のもののまま
+（`candidates.service.ts`）。作風はモデルではなくユーザーの選択に紐づくため。
+したがって xai を選んだ状態で google にフォールバックすると、味付け付きプロンプトが
+google に送られる。これは意図した挙動。
+
+新しいプロバイダを足したときは、`PROVIDER_FLAVOR` に載せなければ味付け無し
+（= 従来と同じプロンプト）になる。
+
 ## 3. 画面・UI / Web の配線
 
 候補カード自体の実装は #88 の範囲。本節は**サービス層の配線**（`NEXT_PUBLIC_API_MODE=http` で
@@ -187,3 +218,4 @@ S-23 でレジストリ向けの文言が出てしまう。
 | v0.1 | 2026-08-27 | 初版（#66 の実装に合わせて起票） |
 | v0.1.1 | 2026-08-27 | 実装との乖離を修正。再生成が失敗したときは部分結果を捨てて 503 / 429 になること、再検証で全件落ちれば 0 件の 200 になることを明記 |
 | v0.2 | 2026-08-27 | §1 を API 実装済みの実態に更新。§3 に Web 配線（`candidates.generate` → `POST /ai/domain-candidates`、`toCheckedFields` の検索経路との共有、`"ai"` origin によるエラー文言の出し分け、本番の `NEXT_PUBLIC_API_MODE=http`）を追記。§7 に Web の契約テスト行を追加。#185 |
+| v0.2.1 | 2026-08-27 | §2.5「プロバイダ別の味付け」を追加。#193 の実装（`PROVIDER_FLAVOR` / `buildDomainCandidatesInstructions`）が §2.5 を正として参照していたが節が存在しなかった。変えないもの・xai だけに味付けを置く理由・フォールバックしても切り替えない理由を明記 |
