@@ -21,9 +21,8 @@
 | 領域 | 仕様 |
 |---|---|
 | 幅 | デスクトップ最大 1280px（`size/page` = `--size-page` = 80rem）。`max-w-page` + `w-full` の可変幅で中央寄せ、外側は `bg/default`。`html` の font-size を ≥1536px で 106.25%、≥1920px で 112.5% に上げるため、大画面では rem 基準の幅・余白・文字が一緒に拡大する。数値の正は `docs/specs/web-ui.md` §3.2。モバイルは §7-6 参照 |
-| サイドバー | 224px（`size/sidebar` = `--size-sidebar` = 14rem）。Logo → 主要 CTA「+ ドメインを取得」→ ナビ（ダッシュボード / ドメイン取得 / 移管 / 設定 / ログ）→ 下部にテーマトグル（Segmented Small）+ ユーザー名 + ログアウト。Active は `Sidebar` の `Active` バリアント。`md` 未満ではサイドバーの代わりに `MobileNav`（横ナビ）を上部に出す |
+| サイドバー | 224px（`size/sidebar` = `--size-sidebar` = 14rem）。Logo → 主要 CTA「+ ドメインを取得」→ ナビ（ダッシュボード / 移管 / 設定）→ 下部にテーマトグル（Segmented Small）+ ユーザー名 + ログアウト。「ドメイン取得」は CTA と同じ `/domains/new` を指すため、ナビ項目には出さず CTA 1 本にする（CTA は現在地のとき Active 表示）。「ログ」は開発者向けなのでナビに出さず `/settings` の「開発者向け」から入る。Active は `Sidebar` の `Active` バリアント。`md` 未満ではサイドバーの代わりに `MobileNav`（横ナビ）を上部に出す |
 | メイン | padding 20/24、gap 12–16。先頭に `Page Header`（Title / Meta / Action）または見出し行 |
-| AI ログパネル | 右から 360px のドロワー（`AI Log Panel`）。全画面から開ける（ヘッダーの sparkles アイコン）。開いている間もメインは操作可。AI 呼び出し完了時に先頭へ追加 |
 | バナー | 画面内の結果・警告は `Banner`（Ok / Warn / Info）をメイン先頭に 1 つだけ置く。トーストは使わない |
 | 認証 | `/`・`/signup`・`/login` 以外の全ルートが認証必須。未認証は `/login?next=<path>`（S-02、reason なし）、API 401（セッション失効）は `/login?reason=expired&next=<path>`（S-03）。ログイン / サインアップ成功後は `next` へ戻る（AC-01-3） |
 | 非対応環境 | `window.PublicKeyCredential` 不在時は S-01c / S-02c を表示。S-00 の CTA 押下時にも同判定を行う |
@@ -145,17 +144,16 @@
 
 | ID | ルート | 状態 | 表示 / 振る舞い | 使用コンポーネント |
 |---|---|---|---|---|
-| S-60 | `/logs` | 操作ログ | Tabs（操作ログ / AI ログ、件数バッジ）+ Log Row（Kind=Operation: 日時 / コマンド / レジストリ / 対象 / 結果コード / レイテンシ）。行クリックで Log Detail（request / response、マスク済み）を展開 | Tabs, Log Row, Log Detail |
+| S-60 | `/logs`（S-70 の「開発者向け」から入る） | 操作ログ | Tabs（操作ログ / AI ログ、件数バッジ）+ Log Row（Kind=Operation: 日時 / コマンド / レジストリ / 対象 / 結果コード / レイテンシ）。行クリックで Log Detail（request / response、マスク済み）を展開 | Tabs, Log Row, Log Detail |
 | S-61 | `/logs?tab=ai` | AI ログ | Log Row（Kind=AI: 機能 / プロバイダ・モデル / 入力要約 / 結果 / レイテンシ）。クリックで出力要約 + トークン数 + 生 JSON | Log Row |
 | S-62 | `/logs` | 0 件 | Empty State | Empty State |
 | S-63 | `/logs` | 読み込み / 取得失敗 | Skeleton 行 ×6 / Banner Warn + 再試行。Figma フレームなし（§4 の規則で表現） | Skeleton, Banner |
-| P-01 | 共通 | AI ログパネル | 右ドロワー（AI Log Entry: Result=Ok / Error、機能・モデル・入力要約・出力要約・レイテンシ / トークン）。0 件は Empty State、読み込みは Skeleton。「すべてのログを見る」→ S-61 | AI Log Panel, AI Log Entry |
 
 ### 2.8 設定（FR-01 / 16 / 17）
 
 | ID | ルート | 状態 | 表示 / 振る舞い | 使用コンポーネント |
 |---|---|---|---|---|
-| S-70 | `/settings` | 通常 | テーマ（Segmented Medium）、パスキー管理（一覧: 名前 / 作成日 / 最終利用日 + 追加 + 削除。最後の 1 つは Disabled）、AI 設定（プロバイダ / モデル Select。選択肢の取得は §7-2）、デモデータリセット（Card Warn + Danger ボタン。表示条件は §7-3） | Segmented Control, Card, Input, Button |
+| S-70 | `/settings` | 通常 | テーマ（Segmented Medium）、パスキー管理（一覧: 名前 / 作成日 / 最終利用日 + 追加 + 削除。最後の 1 つは Disabled）、AI 設定（プロバイダ / モデル Select。選択肢の取得は §7-2）、**開発者向け**（ログ → S-60、デモデータリセット。表示条件は §7-3） | Segmented Control, Card, Input, Button |
 | S-70b | `/settings` | パスキー追加失敗 / AI 設定保存 | Banner Warn「パスキーを追加できませんでした」/ Banner Ok「AI 設定を保存しました」。Figma フレームなし（S-71 と同型） | Banner |
 | D-09 | dialog | パスキー削除 | 汎用 Dialog。最後の 1 つは API が 409（UI では事前に Disabled） | Dialog |
 | D-10 | dialog | デモリセット（FR-16） | Dialog / Danger：「reset」再入力で解錠 | Dialog / Danger |
@@ -179,7 +177,7 @@ Figma **Prototype / Screens** にプロトタイプ接続を設定済み（Prese
   未認証アクセス ─▶ S-02（?next=）   API 401 ─▶ S-03（?reason=expired&next=）
 
 サイドバー（全画面共通）
-  ダッシュボード → S-10 / ドメイン取得 → S-20 / 移管 → S-50 / 設定 → S-70 / ログ → S-60
+  ダッシュボード → S-10 / 移管 → S-50 / 設定 → S-70
   「+ ドメインを取得」→ S-20 / ログアウト → S-02 / テーマトグル → Color モード切替
 
 ダッシュボード
@@ -215,7 +213,7 @@ Figma **Prototype / Screens** にプロトタイプ接続を設定済み（Prese
   S-50 ─状態を更新─▶ S-50（失敗: S-53）   履歴（OUT approved）─▶ S-34   Import Pending ─取り込み完了─▶ S-30 + Banner Ok
 
 ログ / 設定
-  S-60 ⇄ S-61（タブ）   P-01 ─すべてのログを見る─▶ S-61
+  S-70 ─開発者向け「ログを開く」─▶ S-60 ⇄ S-61（タブ）
   S-70 ─削除─▶ D-09 ─▶ S-70 / ─リセット実行─▶ D-10 ─▶ S-71
 ```
 
