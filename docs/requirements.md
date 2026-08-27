@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.1.14（2026-08-26） |
+| 版 | v0.1.15（2026-08-27） |
 | プロダクト | ドパ民.com / dopamin.com — Z世代向けドメイン管理プラットフォーム（疑似レジストラ） |
 | チーム | チームドパ民（Team B）: 佐々木 琢登・星 はるか・上原 拓也 |
 | 位置づけ | GMO Internet Internship in kitaQ Webアプリケーションコース（2026/08/24–28）成果物 |
@@ -890,7 +890,7 @@ export interface RegistryAdapter {
   - `registrarId` 系は申請側 / 対応側という視点非依存の語彙にする（レジストリの `gainingRegistrar` / `losingRegistrar` は申請時点の役割語で、承認 / 拒否 / 取消の応答や Poll 通知では `direction` と一対一にならない）。
   - `requestedAt` ← `reDate` / `actByAt` ← `acDate` は kitaqnic のみ返す（`reDate` 必須・`acDate` 任意）。kitaqsign は両方持たないため optional。新有効期限に相当する `exDate` は両レジストリの transfer 応答に無く、`newExpiresAt` は当面常に undefined（埋めるには移管後の `info` 追い読みが要る）。
   - `raw` はレジストリの生エンベロープ。`transfers.raw`（§9.1）への保存・障害調査・契約テストの fixture 化に使う。レジストリの生の出力は画面に流さない方針（FR-18 / NFR-03）に合わせ、API は `raw` を除いた DTO を返す。
-  - エンベロープの形は両 OpenAPI の `DomainTransferResponse` / `PollMessageDto`（`{ id: int64, msgType, payload, qdate }`。両レジストリ同一）で確定済み。未確定なのは `msgType` に入る値と `payload` の中身で、`PollMessage.type` の 5 値は正規化側の語彙（レジストリの生 `msgType` とは別物。未知は `'unknown'` に倒す）【要確認: §21.2 #13】。
+  - エンベロープの形は両 OpenAPI の `DomainTransferResponse` / `PollMessageDto`（`{ id: int64, msgType, payload, qdate }`。両レジストリ同一）で確定済み。`msgType` / `payload` の中身は kitaqnic で実測済み（§21.2 #13 解決、#176）: `msgType` は `"domain:transfer"` 固定で動詞は `payload.op`、相手は `counterpartyRegistrar` 1 個。`PollMessage.type` の 5 値は正規化側の語彙（レジストリの生 `msgType` とは別物。未知は `'unknown'` に倒す）。kitaqsign はメンテナンス中で未実測のため、旧想定形（`msgType` に動詞 / `status` フォールバック）もアダプタで読める状態を維持する。
   - `PollMessage.id` はレジストリが int64 で返すが `string` に正規化する（`transfers.registry_message_id`（§9.1）が text の一意キーで、JS の number では桁が落ちうるため）。ack 時に数値へ戻す責務はアダプタ側に置く。
 - 入出力型（`CheckResult` / `DomainInfo` / ...）は `packages/shared` の正規化型。レジストリ固有のフィールド名・日付形式・エラーコードはアダプタ内で変換する。
 - 各アダプタは `fetch` ベースの薄い HTTP クライアント + zod によるレスポンス検証（`.passthrough()` で未知フィールドは許容、必須フィールド欠落は `REGISTRY_SPEC_MISMATCH`）。
@@ -1318,8 +1318,8 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | 9 | ~~独自性スコアの閾値較正結果と、編集距離ガード併用の要否~~ → 解決: 埋め込みを採らず lexical 単独（8/26、ADR-0003 / AUDIT_TRANCO.md） | チーム | 済 |
 | 10 | 役割分担 | チーム | 8/25 |
 | 11 | レジストラ ID はチームごとに別か。テスト用の第 2 レジストラ資格情報を発行してもらえるか（無い場合は他チームとの日程調整が必須） | 運営 | 8/26 午前 |
-| 12 | 非スポンサーからの `info` / `transferQuery` の応答（2201 で拒否か、限定情報か。`clID` を含むか）。移管 OUT 完了の検知方法がこれに依存する | Swagger / 実測 | 8/26 |
-| 13 | Poll 通知の `msgType` に入る値と `payload` の中身（transfer request / approve / reject / 自動承認）。gaining 側にも通知が積まれるか。移管応答の `status` の値域（両 OpenAPI に enum も例も無い）。※形（`PollMessageDto` / `DomainTransferResponse`）は OpenAPI で確定済み（§11.1） | Swagger / 実測 | 8/26 |
+| 12 | ~~非スポンサーからの `info` / `transferQuery` の応答~~ → 解決（kitaqnic 実測 8/27、#176 検証。kitaqsign はメンテ中で未実測）: 拒否されず成功し全ステータスが見える。`clID` は引き続き含まれない → 移管 OUT 完了の検知は Poll の承認通知が主のまま（§6.5） | 実測 | 済 |
+| 13 | ~~Poll 通知の `msgType` に入る値と `payload` の中身~~ → 解決（kitaqnic 実測 8/27、#176。kitaqsign はメンテ中で未実測）: `msgType` は `"domain:transfer"` 固定、`payload` は `{ op: request/approve/reject（cancel は未実測）, domain, counterpartyRegistrar }`（受信者から見た相手 1 個。日時・status 無し）。宛先は request → losing、approve / reject → gaining。詳細は `docs/registry/spec-notes.md` §3 #12 | 実測 | 済 |
 | 14 | 移管時のコンタクトの扱い（相手レジストラ発行のコンタクト ID を参照したまま `update` できるか、自コンタクトへの差し替えが必須か、非スポンサーの `contact info` は可か） | Swagger / 実測 | 8/26 |
 | 15 | 自レジストラがスポンサーのドメインに同じレジストラ ID から `transfer request` を送ったときの応答（result code） | 実測 | 8/26 |
 | 16 | 移管系で実際に返る result code（2202 / 2106 / 2300 / 2301 / 2304 …）と、`transfer request` に `period` を渡せるか・完了時に exDate が延びるか | Swagger / 実測 | 8/26 |
@@ -1394,4 +1394,5 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | v0.1.13 | 2026-08-26 | §16.2: `deploy.yml` から `migrate` ジョブを削除し、**api → web** の 2 ジョブ構成に戻した（v0.1.10 で入れた自動適用を撤回）。`DIRECT_DATABASE_URL` に直結ホストが登録されたままで `migrate` が必ず失敗し、`needs` で `api` / `web` が `skipped` になって本番デプロイが全面停止したため、発表までの復旧速度を優先して DB 適用とデプロイを切り離した。マイグレーションは **main にマージしてからローカルで `pnpm db:migrate`** を当てる運用に戻し、二重適用の罠・スキーマ変更を含む PR の注意点・自動適用に戻す手順を §16.2 に明記。§16.3 / §17: `DIRECT_DATABASE_URL` は CI で使わなくなり、ローカル用途では直結 URL でよいことを明記。GitHub Secrets 一覧から削除。#150 |
 | v0.1.14 | 2026-08-26 | §11.1: `poll` / `ackMessage` の実装（#44）と mock の移管シミュレーション（#45）を実装に合わせて確定。Poll のエンドポイント差はアダプタで吸収し（応答の形は両レジストリ同一）、`msgType` が未知の通知は捨てず `'unknown'` に倒す。mock は相手レジストラ保有ドメインの seed・レジストラ別 Poll キュー・役割チェック（approve / reject は対応側、cancel は申請側、更新系は現スポンサー）を持ち、**自動承認は `setTimeout` ではなく `info` / `transferQuery` / `poll` 時の遅延評価**で確定させる（Vercel Functions でタイマーが生き残らないため）。`transferRequest` は自レジストラ保有のドメインには出せない（暫定 2304、§21.2 #15） |
 | v0.1.12 | 2026-08-26 | §11.1: 正規化型を実装に合わせて確定。`TransferResult.status` に `'none'`（`transferQuery` の「移管中でない」）を追加し、`registrarId` 語彙・`reDate` / `acDate` のレジストリ差・`raw` の扱いを明記。`DomainInfo.sponsoringRegistrarId` は両 OpenAPI に clID が無いため当面 null（§6.5 / §9.1 に追随）。`PollMessage` の未確定点を `msgType` / `payload` に限定（§21.2 #13）。判断は ADR-0002 |
+| v0.1.15 | 2026-08-27 | kitaqnic 実機の移管 E2E（teamb ↔ teamb-2、#175 / #176）で §21.2 #12 / #13 を解決。Poll 移管通知は `msgType: "domain:transfer"` 固定 + `payload: { op, domain, counterpartyRegistrar }`（§11.1 / spec-notes §3 #12 に実測を記録）で、アダプタの正規化を実測形に修正（#176）。非スポンサーからの `info` は成功するが `clID` は無し → OUT 検知は Poll 主のまま（§6.5 変更なし）。運営修正アナウンス（8/27）の client* ステータスも実測確認: `clientTransferProhibited` が `info` に反映され `transfer/request` を 2304 で拒否（spec-notes §3 #10 解決） |
 | v0.1.14 | 2026-08-26 | **FR-05 の算出方式を「埋め込み + pgvector」から lexical（文字列ベース）に変更**（判断は ADR-0003、監査は `docs/specs/uniqueness/AUDIT_TRANCO.md`）。§14 を全面改訂（参照コーパスはビルド同梱の静的モジュール = Tranco listId `74V4X` + curated、算出は 4+1 正規化ビュー × Damerau-Levenshtein / Jaro-Winkler × 5 カーブ min 合成、ラベル境界 40/70 は実装が固定で持つ）。§9.1 の `reference_names` / `uniqueness_checks`、§10.1 の `POST /ai/uniqueness`、§13.3 の埋め込み、§6.1 図・§7 の pgvector、§17 の `EMBEDDING_*` / `UNIQUENESS_THETA_*` を不採用に。FR-05 の 24 時間キャッシュを削除（1 件 p95 約 0.22 秒のため不要）し、参照コーパスからアダルト・海賊版サイトを除外する規定と `topSimilar` の並び順（類似度降順・0 を含めない）を追加。AC-05-3 を「外部 API 呼び出しなし」に修正。§14.3 の【要確認】と §21.2 #9 を解決。§17 の `apps/web` に `NEXT_PUBLIC_API_MODE`（本番は `http` 必須）を追記。#155 |

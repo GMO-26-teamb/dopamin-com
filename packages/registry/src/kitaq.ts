@@ -118,6 +118,13 @@ const pollPayloadSchema = z.looseObject({
   domain: loosePayloadString,
   name: loosePayloadString,
   status: loosePayloadString,
+  /**
+   * 実測（kitaqnic 2026-08-27、#176）: `msgType` は `"domain:transfer"` 固定で、
+   * 動詞（`request` / `approve` / `reject` / `cancel`）はここに入る。
+   */
+  op: loosePayloadString,
+  /** 実測（同上）: 受信者から見た相手レジストラ ID。gaining / losing は来ない。 */
+  counterpartyRegistrar: loosePayloadString,
   gainingRegistrar: loosePayloadString,
   losingRegistrar: loosePayloadString,
   reDate: loosePayloadString,
@@ -289,9 +296,24 @@ function toPollMessageType(
   if (normalized.includes("req")) {
     return "transfer_request";
   }
-  // 動詞が読めない（`"domain:transfer"` 等）ときだけ payload の status に降りる
-  const status = payload?.status ? matchTransferStatus(payload.status) : null;
+  // 動詞が読めない（`"domain:transfer"` 等）ときは payload の op → status の順で降りる。
+  // 実測（kitaqnic 2026-08-27、#176）では msgType が固定文字列で、動詞は常に op に入る
+  const status =
+    (payload?.op ? transferStatusForOp(payload.op) : null) ??
+    (payload?.status ? matchTransferStatus(payload.status) : null);
   return status === null ? "unknown" : POLL_TYPE_BY_TRANSFER_STATUS[status];
+}
+
+/**
+ * `payload.op`（`request` / `approve` / `reject` / `cancel`）→ 移管ステータス。
+ * `matchTransferStatus` と違い `request` → pending の対応を持つ（op は申請動詞で、
+ * status の語彙（`pending` 等）とは別物のため）。
+ */
+function transferStatusForOp(op: string): TransferStatus | null {
+  if (op.toLowerCase().includes("req")) {
+    return "pending";
+  }
+  return matchTransferStatus(op);
 }
 
 /** 通知の種別 → その通知が表す移管ステータス。移管通知でなければ null。 */
@@ -355,10 +377,24 @@ function toPollMessage(
   }
   const parsed = pollPayloadSchema.safeParse(message.payload);
   const payload = parsed.success ? parsed.data : null;
-  const rawStatus = payload?.status ?? undefined;
+  // 復元元は status → op → msgType の順（op は実測形（#176）の生の動詞）
+  const rawStatus = payload?.status ?? payload?.op ?? undefined;
   const type = toPollMessageType(message.msgType, payload);
   const domainName = (payload?.domain ?? payload?.name)?.toLowerCase();
   const transferStatus = transferStatusForPollType(type);
+  // 実測形（#176）は gaining / losing でなく counterpartyRegistrar（受信者から見た相手）
+  // だけを返す。申請系（request / cancel）の相手は申請側なので requesting、
+  // 対応系（approved / rejected）の相手は対応側なので acting に写す
+  // （counterpartRegistrarId の導出（ADR-0002 決定 3）はどちらでも成立するが、語義を保つ）。
+  const counterpart = payload?.counterpartyRegistrar ?? undefined;
+  const counterpartIsRequesting =
+    type === "transfer_request" || type === "transfer_cancelled";
+  const requestingRegistrarId =
+    payload?.gainingRegistrar ??
+    (counterpartIsRequesting ? counterpart : undefined);
+  const actingRegistrarId =
+    payload?.losingRegistrar ??
+    (counterpartIsRequesting ? undefined : counterpart);
   const transfer: TransferResult | undefined =
     transferStatus === null || domainName === undefined
       ? undefined
@@ -366,12 +402,8 @@ function toPollMessage(
           name: domainName,
           status: transferStatus,
           registryStatus: rawStatus ?? message.msgType,
-          ...(payload?.gainingRegistrar
-            ? { requestingRegistrarId: payload.gainingRegistrar }
-            : {}),
-          ...(payload?.losingRegistrar
-            ? { actingRegistrarId: payload.losingRegistrar }
-            : {}),
+          ...(requestingRegistrarId ? { requestingRegistrarId } : {}),
+          ...(actingRegistrarId ? { actingRegistrarId } : {}),
           ...(payload?.reDate ? { requestedAt: payload.reDate } : {}),
           ...(payload?.acDate ? { actByAt: payload.acDate } : {}),
           raw: envelope,

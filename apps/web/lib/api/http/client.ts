@@ -15,6 +15,8 @@ import {
   errorCodeSchema,
   registryIdSchema,
   transferResponseSchema,
+  transferSummarySchema,
+  transfersListResponseSchema,
 } from "@dopamin/shared";
 import { hc } from "hono/client";
 import { z } from "zod";
@@ -100,9 +102,19 @@ export const checkResponseSchema = z.object({
 });
 
 /**
- * `POST /transfers` / `GET /transfers/:name` の応答。
- * 形の正は `packages/shared` の `transferResponseSchema`（`raw` は API 境界で落ちる）。
+ * `POST /transfers` の応答（FR-12 / §10.1）。
+ * `transfer` はレジストリ応答の DTO（`raw` は API 境界で落ちる）、`record` は
+ * 永続化された `transfers` 行の要約（#56）。以後の取消・照会は `record.id`（uuid）で行う。
  */
 export const transferEnvelopeSchema = z.object({
   transfer: transferResponseSchema,
+  record: transferSummarySchema,
+});
+
+/** `GET /transfers` の応答（FR-12）。スキーマは packages/shared が SSOT。 */
+export const transfersListSchema = transfersListResponseSchema;
+
+/** `POST /transfers/:id/{approve,reject,cancel}` / `GET /transfers/:id` の応答。 */
+export const transferSummaryEnvelopeSchema = z.object({
+  transfer: transferSummarySchema,
 });

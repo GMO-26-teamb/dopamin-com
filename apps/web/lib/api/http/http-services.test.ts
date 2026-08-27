@@ -317,18 +317,270 @@ const ME = {
   },
 };
 
-describe("transfers.request（POST /transfers。FR-12）", () => {
-  it("正規化 TransferResult の DTO を画面用 Transfer に写す", async () => {
-    stubFetch(202, {
-      transfer: {
-        name: "move.com",
+// ---- 移管（FR-12 / #175） ----
+
+/** `POST /transfers` の応答の `transfer`（正規化 TransferResult の DTO）。 */
+const TRANSFER_DTO = {
+  name: "move.com",
+  status: "pending",
+  registryStatus: "pending",
+  requestingRegistrarId: "REG-DOPAMIN",
+  actingRegistrarId: "REG-OTHER",
+  requestedAt: "2026-08-26T10:00:00.000Z",
+  actByAt: "2026-08-26T10:20:00.000Z",
+};
+
+const OUT_ID = "11111111-1111-4111-8111-111111111111";
+const IN_ID = "22222222-2222-4222-8222-222222222222";
+const HISTORY_ID = "33333333-3333-4333-8333-333333333333";
+
+/** `GET /transfers` の 1 件分（packages/shared の transferSummarySchema と同じ形）。 */
+function apiTransferSummary(overrides: Record<string, unknown> = {}) {
+  return {
+    id: OUT_ID,
+    domainName: "move.com",
+    registry: "kitaqsign",
+    direction: "out",
+    status: "pending",
+    requestedAt: "2026-08-26T10:00:00.000Z",
+    actByAt: "2026-08-26T10:20:00.000Z",
+    completedAt: null,
+    domainId: null,
+    ...overrides,
+  };
+}
+
+describe("transfers.list（GET /transfers）", () => {
+  it("outbound / inbound / history を 1 本の Transfer[] に平坦化して返す", async () => {
+    stubFetch(200, {
+      inbound: [
+        apiTransferSummary({
+          id: IN_ID,
+          domainName: "in.com",
+          direction: "in",
+        }),
+      ],
+      outbound: [apiTransferSummary()],
+      history: [
+        apiTransferSummary({
+          id: HISTORY_ID,
+          domainName: "gone.com",
+          status: "approved",
+          completedAt: "2026-08-26T10:30:00.000Z",
+          domainId: "dom-1",
+        }),
+      ],
+    });
+
+    const list = await services().transfers.list();
+
+    expect(calls[0]?.url).toContain("/api/v1/transfers");
+    expect(calls[0]?.method).toBe("GET");
+    expect(list).toHaveLength(3);
+    expect(list).toContainEqual({
+      id: OUT_ID,
+      domainName: "move.com",
+      registry: "kitaqsign",
+      direction: "out",
+      status: "pending",
+      requestedAt: "2026-08-26T10:00:00.000Z",
+      actByAt: "2026-08-26T10:20:00.000Z",
+      completedAt: null,
+    });
+    expect(list).toContainEqual(
+      expect.objectContaining({
+        id: IN_ID,
+        direction: "in",
         status: "pending",
-        registryStatus: "pending",
-        requestingRegistrarId: "REG-DOPAMIN",
-        actingRegistrarId: "REG-OTHER",
-        requestedAt: "2026-08-26T10:00:00.000Z",
-        actByAt: "2026-08-26T10:20:00.000Z",
+      }),
+    );
+    expect(list).toContainEqual(
+      expect.objectContaining({ id: HISTORY_ID, status: "approved" }),
+    );
+  });
+
+  it("IN の approved で domainId が無い行は import_pending（取り込み待ち）に写す", async () => {
+    stubFetch(200, {
+      inbound: [],
+      outbound: [],
+      history: [
+        apiTransferSummary({
+          direction: "in",
+          status: "approved",
+          completedAt: "2026-08-26T10:30:00.000Z",
+          domainId: null,
+        }),
+      ],
+    });
+
+    const [transfer] = await services().transfers.list();
+
+    expect(transfer?.status).toBe("import_pending");
+  });
+
+  it("IN の approved でも domainId が付いた行は approved のまま（取り込み済みの履歴）", async () => {
+    stubFetch(200, {
+      inbound: [],
+      outbound: [],
+      history: [
+        apiTransferSummary({
+          direction: "in",
+          status: "approved",
+          completedAt: "2026-08-26T10:30:00.000Z",
+          domainId: "dom-1",
+        }),
+      ],
+    });
+
+    const [transfer] = await services().transfers.list();
+
+    expect(transfer?.status).toBe("approved");
+  });
+
+  it("requestedAt が null の行は completedAt で埋める（履歴の日付表示用）", async () => {
+    stubFetch(200, {
+      inbound: [],
+      outbound: [],
+      history: [
+        apiTransferSummary({
+          status: "rejected",
+          requestedAt: null,
+          actByAt: null,
+          completedAt: "2026-08-26T10:30:00.000Z",
+        }),
+      ],
+    });
+
+    const [transfer] = await services().transfers.list();
+
+    expect(transfer?.requestedAt).toBe("2026-08-26T10:30:00.000Z");
+  });
+
+  it("形が違う応答は INTERNAL（API との契約ずれを検知する）", async () => {
+    stubFetch(200, { inbound: [{ id: "broken" }], outbound: [], history: [] });
+
+    const error = await services()
+      .transfers.list()
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiClientError);
+    expect((error as ApiClientError).code).toBe("INTERNAL");
+  });
+
+  it("401 は UNAUTHORIZED の ApiClientError（AC-01-3）", async () => {
+    stubFetch(401, {
+      error: {
+        code: "UNAUTHORIZED",
+        message: "ログインが必要です。",
+        retryable: false,
+        requestId: "req_1",
       },
+    });
+
+    const error = await services()
+      .transfers.list()
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiClientError);
+    expect(error).toMatchObject({ code: "UNAUTHORIZED", requestId: "req_1" });
+  });
+});
+
+describe("transfers.refresh（S-50「状態を更新」）", () => {
+  it("GET /transfers を叩き直す（Poll 消化 + transferQuery はサーバ側で走る）", async () => {
+    stubFetch(200, {
+      inbound: [],
+      outbound: [apiTransferSummary()],
+      history: [],
+    });
+
+    const list = await services().transfers.refresh();
+
+    expect(calls[0]?.url).toContain("/api/v1/transfers");
+    expect(calls[0]?.method).toBe("GET");
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ id: OUT_ID, direction: "out" });
+  });
+});
+
+describe("transfers.approve / reject / cancel（POST /transfers/:id/*。FR-12）", () => {
+  it("approve は /api/v1/transfers/:id/approve に POST し、承認済みの行を返す（AC-12-4）", async () => {
+    stubFetch(200, {
+      transfer: apiTransferSummary({
+        status: "approved",
+        completedAt: "2026-08-26T10:05:00.000Z",
+        actByAt: null,
+      }),
+    });
+
+    const transfer = await services().transfers.approve(OUT_ID);
+
+    expect(calls[0]?.url).toContain(`/api/v1/transfers/${OUT_ID}/approve`);
+    expect(calls[0]?.method).toBe("POST");
+    expect(transfer).toMatchObject({
+      id: OUT_ID,
+      direction: "out",
+      status: "approved",
+      completedAt: "2026-08-26T10:05:00.000Z",
+    });
+  });
+
+  it("reject は /api/v1/transfers/:id/reject に POST し、拒否済みの行を返す（AC-12-4）", async () => {
+    stubFetch(200, {
+      transfer: apiTransferSummary({
+        status: "rejected",
+        completedAt: "2026-08-26T10:05:00.000Z",
+        actByAt: null,
+      }),
+    });
+
+    const transfer = await services().transfers.reject(OUT_ID);
+
+    expect(calls[0]?.url).toContain(`/api/v1/transfers/${OUT_ID}/reject`);
+    expect(transfer).toMatchObject({ id: OUT_ID, status: "rejected" });
+  });
+
+  it("cancel は /api/v1/transfers/:id/cancel に POST し、取消済みの行を返す", async () => {
+    stubFetch(200, {
+      transfer: apiTransferSummary({
+        id: IN_ID,
+        direction: "in",
+        status: "cancelled",
+        completedAt: "2026-08-26T10:05:00.000Z",
+        actByAt: null,
+      }),
+    });
+
+    const transfer = await services().transfers.cancel(IN_ID);
+
+    expect(calls[0]?.url).toContain(`/api/v1/transfers/${IN_ID}/cancel`);
+    expect(transfer).toMatchObject({ id: IN_ID, status: "cancelled" });
+  });
+
+  it("409 OPERATION_NOT_ALLOWED は ApiClientError のまま画面に渡す", async () => {
+    stubFetch(409, {
+      error: {
+        code: "OPERATION_NOT_ALLOWED",
+        message: "この移管は操作できません。",
+        retryable: false,
+        requestId: "req_2",
+      },
+    });
+
+    const error = await services()
+      .transfers.approve(OUT_ID)
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiClientError);
+    expect(error).toMatchObject({
+      code: "OPERATION_NOT_ALLOWED",
+      retryable: false,
+    });
+  });
+});
+
+describe("transfers.request（POST /transfers。FR-12）", () => {
+  it("永続化された record（uuid）を画面用 Transfer に写す", async () => {
+    stubFetch(202, {
+      transfer: TRANSFER_DTO,
+      record: apiTransferSummary({ id: IN_ID, direction: "in" }),
     });
 
     const transfer = await services().transfers.request({
@@ -339,15 +591,19 @@ describe("transfers.request（POST /transfers。FR-12）", () => {
     expect(calls[0]).toMatchObject({ method: "POST" });
     expect(calls[0]?.url).toContain("/api/v1/transfers");
     expect(transfer).toMatchObject({
-      id: "move.com",
+      // id はドメイン名ではなく transfers 行の uuid（取消 API が uuid を要求する）
+      id: IN_ID,
       domainName: "move.com",
+      registry: "kitaqsign",
       direction: "in",
       status: "pending",
+      requestedAt: "2026-08-26T10:00:00.000Z",
+      actByAt: "2026-08-26T10:20:00.000Z",
     });
   });
 
-  it("必須フィールドが欠けていれば INTERNAL（API との契約ずれを検知する）", async () => {
-    stubFetch(202, { transfer: { name: "move.com" } });
+  it("record が欠けていれば INTERNAL（API との契約ずれを検知する）", async () => {
+    stubFetch(202, { transfer: TRANSFER_DTO });
 
     const error = await services()
       .transfers.request({ name: "move.com", authCode: "s3cr3t" })
@@ -356,9 +612,10 @@ describe("transfers.request（POST /transfers。FR-12）", () => {
     expect((error as ApiClientError).code).toBe("INTERNAL");
   });
 
-  it("status が未知の値なら INTERNAL（正規化ユニオン外は受け取らない）", async () => {
+  it("transfer.status が未知の値なら INTERNAL（正規化ユニオン外は受け取らない）", async () => {
     stubFetch(202, {
-      transfer: { name: "move.com", status: "clientApproved" },
+      transfer: { ...TRANSFER_DTO, status: "clientApproved" },
+      record: apiTransferSummary({ id: IN_ID, direction: "in" }),
     });
 
     const error = await services()
