@@ -51,6 +51,13 @@ pnpm check         # lint + typecheck + test（PR 前に必須）
     （postgres.js は `Buffer`）。`bigint` は安全な範囲なら `number`。pgvector が必要になったら
     `@electric-sql/pglite/vector` を `PGlite.create({ extensions: { vector } })` で有効化する。
   - SimpleWebAuthn の `verify*` は `vi.mock("@simplewebauthn/server", …)` で差し替える（契約テストは DB 更新を検証する）。
+- 認証なしで叩ける `POST /uniqueness/preview`（FR-05 / ランディングのお試しスコア）は
+  接続元 IP 単位のトークンバケット（毎分 10 回）で守られている。**状態はモジュール変数**なので、
+  同じ口を 11 回以上叩くテストは `resetRateLimitForTesting()`
+  （`apps/api/src/middleware/rate-limit.ts`）を `beforeEach` で呼んで残トークンを持ち越さない
+  （`apps/api/test/routes/uniqueness-preview.test.ts` 参照）。
+  手元で `NEXT_PUBLIC_API_MODE=http` のランディングを連打すると同じ理由で 429 になる。
+  api を再起動すればバケットは消える。
   - FR-01 の検証ロジック（challenge 期限切れ / 使用済み / 期限切れ行の掃除、signature counter 後退、
     userHandle 不一致、最後のパスキー削除、他人のパスキー）は `apps/api/src/services/auth.test.ts` が
     サービス関数を直接呼んで pglite で常時検証する。HTTP 経由の契約（Set-Cookie 等）は `test/routes/auth.test.ts`。
