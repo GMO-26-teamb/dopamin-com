@@ -64,8 +64,8 @@ export function RenewDialog({
       : quoteOrder({ kind: "renew", domain: domain.name, years: selected });
   const helper =
     max === 0
-      ? `合計有効期間が上限（${MAX_REGISTRATION_YEARS} 年）に達しているため延長できません。`
-      : `新しい有効期限: ${renewedExpiry(domain.expiresAt, selected)}（合計 ${MAX_REGISTRATION_YEARS} 年まで）${quote === null ? "" : `・お支払い合計 ${formatJpy(quote.total)}`}`;
+      ? `合計有効期間が上限（${MAX_REGISTRATION_YEARS} 年）に達しているため更新できません。`
+      : `新しい有効期限: ${renewedExpiry(domain.expiresAt, selected)}（合計 ${MAX_REGISTRATION_YEARS} 年まで）${quote === null ? "" : ` · お支払い合計 ${formatJpy(quote.total)}`}`;
 
   const handlePrimary = async () => {
     if (quote === null) {
@@ -96,17 +96,17 @@ export function RenewDialog({
       primaryLabel={
         isPayment && quote !== null
           ? busy
-            ? "延長中…"
-            : `${formatJpy(quote.total)} を支払って延長する`
+            ? "更新中…"
+            : `${formatJpy(quote.total)} を支払って更新する`
           : "お支払いへ"
       }
       secondaryLabel={isPayment ? "戻る" : "キャンセル"}
       subtitle={
         isPayment
-          ? `${domain.name}・お支払い（モック決済・実際の請求はありません）`
-          : `${domain.name}・現在の有効期限 ${formatDate(domain.expiresAt)}`
+          ? `${domain.name} · お支払い（モック決済のため実際の請求はありません）`
+          : `${domain.name} · 現在の有効期限 ${formatDate(domain.expiresAt)}`
       }
-      title="有効期限を延長"
+      title="有効期限を更新"
     >
       {isPayment && quote !== null ? (
         <PaymentStep
@@ -121,7 +121,7 @@ export function RenewDialog({
         <Select
           disabled={max === 0}
           helper={helper}
-          label="延長する期間"
+          label="更新する期間"
           onValueChange={setPeriod}
           options={max === 0 ? [{ value: "1", label: "—" }] : options}
           surface="panel"

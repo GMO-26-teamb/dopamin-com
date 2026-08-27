@@ -74,6 +74,7 @@ export function MobileNav({ active, onLogout, className }: MobileNavProps) {
           <NavItem
             active={item.key === active}
             href={item.href}
+            icon={<item.Icon />}
             indicatorId="mobile-nav"
             key={item.key}
             orientation="horizontal"

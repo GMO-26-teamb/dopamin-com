@@ -117,7 +117,7 @@ describe("RegisterSuccessDialog（S-26）", () => {
     // NS は登録時に送っていないので「既定値」ではなく実際の結果を出す（#173）
     expect(screen.getByText(/ネームサーバーは未設定/)).toBeInTheDocument();
     expect(
-      screen.getByText(/お支払い ¥1,628（Visa •••• 4242）・受付 pay_ABCD1234/),
+      screen.getByText(/お支払い ¥1,628（Visa •••• 4242） · 受付 pay_ABCD1234/),
     ).toBeInTheDocument();
 
     await userEvent.click(
@@ -167,14 +167,12 @@ describe("RegisterConflictDialog（S-27）", () => {
     expect(
       screen.getByText("takutaku.com は取得できませんでした"),
     ).toBeInTheDocument();
-    expect(screen.getByText("a.com・b.com・c.com")).toBeInTheDocument();
+    expect(screen.getByText("a.com / b.com / c.com")).toBeInTheDocument();
     // 内部の識別子（CONFLICT / 409）は本文に出さない（#218）
     expect(screen.getByText(/ほかの人が取得済みでした/)).toBeInTheDocument();
     expect(screen.queryByText(/CONFLICT/)).toBeNull();
 
-    await userEvent.click(
-      screen.getByRole("button", { name: "代替候補を見る" }),
-    );
+    await userEvent.click(screen.getByRole("button", { name: "代替を見る" }));
     expect(onShowAlternatives).toHaveBeenCalledWith([
       "a.com",
       "b.com",
@@ -219,7 +217,7 @@ describe("RegisterTimeoutDialog（S-28）", () => {
     // EPP のコマンド名（info）は本文に出さない（#218）
     expect(screen.queryByText(/info/)).toBeNull();
     expect(
-      screen.getByText("REGISTRY_TIMEOUT・504・req_01J8ZQ7M2K"),
+      screen.getByText("REGISTRY_TIMEOUT · 504 · req_01J8ZQ7M2K"),
     ).toBeInTheDocument();
   });
 

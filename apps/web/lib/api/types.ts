@@ -85,14 +85,15 @@ export interface SyncResult {
 }
 
 /**
- * `PATCH /domains/:name` に渡すコンタクト（FR-09 / 要件 §10.1 の `contacts`）。
+ * `POST /domains` / `PATCH /domains/:name` に渡すコンタクト
+ * （FR-06 / FR-09 / 要件 §10.1 の `contacts`）。
  *
  * 登録者（Registrant）のみを扱う。技術（Technical）は FR-09 上は任意だが
  * {@link DomainDetail} に保持先が無いため、この ViewModel では扱わない。
  * 値はレジストリが許可するダミー PII のみ（`RegistrantProfile`）。
- * `street` / `city` / `countryCode` は D-02 に入力欄が無いので HTTP 実装が
+ * `street` / `city` / `countryCode` は D-02 / S-25 に入力欄が無いので HTTP 実装が
  * `DEFAULT_REGISTRANT_PROFILE` から補う（#172）。
- * S-39（移管 IN 後のコンタクト未移行）の再実行はこの入力で行う。
+ * S-39（移管 IN 後のコンタクト未移行）の再実行もこの入力で行う。
  */
 export interface DomainContactsInput {
   /** 氏名は許可された 8 種のダミー値のみ（`ALLOWED_CONTACT_NAMES`）。 */
@@ -259,7 +260,7 @@ export interface PaymentReceipt {
   currency: OrderQuote["currency"];
   brand: string;
   last4: string;
-  /** 摘要（例 `takutaku.com 新規登録 2 年`） */
+  /** 摘要（例: `takutaku.com 新規登録 2 年`） */
   description: string;
 }
 

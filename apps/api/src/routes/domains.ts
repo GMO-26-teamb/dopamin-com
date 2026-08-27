@@ -261,10 +261,15 @@ export const domains = new Hono<AuthedEnv>()
 
     // FR-06「登録者プロファイルを自動適用」: ユーザー × レジストリで 1 件のコンタクトを
     // 用意して使い回す（未作成なら contact:create）。#72
+    //
+    // S-25 で登録者を指定したときは PATCH と同じ経路でそのプロファイルを使う
+    // （＝既存コンタクトがあれば contact:update で中身を差し替える）。
+    // 省略時は既定プロファイル（`DEFAULT_REGISTRANT_PROFILE`）のまま（従来どおり）。
     const registrantContactId = await ensureRegistryContact(
       c.get("user").id,
       adapter,
       "registrant",
+      body.contacts?.registrant,
     );
 
     // AC-06-2: create タイムアウト時は再送せず info で存在確認して結果を確定する

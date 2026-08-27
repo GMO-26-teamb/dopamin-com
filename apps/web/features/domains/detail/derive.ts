@@ -67,7 +67,7 @@ export function isTransferLocked(statuses: readonly string[]): boolean {
   );
 }
 
-/** 有効期限が 10 年上限に収まる最大の延長年数（AC-08-2）。0 なら延長できない。 */
+/** 有効期限が 10 年上限に収まる最大の更新年数（AC-08-2）。0 なら更新できない。 */
 export const MAX_REGISTRATION_YEARS = 10;
 
 export function maxRenewPeriod(expiresAt: string | null, now: number): number {
@@ -86,7 +86,7 @@ export function maxRenewPeriod(expiresAt: string | null, now: number): number {
   );
 }
 
-/** 延長後の有効期限（`YYYY-MM-DD`・ローカル日付）。 */
+/** 更新後の有効期限（`YYYY-MM-DD`・ローカル日付）。 */
 export function renewedExpiry(
   expiresAt: string | null,
   period: number,
