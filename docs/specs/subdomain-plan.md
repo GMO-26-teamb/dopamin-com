@@ -111,7 +111,25 @@ sequenceDiagram
 
 ## 3. 画面・UI
 
-本書の範囲外（設計ツリー・差分ダイアログの接続は #91 / #92）。
+画面（設計ツリー・差分ダイアログ）そのものは #91 / #92 の範囲。ここには、
+`NEXT_PUBLIC_API_MODE=http` で画面を本 API に繋ぐ層（`apps/web/lib/api/http/http-services.ts` の
+`SubdomainService`。#187）の写像だけを書く。ブラウザ内モックと同じ ViewModel
+（`apps/web/lib/api/types.ts` の `SubdomainPlan` / `DnsDiff`）に寄せるため、次を補っている。
+
+| 画面が要るもの | API の応答 | 補い方 |
+|---|---|---|
+| `SubdomainHost.id` | 無し（項目に ID を振らない） | ホスト名をそのまま ID にする。設計内でホストは一意（`hasUniqueHosts`）なので衝突せず、保存で採番し直されない |
+| `applyStatus`（`pending` / `applied` / `changed`） | `applyState`（`unapplied` / `applied` / `changed`） | 呼び名の対応表で 1:1 に写す |
+| `SubdomainPlan.nameserversSwitched` | 無し（設計の応答は NS を返さない） | `appliedAt !== null` から導く。反映は NS 切替を先に行い、切り替えられなければレコードを 1 件も変えずに失敗する（AC-13-5）ので「反映済み = NS はドパ民 DNS」が成り立つ。`GET /domains/:name` を足すとレジストリ呼び出しが S-43 を開くたびに 1 回増えるため採らない |
+| 差分の各行の用途・重要度 | `GET /domains/:name/dns` はレコード（host / recordType / target / ttl）だけ | 保存済み設計を併せて引き、ホスト名で引き当てて埋める |
+| 反映後の設計（S-45 の全ノード「反映済み」） | apply の応答は件数のみ | apply の直後に `GET /domains/:name/subdomain-plan` を取り直す |
+| 未保存 = S-40 の空状態 | 未保存は 404 | `NOT_FOUND` だけを `null` に倒す（他の失敗はそのまま投げる） |
+
+提案（`POST`）の失敗は、相手によって画面の出方が変わる（S-41 = Banner Warn + 再試行 /
+S-42 = 概要入力へ倒す・AC-13-2）。GitHub 解析の失敗は `NOT_FOUND` で返るので、
+`AI_UNAVAILABLE` / `REGISTRY_TIMEOUT` / `REGISTRY_UNAVAILABLE` のときだけ
+`origin: "ai"` を付ける（`withErrorOrigin`）。`RATE_LIMITED` は GitHub と AI の
+どちらでも返り相手を断定できないため、手が残る方（概要入力）に倒す。
 
 ## 4. API 契約
 
@@ -151,7 +169,8 @@ sequenceDiagram
 |---|---|
 | unit | `packages/shared/src/subdomains.test.ts`（差分・反映状態・手順テキスト）、`packages/db` のスキーマ制約は `apps/api/test/db/subdomain-schema.test.ts` |
 | 契約 / 統合 | `apps/api/test/lib/github.test.ts`（mock / real 両経路、失敗の分類、8KB 切り出し）、`test/routes/subdomain-plan-generate.test.ts`、`test/routes/subdomain-plan-save.test.ts`、`test/routes/subdomain-plan-apply.test.ts` |
-| 手動 | `GITHUB_MODE=real` で実リポジトリを解析し、提案が構造ヒントを反映していること |
+| 契約（web） | `apps/web/lib/api/http/http-services.test.ts`: `subdomains` の 5 メソッド（写像・未保存の 404 → null・提案の失敗の相手分け・apply 後の取り直し） |
+| 手動 | `GITHUB_MODE=real` で実リポジトリを解析し、提案が構造ヒントを反映していること。`NEXT_PUBLIC_API_MODE=http` で提案 → 保存 → 反映が通ること |
 
 ## 8. 未決事項・要確認
 
@@ -167,3 +186,4 @@ sequenceDiagram
 | 版 | 日付 | 内容 |
 |---|---|---|
 | v0.1 | 2026-08-27 | 初版（#36 / #68 / #69 / #70 の実装に合わせて起票） |
+| v0.2 | 2026-08-27 | §3 を「Web の配線」に広げ、`NEXT_PUBLIC_API_MODE=http` での ViewModel 写像（ホスト名 = ID / `applyState` → `applyStatus` / `nameserversSwitched` を `appliedAt` から導く / 差分の用途・重要度の補完 / apply 後の取り直し / 未保存の 404 → null）と提案の失敗の相手分けを追記。§7 に web の契約テスト行。#187 |
