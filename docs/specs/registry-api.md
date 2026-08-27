@@ -270,3 +270,14 @@ result code ごとの**ユーザー向け理由文**は `packages/shared/src/reg
   `msgType` / `payload` と transfer fixture の `status` は実応答が未取得のため暫定値
   （`docs/registry/fixtures/README.md`）。
 - Poll 通知の `msgType` の値と `payload` の中身は未確定【要確認: requirements.md §21.2 #13】。
+
+---
+
+## 更新履歴
+
+本書は `docs/specs/_template.md` より前に書かれたため版番号を持っていなかった。
+2026-08-28 以降の変更はここに記録する（それ以前の経緯は `git log docs/specs/registry-api.md`）。
+
+| 版 | 日付 | 内容 |
+|---|---|---|
+| v1 | 2026-08-28 | 版番号の付与。§1 に未認証の `POST /uniqueness/preview`（本 spec の対象外）を注記、§2 / §3-17 に `GET /domains/:name` の `subdomainPlan: { hosts, applied } \| null` を追記（#217 / requirements v0.1.27）、§5 のコンタクト更新を実装済みに更新（#172 / #205） |

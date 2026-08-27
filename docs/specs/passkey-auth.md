@@ -345,3 +345,14 @@ A / B / D のマージ後に main から着手する。`packages/shared/src/erro
 2. A → B → D（`routes/auth.ts` の `/me` と `/passkeys/:id` は近接編集だが別ハンドラ。`index.ts` の `.route()` 追加は B のみ）
 3. E（A の requireSession 適用後の挙動で検証したいので最後）
 4. Wave 2
+
+---
+
+## 更新履歴
+
+本書は `docs/specs/_template.md` より前に書かれたため版番号を持っていなかった。
+2026-08-28 以降の変更はここに記録する（それ以前の経緯は `git log docs/specs/passkey-auth.md`）。
+
+| 版 | 日付 | 内容 |
+|---|---|---|
+| v1 | 2026-08-28 | 版番号の付与。§1 / §6 の本番 RP ID・Origin を `dopamin.vercel.app` から実際の `dopamin.ut42tech.com` に更新（requirements §16.1 / §16.4） |

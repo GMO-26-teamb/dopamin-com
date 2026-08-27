@@ -27,6 +27,7 @@
 | 1-3 | `GET /api/v1/health` | `status: "ok"`、両レジストリ `ok: true`、`db.ok: true` | | | |
 | 1-4 | 本番が実 API モード | 未ログインで `/dashboard` を開くと `/login?next=/dashboard` へ 307。**200 が返ったら mock モードなので即エスカレーション**（`NEXT_PUBLIC_API_MODE`。#180） | | | |
 | 1-5 | マイグレーション適用済み | `pnpm db:migrate` を当てた後に本番 DB のテーブルが最新（CI では自動適用しない。§16.2） | | | |
+| 1-6 | 未ログインのお試しスコア | ランディング（`/`）の入力欄に `gogle` を入れるとスコアが出る（`POST /api/v1/uniqueness/preview`・認証不要）。**11 回目以降は 429**（IP 単位で毎分 10 回。仕様どおり） | | | |
 
 ## 2. エラーシミュレーション（§11.6・GMO 要件）
 
