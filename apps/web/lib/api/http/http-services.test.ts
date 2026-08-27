@@ -40,6 +40,50 @@ function stubFetch(status: number, body: unknown): void {
   );
 }
 
+/**
+ * ルート（メソッド + URL の部分一致）ごとに応答を返す。
+ * 1 回のサービス呼び出しで 2 本叩く経路（`subdomains.diff` / `subdomains.apply`）用。
+ * どれにも当たらない要求は 500 にして、想定外の呼び出しをテストで拾う。
+ */
+interface StubRoute {
+  method: string;
+  /** URL に含まれる文字列。`/subdomain-plan/apply` のように長い方を先に並べる。 */
+  path: string;
+  status?: number;
+  body: unknown;
+}
+
+function stubFetchRoutes(routes: readonly StubRoute[]): void {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : null;
+      const url = request ? request.url : String(input);
+      const method = request?.method ?? init?.method ?? "GET";
+      calls.push({
+        url,
+        method,
+        body: typeof init?.body === "string" ? init.body : null,
+        contentType: new Headers(init?.headers).get("content-type"),
+      });
+      const route = routes.find(
+        (candidate) =>
+          candidate.method === method && url.includes(candidate.path),
+      );
+      const body =
+        route === undefined
+          ? { error: { code: "INTERNAL", message: `未定義のルート ${url}` } }
+          : route.body;
+      return Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status: route === undefined ? 500 : (route.status ?? 200),
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    }),
+  );
+}
+
 function services(): Services {
   return createHttpServices();
 }
@@ -705,15 +749,31 @@ describe("settings.updateAi（PATCH /settings/ai）", () => {
   });
 });
 
-describe("settings.demoReset（POST /demo/reset）", () => {
-  it("API 未実装のため NOT_IMPLEMENTED のまま（FR-16 は別トラック）", async () => {
-    stubFetch(200, {});
+describe("settings.demoReset（POST /demo/reset。FR-16）", () => {
+  it("同一オリジンの /api/v1/demo/reset を POST する（AC-16-1）", async () => {
+    stubFetch(200, { ok: true, domains: ["dopamin-demo-a1b2.com"] });
+
+    await expect(services().settings.demoReset()).resolves.toBeUndefined();
+
+    expect(calls[0]?.url).toContain("/api/v1/demo/reset");
+    expect(calls[0]?.method).toBe("POST");
+  });
+
+  it("無効な環境の 404 は NOT_FOUND として投げる（AC-16-1）", async () => {
+    stubFetch(404, {
+      error: {
+        code: "NOT_FOUND",
+        message: "デモデータリセットはこの環境では利用できません。",
+        retryable: false,
+      },
+    });
+
     const error = await services()
       .settings.demoReset()
       .catch((e: unknown) => e);
+
     expect(error).toBeInstanceOf(ApiClientError);
-    expect((error as ApiClientError).code).toBe("NOT_IMPLEMENTED");
-    expect(calls).toHaveLength(0);
+    expect((error as ApiClientError).code).toBe("NOT_FOUND");
   });
 });
 
@@ -949,5 +1009,648 @@ describe("candidates.generate（POST /ai/domain-candidates。FR-04）", () => {
       .candidates.generate({ nickname: "たくたく" })
       .catch((e: unknown) => e);
     expect(error).toMatchObject({ code: "UNAUTHORIZED", origin: "ai" });
+  });
+});
+
+// ---- サブドメイン設計（FR-13 / #187） ----
+
+const PLAN_PATH = "/api/v1/domains/example.com/subdomain-plan";
+const APPLY_PATH = `${PLAN_PATH}/apply`;
+const DNS_PATH = "/api/v1/domains/example.com/dns";
+
+/** `GET /domains/:name/subdomain-plan` の 1 項目（shared の subdomainPlanItemSchema と同じ形）。 */
+function apiPlanItem(overrides: Record<string, unknown> = {}) {
+  return {
+    host: "www",
+    purpose: "ランディングページ",
+    recordType: "A",
+    target: "203.0.113.10",
+    priority: "required",
+    applyState: "applied",
+    ...overrides,
+  };
+}
+
+/** 保存済み設計の応答（shared の subdomainPlanResponseSchema と同じ形）。 */
+function apiPlan(overrides: Record<string, unknown> = {}) {
+  return {
+    domain: "example.com",
+    repoUrl: "https://github.com/takutaku/example",
+    policy: "www と api を分ける",
+    items: [apiPlanItem()],
+    savedAt: "2026-08-27T00:00:00.000Z",
+    appliedAt: "2026-08-27T00:05:00.000Z",
+    instructions: "example.com のサブドメイン設定手順",
+    ...overrides,
+  };
+}
+
+/** §10.3 の統一エラー形式。 */
+function apiError(code: string, message: string, retryable = false) {
+  return { error: { code, message, retryable } };
+}
+
+describe("subdomains.get（GET /domains/:name/subdomain-plan。FR-13）", () => {
+  it("applyState を applyStatus に写し、ホスト名を ID に使う（AC-13-6）", async () => {
+    stubFetch(200, {
+      ...apiPlan(),
+      items: [
+        apiPlanItem(),
+        apiPlanItem({
+          host: "api",
+          purpose: "API サーバー",
+          recordType: "CNAME",
+          target: "api.example-app.com",
+          priority: "recommended",
+          applyState: "changed",
+        }),
+        apiPlanItem({
+          host: "docs",
+          purpose: "ドキュメント",
+          recordType: "CNAME",
+          target: "docs.example-app.com",
+          priority: "optional",
+          applyState: "unapplied",
+        }),
+      ],
+    });
+
+    const plan = await services().subdomains.get("example.com");
+
+    expect(calls[0]?.url).toContain(PLAN_PATH);
+    expect(calls[0]?.method).toBe("GET");
+    expect(plan).toEqual({
+      domain: "example.com",
+      repoUrl: "https://github.com/takutaku/example",
+      policy: "www と api を分ける",
+      hosts: [
+        {
+          id: "www",
+          host: "www",
+          purpose: "ランディングページ",
+          recordType: "A",
+          target: "203.0.113.10",
+          priority: "required",
+          applyStatus: "applied",
+        },
+        {
+          id: "api",
+          host: "api",
+          purpose: "API サーバー",
+          recordType: "CNAME",
+          target: "api.example-app.com",
+          priority: "recommended",
+          applyStatus: "changed",
+        },
+        {
+          id: "docs",
+          host: "docs",
+          purpose: "ドキュメント",
+          recordType: "CNAME",
+          target: "docs.example-app.com",
+          priority: "optional",
+          applyStatus: "pending",
+        },
+      ],
+      nameserversSwitched: true,
+      savedAt: "2026-08-27T00:00:00.000Z",
+      appliedAt: "2026-08-27T00:05:00.000Z",
+    });
+  });
+
+  it("未反映（appliedAt が null）なら NS は未切替として出す（S-43 / AC-13-5）", async () => {
+    stubFetch(200, apiPlan({ appliedAt: null }));
+
+    const plan = await services().subdomains.get("example.com");
+
+    expect(plan?.nameserversSwitched).toBe(false);
+  });
+
+  it("未保存の 404 は例外ではなく null（S-40 の空状態）", async () => {
+    stubFetch(404, apiError("NOT_FOUND", "まだ保存されていません。"));
+
+    await expect(services().subdomains.get("example.com")).resolves.toBeNull();
+  });
+
+  it("404 以外の失敗はそのまま投げる", async () => {
+    stubFetch(401, apiError("UNAUTHORIZED", "ログインが必要です。"));
+
+    const error = await services()
+      .subdomains.get("example.com")
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ApiClientError);
+    expect((error as ApiClientError).code).toBe("UNAUTHORIZED");
+  });
+
+  it("応答の形が違えば INTERNAL（自前 API 側の問題）", async () => {
+    stubFetch(200, { ...apiPlan(), savedAt: "きのう" });
+
+    const error = await services()
+      .subdomains.get("example.com")
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ApiClientError);
+    expect((error as ApiClientError).code).toBe("INTERNAL");
+  });
+});
+
+describe("subdomains.propose（POST /domains/:name/subdomain-plan。FR-13）", () => {
+  const PROPOSAL = {
+    domain: "example.com",
+    repoUrl: "https://github.com/takutaku/example",
+    policy: "www と api を分ける",
+    items: [apiPlanItem({ applyState: undefined })].map(
+      ({ applyState: _ignored, ...item }) => item,
+    ),
+  };
+
+  it("リポジトリ URL を JSON で送り、提案は未保存・未反映として返す（AC-13-1）", async () => {
+    stubFetch(200, PROPOSAL);
+
+    const plan = await services().subdomains.propose("example.com", {
+      repoUrl: "https://github.com/takutaku/example",
+    });
+
+    expect(calls[0]?.url).toContain(PLAN_PATH);
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.contentType).toBe("application/json");
+    expect(JSON.parse(calls[0]?.body ?? "null")).toEqual({
+      repoUrl: "https://github.com/takutaku/example",
+    });
+    expect(plan).toEqual({
+      domain: "example.com",
+      repoUrl: "https://github.com/takutaku/example",
+      policy: "www と api を分ける",
+      hosts: [
+        {
+          id: "www",
+          host: "www",
+          purpose: "ランディングページ",
+          recordType: "A",
+          target: "203.0.113.10",
+          priority: "required",
+          applyStatus: "pending",
+        },
+      ],
+      nameserversSwitched: false,
+      savedAt: null,
+      appliedAt: null,
+    });
+  });
+
+  it("概要テキストだけでも提案できる（AC-13-2 の代替入力）", async () => {
+    stubFetch(200, { ...PROPOSAL, repoUrl: null });
+
+    const plan = await services().subdomains.propose("example.com", {
+      description: "個人のポートフォリオサイト",
+    });
+
+    expect(JSON.parse(calls[0]?.body ?? "null")).toEqual({
+      description: "個人のポートフォリオサイト",
+    });
+    expect(plan.repoUrl).toBeNull();
+  });
+
+  it("AI 側の失敗には origin: ai を付ける（S-41 の Banner Warn + 再試行）", async () => {
+    stubFetch(503, apiError("AI_UNAVAILABLE", "AI が利用できません。", true));
+
+    const error = await services()
+      .subdomains.propose("example.com", { repoUrl: "https://github.com/a/b" })
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ApiClientError);
+    expect((error as ApiClientError).code).toBe("AI_UNAVAILABLE");
+    expect((error as ApiClientError).origin).toBe("ai");
+    // 相手を付け替えても本文・再試行可否は API の応答のまま残す
+    expect((error as ApiClientError).message).toBe("AI が利用できません。");
+    expect((error as ApiClientError).retryable).toBe(true);
+  });
+
+  it("リポジトリを取得できない NOT_FOUND には相手を付けない（S-42 の概要入力へ倒す）", async () => {
+    stubFetch(404, apiError("NOT_FOUND", "リポジトリを取得できません。"));
+
+    const error = await services()
+      .subdomains.propose("example.com", { repoUrl: "https://github.com/a/b" })
+      .catch((e: unknown) => e);
+
+    expect((error as ApiClientError).code).toBe("NOT_FOUND");
+    expect((error as ApiClientError).origin).toBeUndefined();
+  });
+
+  it("RATE_LIMITED は GitHub / AI のどちらでも返るので相手を断定しない", async () => {
+    stubFetch(429, apiError("RATE_LIMITED", "利用制限に達しました。", true));
+
+    const error = await services()
+      .subdomains.propose("example.com", { repoUrl: "https://github.com/a/b" })
+      .catch((e: unknown) => e);
+
+    expect((error as ApiClientError).code).toBe("RATE_LIMITED");
+    expect((error as ApiClientError).origin).toBeUndefined();
+  });
+});
+
+describe("subdomains.save（PUT /domains/:name/subdomain-plan。FR-13）", () => {
+  const DRAFT = {
+    domain: "example.com",
+    repoUrl: "https://github.com/takutaku/example",
+    policy: "www と api を分ける",
+    hosts: [
+      {
+        id: "draft-2",
+        host: "www",
+        purpose: "ランディングページ",
+        recordType: "A" as const,
+        target: "203.0.113.10",
+        priority: "required" as const,
+        applyStatus: "pending" as const,
+      },
+    ],
+    nameserversSwitched: false,
+    savedAt: null,
+    appliedAt: null,
+  };
+
+  it("設計だけを PUT し、画面側の ID・反映状態は送らない（AC-13-3）", async () => {
+    stubFetch(200, apiPlan({ appliedAt: null }));
+
+    await services().subdomains.save("example.com", DRAFT);
+
+    expect(calls[0]?.url).toContain(PLAN_PATH);
+    expect(calls[0]?.method).toBe("PUT");
+    expect(JSON.parse(calls[0]?.body ?? "null")).toEqual({
+      policy: "www と api を分ける",
+      items: [
+        {
+          host: "www",
+          purpose: "ランディングページ",
+          recordType: "A",
+          target: "203.0.113.10",
+          priority: "required",
+        },
+      ],
+      repoUrl: "https://github.com/takutaku/example",
+    });
+  });
+
+  it("repoUrl が無い設計では repoUrl を送らない（スキーマ上も任意）", async () => {
+    stubFetch(200, apiPlan({ repoUrl: null, appliedAt: null }));
+
+    await services().subdomains.save("example.com", {
+      ...DRAFT,
+      repoUrl: null,
+    });
+
+    expect(JSON.parse(calls[0]?.body ?? "null")).not.toHaveProperty("repoUrl");
+  });
+
+  it("保存後の反映状態はサーバーの応答をそのまま写す（AC-13-6）", async () => {
+    stubFetch(200, {
+      ...apiPlan({ appliedAt: null }),
+      items: [apiPlanItem({ applyState: "changed" })],
+    });
+
+    const saved = await services().subdomains.save("example.com", DRAFT);
+
+    expect(saved.hosts[0]?.applyStatus).toBe("changed");
+    expect(saved.savedAt).toBe("2026-08-27T00:00:00.000Z");
+  });
+});
+
+describe("subdomains.diff（GET /domains/:name/dns。FR-13）", () => {
+  it("差分を写し、用途・重要度は保存済み設計から補う（AC-13-7）", async () => {
+    stubFetchRoutes([
+      {
+        method: "GET",
+        path: DNS_PATH,
+        body: {
+          records: [
+            {
+              host: "api",
+              recordType: "CNAME",
+              target: "old.example-app.com",
+              ttl: 3600,
+              source: "subdomain_plan",
+              appliedAt: "2026-08-27T00:05:00.000Z",
+            },
+            {
+              host: "old",
+              recordType: "A",
+              target: "203.0.113.99",
+              ttl: 300,
+              source: "subdomain_plan",
+              appliedAt: "2026-08-27T00:05:00.000Z",
+            },
+          ],
+          diff: {
+            added: [
+              {
+                host: "docs",
+                recordType: "CNAME",
+                target: "docs.example-app.com",
+                ttl: 3600,
+              },
+            ],
+            changed: [
+              {
+                current: {
+                  host: "api",
+                  recordType: "CNAME",
+                  target: "old.example-app.com",
+                  ttl: 3600,
+                  source: "subdomain_plan",
+                  appliedAt: "2026-08-27T00:05:00.000Z",
+                },
+                desired: {
+                  host: "api",
+                  recordType: "CNAME",
+                  target: "api.example-app.com",
+                  ttl: 3600,
+                },
+              },
+            ],
+            removed: [
+              {
+                host: "old",
+                recordType: "A",
+                target: "203.0.113.99",
+                ttl: 300,
+                source: "subdomain_plan",
+                appliedAt: "2026-08-27T00:05:00.000Z",
+              },
+            ],
+            unchanged: [
+              {
+                host: "www",
+                recordType: "A",
+                target: "203.0.113.10",
+                ttl: 3600,
+              },
+            ],
+          },
+        },
+      },
+      {
+        method: "GET",
+        path: PLAN_PATH,
+        body: {
+          ...apiPlan(),
+          items: [
+            apiPlanItem(),
+            apiPlanItem({
+              host: "api",
+              purpose: "API サーバー",
+              recordType: "CNAME",
+              target: "api.example-app.com",
+              priority: "recommended",
+              applyState: "changed",
+            }),
+            apiPlanItem({
+              host: "docs",
+              purpose: "ドキュメント",
+              recordType: "CNAME",
+              target: "docs.example-app.com",
+              priority: "optional",
+              applyState: "unapplied",
+            }),
+          ],
+        },
+      },
+    ]);
+
+    const diff = await services().subdomains.diff("example.com");
+
+    expect(calls.map((call) => call.method)).toEqual(["GET", "GET"]);
+    expect(diff).toEqual({
+      added: [
+        {
+          id: "docs",
+          host: "docs",
+          purpose: "ドキュメント",
+          recordType: "CNAME",
+          target: "docs.example-app.com",
+          priority: "optional",
+          applyStatus: "pending",
+        },
+      ],
+      updated: [
+        {
+          host: {
+            id: "api",
+            host: "api",
+            purpose: "API サーバー",
+            recordType: "CNAME",
+            target: "api.example-app.com",
+            priority: "recommended",
+            applyStatus: "changed",
+          },
+          previous: {
+            host: "api",
+            recordType: "CNAME",
+            target: "old.example-app.com",
+            ttl: 3600,
+          },
+        },
+      ],
+      removed: [
+        { host: "old", recordType: "A", target: "203.0.113.99", ttl: 300 },
+      ],
+      unchanged: ["www"],
+    });
+  });
+
+  it("設計が未保存なら差分も空（サーバーが空の diff を返す）", async () => {
+    stubFetchRoutes([
+      {
+        method: "GET",
+        path: DNS_PATH,
+        body: {
+          records: [],
+          diff: { added: [], changed: [], removed: [], unchanged: [] },
+        },
+      },
+      {
+        method: "GET",
+        path: PLAN_PATH,
+        status: 404,
+        body: apiError("NOT_FOUND", "まだ保存されていません。"),
+      },
+    ]);
+
+    await expect(services().subdomains.diff("example.com")).resolves.toEqual({
+      added: [],
+      updated: [],
+      removed: [],
+      unchanged: [],
+    });
+  });
+});
+
+describe("subdomains.apply（POST .../subdomain-plan/apply。FR-13）", () => {
+  it("件数を返しつつ、反映後の設計を取り直す（AC-13-4）", async () => {
+    stubFetchRoutes([
+      {
+        method: "POST",
+        path: APPLY_PATH,
+        body: { added: 2, updated: 1, removed: 0, nameserversChanged: true },
+      },
+      { method: "GET", path: PLAN_PATH, body: apiPlan() },
+    ]);
+
+    const result = await services().subdomains.apply("example.com");
+
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.url).toContain(APPLY_PATH);
+    expect(calls[1]?.method).toBe("GET");
+    expect(result).toMatchObject({
+      added: 2,
+      updated: 1,
+      removed: 0,
+      nameserversChanged: true,
+    });
+    // 反映が通った = NS はドパ民 DNS（切替に失敗すれば apply ごと失敗する・AC-13-5）
+    expect(result.plan.nameserversSwitched).toBe(true);
+    expect(result.plan.appliedAt).toBe("2026-08-27T00:05:00.000Z");
+    expect(result.plan.hosts[0]?.applyStatus).toBe("applied");
+  });
+
+  it("NS 切替に失敗したら反映自体が失敗し、設計は取り直さない（S-46 / AC-13-5）", async () => {
+    stubFetchRoutes([
+      {
+        method: "POST",
+        path: APPLY_PATH,
+        status: 503,
+        body: apiError(
+          "REGISTRY_UNAVAILABLE",
+          "レジストリに接続できませんでした。",
+          true,
+        ),
+      },
+      { method: "GET", path: PLAN_PATH, body: apiPlan() },
+    ]);
+
+    const error = await services()
+      .subdomains.apply("example.com")
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ApiClientError);
+    expect((error as ApiClientError).code).toBe("REGISTRY_UNAVAILABLE");
+    expect(calls).toHaveLength(1);
+  });
+});
+
+// ---- ログ（FR-14 / FR-15 / #187） ----
+
+describe("logs.operations（GET /logs/operations。FR-15）", () => {
+  it("1 ページで取り、request / response をそのまま画面に渡す（AC-15-2）", async () => {
+    stubFetch(200, {
+      items: [
+        {
+          id: "5b1d5a1e-6d0f-4f3d-9f21-2f7b1f4b0a11",
+          at: "2026-08-27T00:00:00.000Z",
+          command: "create",
+          registry: "kitaqsign",
+          domainName: "example.com",
+          status: "error",
+          errorCode: "REGISTRY_UNAVAILABLE",
+          registryCode: "2400",
+          latencyMs: 1200,
+          requestId: "req_1",
+          request: { name: "example.com", pw: "***" },
+          response: { code: 2400 },
+        },
+      ],
+      nextCursor: null,
+    });
+
+    const logs = await services().logs.operations();
+
+    expect(calls[0]?.url).toContain("/api/v1/logs/operations");
+    expect(calls[0]?.url).toContain("limit=100");
+    expect(logs).toEqual([
+      {
+        id: "5b1d5a1e-6d0f-4f3d-9f21-2f7b1f4b0a11",
+        at: "2026-08-27T00:00:00.000Z",
+        command: "create",
+        registry: "kitaqsign",
+        domainName: "example.com",
+        status: "error",
+        errorCode: "REGISTRY_UNAVAILABLE",
+        registryCode: "2400",
+        latencyMs: 1200,
+        request: { name: "example.com", pw: "***" },
+        response: { code: 2400 },
+      },
+    ]);
+  });
+
+  it("0 件でも空配列で返す（S-60 の Empty State）", async () => {
+    stubFetch(200, { items: [], nextCursor: null });
+
+    await expect(services().logs.operations()).resolves.toEqual([]);
+  });
+});
+
+describe("logs.ai（GET /logs/ai。FR-14）", () => {
+  /** `GET /logs/ai` の 1 件（shared の aiLogItemSchema と同じ形）。 */
+  function apiAiLog(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "0f2a0f6f-2c1d-4d0f-8d3a-9b6b5f0e1c22",
+      at: "2026-08-27T00:00:00.000Z",
+      feature: "subdomain_plan",
+      provider: "google",
+      model: "gemini-2.5-flash",
+      inputSummary: "example.com / repo あり",
+      outputSummary: "www・api・docs の 3 ホスト",
+      status: "success",
+      errorMessage: null,
+      latencyMs: 4200,
+      tokensIn: 900,
+      tokensOut: 350,
+      output: { policy: "www と api を分ける" },
+      ...overrides,
+    };
+  }
+
+  it("入出力トークンを合計し、構造化出力を raw に載せる（AC-14-1）", async () => {
+    stubFetch(200, { items: [apiAiLog()], nextCursor: null });
+
+    const logs = await services().logs.ai();
+
+    expect(calls[0]?.url).toContain("/api/v1/logs/ai");
+    expect(logs[0]).toEqual({
+      id: "0f2a0f6f-2c1d-4d0f-8d3a-9b6b5f0e1c22",
+      at: "2026-08-27T00:00:00.000Z",
+      feature: "subdomain_plan",
+      provider: "google",
+      model: "gemini-2.5-flash",
+      inputSummary: "example.com / repo あり",
+      outputSummary: "www・api・docs の 3 ホスト",
+      status: "success",
+      latencyMs: 4200,
+      tokens: 1250,
+      raw: { policy: "www と api を分ける" },
+    });
+  });
+
+  it("トークン数が取れなかった失敗ログは tokens を null のまま出す（AC-14-1）", async () => {
+    stubFetch(200, {
+      items: [
+        apiAiLog({
+          status: "error",
+          errorMessage: "AI が 10 秒以内に応答しませんでした。",
+          outputSummary: "（失敗）",
+          tokensIn: null,
+          tokensOut: null,
+          output: null,
+        }),
+      ],
+      nextCursor: null,
+    });
+
+    const [log] = await services().logs.ai();
+
+    expect(log?.status).toBe("error");
+    expect(log?.tokens).toBeNull();
   });
 });
