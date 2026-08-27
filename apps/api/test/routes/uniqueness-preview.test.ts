@@ -169,4 +169,41 @@ describe("POST /api/v1/uniqueness/preview のレート制限", () => {
 
     expect((await preview({ sld: "gogle" }, "198.51.100.5")).status).toBe(429);
   });
+
+  it("x-forwarded-for を自分で付けても数える単位は変えられない", async () => {
+    // 前段が追記するヘッダなので、呼び出し側が載せた値は先頭に押し出される。
+    // 先頭を鍵にしていると、毎回でたらめな値を付けるだけで上限を迂回できてしまう
+    const spoof = (nth: number) =>
+      app.request("/api/v1/uniqueness/preview", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-forwarded-for": `10.0.0.${nth}, 198.51.100.9`,
+        },
+        body: JSON.stringify({ sld: "gogle" }),
+      });
+
+    for (let i = 0; i < UNAUTHENTICATED_RATE_LIMIT.limit; i += 1) {
+      expect((await spoof(i)).status).toBe(200);
+    }
+    expect((await spoof(99)).status).toBe(429);
+  });
+
+  it("プラットフォームが付けるヘッダを優先する", async () => {
+    const platform = (forwarded: string) =>
+      app.request("/api/v1/uniqueness/preview", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-vercel-forwarded-for": "198.51.100.10",
+          "x-forwarded-for": forwarded,
+        },
+        body: JSON.stringify({ sld: "gogle" }),
+      });
+
+    for (let i = 0; i < UNAUTHENTICATED_RATE_LIMIT.limit; i += 1) {
+      expect((await platform(`10.0.0.${i}`)).status).toBe(200);
+    }
+    expect((await platform("10.0.0.99")).status).toBe(429);
+  });
 });

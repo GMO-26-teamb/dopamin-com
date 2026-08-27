@@ -63,17 +63,43 @@ function sweep(now: number): void {
 /**
  * 数える単位（接続元の IP）。
  *
- * Vercel はプラットフォーム側で `x-forwarded-for` を上書きするので、その先頭を使う。
- * 逆に言うと信頼できるのは前段のプロキシがある場合だけで、素で公開すると詐称できる。
- * 取れなければ全員をまとめて 1 つのバケットに入れる（緩めるより締める側に倒す）。
+ * **クライアントが付けられるヘッダを信用しないこと。** `x-forwarded-for` は
+ * 前段が「追記」するヘッダで、呼び出し側が自分で載せてくることもある。先頭を鍵に
+ * すると、毎回でたらめな値を付けるだけで新しいバケットが割り当てられ、制限を
+ * まるごと迂回できてしまう。
+ *
+ * そこで、
+ * 1. `x-vercel-forwarded-for`（Vercel の edge が付けるので詐称できない）
+ * 2. `x-real-ip`（同上）
+ * 3. `x-forwarded-for` の **末尾**（＝自分に一番近いホップ。手前が追記した値なので、
+ *    呼び出し側が載せた値はその前に押し出される）
+ * の順に見る。
+ *
+ * どれも取れなければ全員をまとめて 1 つのバケットに入れる（緩めるより締める側に倒す）。
+ * 前段のプロキシが無い環境で素のまま公開すると、この鍵は信用できない。
  */
+function firstNonEmpty(raw: string | undefined): string | undefined {
+  const value = raw?.trim();
+  return value === undefined || value === "" ? undefined : value;
+}
+
 function clientKey(c: Context): string {
-  const forwarded = c.req.header("x-forwarded-for")?.split(",")[0]?.trim();
-  if (forwarded !== undefined && forwarded !== "") {
-    return forwarded;
+  const vercel = firstNonEmpty(c.req.header("x-vercel-forwarded-for"));
+  if (vercel !== undefined) {
+    return vercel;
   }
-  const real = c.req.header("x-real-ip")?.trim();
-  return real === undefined || real === "" ? "unknown" : real;
+  const real = firstNonEmpty(c.req.header("x-real-ip"));
+  if (real !== undefined) {
+    return real;
+  }
+  const hops = c.req
+    .header("x-forwarded-for")
+    ?.split(",")
+    .map((hop) => hop.trim())
+    .filter((hop) => hop !== "");
+  return hops === undefined || hops.length === 0
+    ? "unknown"
+    : (hops[hops.length - 1] as string);
 }
 
 /** 次の 1 回が通るまでの秒数（最低 1 秒）。§10.3 の `details.retryAfter` に載せる。 */

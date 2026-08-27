@@ -897,7 +897,7 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。アプリのテーブル
 { "sld": "gogle", "uniqueness": { "score": 0, "label": "low", "topSimilar": [{ "name": "google", "similarity": 0.96 }], "confidence": "normal", "algorithmVersion": "v3.4-r2-ts.1", "corpusVersion": "tranco-74V4X-2026-08-26-top10k+curated-v1" } }
 ```
 
-レート制限は **1 IP あたり毎分 10 回**（超過で `RATE_LIMITED` + `Retry-After`）。状態は関数インスタンスのメモリに持つので、Vercel Functions では「1 インスタンスあたり」の上限であり全体の厳密な上限ではない。
+レート制限は **1 IP あたり毎分 10 回**（超過で `RATE_LIMITED` + `Retry-After`）。数える単位はプラットフォームが付けるヘッダ（`x-vercel-forwarded-for` → `x-real-ip`）を優先し、`x-forwarded-for` は**末尾**（自分に一番近いホップ）だけを見る。呼び出し側が自分で載せた値は先頭に押し出されるので、先頭を鍵にすると毎回別バケットになって制限を迂回できてしまう。状態は関数インスタンスのメモリに持つので、Vercel Functions では「1 インスタンスあたり」の上限であり全体の厳密な上限ではない。
 
 `GET /domains/:name`（および更新系の同型レスポンス）には `subdomainPlan: { hosts, applied } | null` が付く。FR-13 の設計を保存していないドメインは `null`。件数は `subdomain_plans` と `dns_records` から算出する（S-30 のサブドメイン設計カードが使う）。
 
