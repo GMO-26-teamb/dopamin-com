@@ -17,6 +17,7 @@ import { setAiModelFactoryForTesting } from "../../src/lib/ai-provider";
 import { setDbForTesting } from "../../src/lib/db";
 import { resetApiEnvCacheForTesting } from "../../src/lib/env";
 import { setRegistrySetForTesting } from "../../src/lib/registries";
+import { setRetrySleepForTesting } from "../../src/lib/retry";
 import { createTestDb, resetTestDb } from "../helpers/db";
 import { createTestSession } from "../helpers/session";
 
@@ -39,6 +40,10 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  // 参照系の自動再試行（#60）のバックオフを実時間で待たない。
+  // MOCK_REGISTRY_FAIL_MODE を使うテストが 300ms + 600ms を毎回待つと、
+  // 候補 6 件のスコア算出と合わせて既定のテストタイムアウトに届いてしまう
+  setRetrySleepForTesting(() => Promise.resolve());
   await resetTestDb(db);
   setDbForTesting(db);
   process.env.REGISTRY_MODE = "mock";
@@ -53,6 +58,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  setRetrySleepForTesting(null);
   setAiModelFactoryForTesting(null);
   setRegistrySetForTesting(null);
   delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;

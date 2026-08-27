@@ -14,7 +14,9 @@
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:connect": "REGISTRY_CONNECT_TEST=1 vitest run test/connect/"
+    "test:coverage": "vitest run --coverage",
+    "test:connect": "REGISTRY_CONNECT_TEST=1 vitest run test/connect/",
+    "test:connect:transfer": "KITAQNIC_API_TRANSFER_TEST=1 vitest run test/connect/kitaqnic-transfer-api.connect.test.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.42",
@@ -35,6 +37,7 @@
     "@electric-sql/pglite": "0.5.7",
     "@hono/node-server": "^2.1.1",
     "@types/node": "^22",
+    "@vitest/coverage-v8": "4.1.11",
     "tsup": "^8.5.1",
     "tsx": "^4.23.12",
     "typescript": "^6.0.3",
