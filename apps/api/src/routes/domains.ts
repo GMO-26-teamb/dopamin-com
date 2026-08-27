@@ -30,6 +30,7 @@ import {
   getContactStore,
 } from "../services/contact.service";
 import {
+  discardForeignOwnedRow,
   listDomainSummaries,
   pendingTransfersByDomain,
   removeDomain,
@@ -280,6 +281,11 @@ export const domains = new Hono<AuthedEnv>()
         }),
       () => adapter.info(body.name),
     );
+    // §6.5 / NFR-04: 同名で別ユーザーの保有行が残っていることがある（廃止 → RGP →
+    // レジストリから消滅、を経ても行は残るため）。その行を再利用すると旧所有者の
+    // サブドメイン設計・DNS レコードを id ごと引き継いでしまうので、
+    // 新しい行を作る前に捨てる（#222）。この直前の check で空きは確認済み。
+    await discardForeignOwnedRow(c.get("user").id, body.name);
     // AC-06-1: 成功時点で DB に write-through し、一覧（FR-02）に即時反映する
     const record = await upsertDomainFromInfo(c.get("user").id, domain);
     return c.json(await detailResponse(record, false), 201);
