@@ -193,6 +193,11 @@ describe("createMockServices - uniqueness（FR-05 / S-00 お試しスコア）",
     expect(fromFqdn).toEqual(fromSld);
     expect(fromSld.uniqueness.score).toBeGreaterThanOrEqual(0);
     expect(fromSld.uniqueness.score).toBeLessThanOrEqual(100);
+    // 判定に使った SLD が類似候補にも出る。ここを見ないと、SLD が空文字のまま
+    // 「s」「-app」「the」を返していても両者が一致して素通りする
+    for (const entry of fromSld.uniqueness.nearest) {
+      expect(entry.name).toContain("gogle");
+    }
   });
 
   it("類似候補の類似度は 0〜1（SimilarityRow と同じ単位）", async () => {

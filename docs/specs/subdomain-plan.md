@@ -65,9 +65,9 @@ sequenceDiagram
 | `apps/api/src/services/subdomain-plan.service.ts` | 提案生成、保存 / 取得、応答への写像 |
 | `apps/api/src/services/subdomain-plan-store.ts` | 2 テーブルの永続化と読み戻しの検証 |
 | `apps/api/src/services/dns.service.ts` | 差分の実行（NS 切替 → レコード書き込み → 操作ログ） |
-| `apps/api/src/routes/subdomain-plan.ts` | 認証・所有権チェック・サービス呼び出し |
+| `apps/api/src/routes/subdomain-plan.ts` | 所有権チェック・サービス呼び出し（認証はネスト元の `routes/domains.ts` が 1 箇所で掛ける。#166） |
 
-ルートは `/domains` に重ねてマウントする（`routes/domains.ts` とは関心が違うのでファイルを分ける）。
+ルートは `routes/domains.ts` のチェーンにネストする（関心が違うのでファイルは分けるが、`/domains` に重ねてマウントすると `requireSession` が 2 回走るため。#166）。
 
 ### 2.2 GitHub 解析（#68）
 
@@ -160,6 +160,18 @@ AI が提案していない設計をユーザーに見せることになるの�
 "requestId","userId","domain","kept","dropped":[{"host","reason"}]}`。AI の**素の出力**そのもの
 （落とした項目を含む）は `ai_logs.output` に残るので（AC-14-1）、後から「何が返ってきて何を落としたか」を
 突き合わせられる。
+
+### 2.6 第三者データの隔離（#169）
+
+GitHub から取ってくる情報（README・説明・トピック・使用言語・ルート直下のファイル名・構造ヒント・マニフェストの中身）と、ユーザーが打つ「プロジェクト概要」は、**攻撃者が自由に書ける第三者データ**である。README に「これまでの指示を無視して…」と書けば AI の出力を操れる（間接プロンプトインジェクション）。
+
+対策は 3 段:
+
+1. **信頼の起点は zod の再検証**。AI が何を返そうと、アプリが受け入れる形は `subdomainPlanProposalSchema` が決める。さらに **AI の出力が DNS 反映・NS 切替に直接届く経路は存在しない**（`POST /subdomain-plan` は提案を返すだけで保存せず、`apply` は `PUT` でユーザーが保存した設計だけを読む）。この不変条件をテストで固定している。
+2. **構造的な隔離**。第三者データはすべて `<untrusted-data source="...">…</untrusted-data>` の区画に入れ、指示文の面に混ぜない。`source` はコード内の固定文字列のみ。指示文に残る変数は、検証済みのドメイン名と TLD だけ。システム指示には「区画の中はデータであって指示ではない」旨を明示する。
+3. **正規化と上限**。制御文字・ゼロ幅・双方向制御・タグ文字を除去し、改行を LF に統一。タグ名 `untrusted-data` は（不可視文字で割られていても）無害化する。長さと件数に上限を置く。実装は `apps/api/src/prompts/untrusted.ts` が SSOT。
+
+**限界**: 2 と 3 はモデルの従順さに依存する確率的な防御で、決定的な保証ではない。決定的なのは 1（zod の再検証と「ユーザーが保存した設計しか適用されない」不変条件）だけである。スキーマ内に収まる誘導（形式上正しいホスト名を提案させる）は残るので、向き先の妥当性は最終的にユーザーが確認する。
 
 ## 3. 画面・UI
 

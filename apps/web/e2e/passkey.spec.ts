@@ -1,61 +1,23 @@
-import { randomUUID } from "node:crypto";
+import { expect, test } from "@playwright/test";
 import {
-  type CDPSession,
-  type Cookie,
-  expect,
-  type Page,
-  test,
-} from "@playwright/test";
+  AUTHENTICATOR_OPTIONS,
+  attachVirtualAuthenticator,
+  sessionCookie,
+  signUpWithPasskey,
+  uniqueDisplayName,
+} from "./support/webauthn";
 
 /**
  * FR-01 パスキー認証の e2e（docs/specs/passkey-auth.md §9 / §12.5）。
  *
  * WebAuthn は Chromium の CDP Virtual Authenticator で肩代わりする（生体認証 / PIN のダイアログは出ない）。
+ * 仮想認証器とサインアップの手順は `support/webauthn.ts` に置いて demo-scenario.spec.ts と共有する。
  * locator は docs/specs/ui-screens.md の S-01 / S-02 / S-70 / D-09 と、
  * features/auth/*.tsx・features/settings/passkey-section.tsx・components/app/sidebar.tsx の文言に合わせる。
  *
  * 前提: `pnpm --filter @dopamin/web e2e` が playwright.config.ts の webServer で
  * web（http モード）と api（mock レジストリ + Postgres）を起動している。
  */
-
-/** ctap2 / internal = プラットフォーム認証器。resident key + UV を持ち、presence は自動で満たす */
-const AUTHENTICATOR_OPTIONS = {
-  protocol: "ctap2",
-  transport: "internal",
-  hasResidentKey: true,
-  hasUserVerification: true,
-  isUserVerified: true,
-  automaticPresenceSimulation: true,
-} as const;
-
-interface VirtualAuthenticator {
-  cdp: CDPSession;
-  authenticatorId: string;
-}
-
-/** ページに仮想認証器を 1 台つなぐ。`page.goto()` より前に呼ぶ */
-async function attachVirtualAuthenticator(
-  page: Page,
-): Promise<VirtualAuthenticator> {
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("WebAuthn.enable");
-  const { authenticatorId } = await cdp.send(
-    "WebAuthn.addVirtualAuthenticator",
-    { options: AUTHENTICATOR_OPTIONS },
-  );
-  return { cdp, authenticatorId };
-}
-
-/** 同じ DB で何度でも流せるよう、表示名は毎回ユニークにする（1〜32 文字） */
-function uniqueDisplayName(): string {
-  return `e2e-${randomUUID().slice(0, 8)}`;
-}
-
-/** セッション Cookie（HttpOnly なので context 経由で読む） */
-async function sessionCookie(page: Page): Promise<Cookie | undefined> {
-  const cookies = await page.context().cookies();
-  return cookies.find((cookie) => cookie.name === "dopamin_session");
-}
 
 test.describe("FR-01 パスキー認証", () => {
   test("未認証で /dashboard に直アクセスすると /login?next= へ戻され、API は 401 を返す (AC-01-3)", async ({
@@ -94,11 +56,8 @@ test.describe("FR-01 パスキー認証", () => {
     });
 
     await test.step("S-01: 表示名を入れてパスキーを作成すると /dashboard に着く", async () => {
-      await page.goto("/signup");
-      await page.getByLabel("表示名").fill(displayName);
-      await page.getByRole("button", { name: "パスキーを作成" }).click();
-      await expect(page).toHaveURL(/\/dashboard$/);
-      // dashboard の一覧 API は未実装で Error Card が出るが、AppShell（ナビ）が描かれていれば到達とみなす
+      await signUpWithPasskey(page, displayName);
+      // AppShell（ナビ）が描かれていれば到達とみなす
       await expect(
         page.getByRole("navigation", { name: "メインナビゲーション" }),
       ).toBeVisible();
