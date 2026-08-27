@@ -2,15 +2,21 @@ import type { Db } from "@dopamin/db";
 import type {
   AuthUser,
   DnsRecord,
+  DroppedSubdomainItem,
   SubdomainPlanGenerateRequest,
   SubdomainPlanProposalResponse,
   SubdomainPlanResponse,
   SubdomainPlanSaveRequest,
   SubdomainPlanSummary,
+  SubdomainProposal,
+  SubdomainProposalOutput,
 } from "@dopamin/shared";
 import {
   buildDnsSetupInstructions,
+  clampSubdomainPolicy,
+  pickValidSubdomainItems,
   subdomainApplyState,
+  subdomainProposalOutputSchema,
   subdomainProposalSchema,
 } from "@dopamin/shared";
 import { runStructured } from "../lib/ai-provider";
@@ -21,6 +27,7 @@ import {
   type RepoSummary,
   toGithubApiException,
 } from "../lib/github";
+import { getRequestContext } from "../lib/operation-log-context";
 import {
   buildSubdomainPlanPrompt,
   SUBDOMAIN_PLAN_INSTRUCTIONS,
@@ -36,7 +43,7 @@ import {
  * サブドメイン設計の提案生成（docs/requirements.md FR-13 / §10.1
  * `POST /domains/:name/subdomain-plan`）。
  *
- * リポジトリを解析 → AI に提案させる → `subdomainProposalSchema` で再検証、までを行う。
+ * リポジトリを解析 → AI に提案させる → 項目ごと + 集合の 2 段で再検証、までを行う。
  * **保存はしない**（保存は `PUT /domains/:name/subdomain-plan`）。
  */
 
@@ -78,10 +85,72 @@ async function analyzeRepo(
 }
 
 /**
+ * 落とした項目を構造化ログに 1 行残す（NFR-06）。
+ *
+ * AI の素の出力そのものは `ai_logs.output_summary` に残る（AC-14-1）ので、
+ * ここでは「何をなぜ落としたか」だけを出す。`ai_logs` と同じく `console.log` に
+ * JSON 1 行で出し、serverless でも Vercel のログに必ず残るようにする。
+ */
+function logDroppedItems(
+  domain: string,
+  userId: string,
+  dropped: readonly DroppedSubdomainItem[],
+  kept: number,
+): void {
+  if (dropped.length === 0) {
+    return;
+  }
+  const { requestId } = getRequestContext();
+  console.log(
+    JSON.stringify({
+      level: "warn",
+      type: "subdomain_plan_items_dropped",
+      requestId,
+      userId,
+      domain,
+      kept,
+      dropped,
+    }),
+  );
+}
+
+/**
+ * AI の素の出力（{@link subdomainProposalOutputSchema}）を提案に変換する。
+ *
+ * 2 段構え（`docs/specs/subdomain-plan.md` §2.5）:
+ * 1. **項目ごとの検証**: DNS として成立しない項目だけを落とす（#66 と同じ方針）
+ * 2. **集合としての再検証**: 残った集合に `subdomainProposalSchema` を掛ける。
+ *    `www` 必須 / 3〜8 件 / ホスト重複なしを満たさなければ AI_UNAVAILABLE（503）。
+ *    設計として成立しないものを勝手に補完しない（`www` を足したりしない）
+ */
+function toProposal(
+  output: SubdomainProposalOutput,
+  context: { domain: string; userId: string },
+): SubdomainProposal {
+  const { items, dropped } = pickValidSubdomainItems(output.items);
+  logDroppedItems(context.domain, context.userId, dropped, items.length);
+  const parsed = subdomainProposalSchema.safeParse({
+    policy: clampSubdomainPolicy(output.policy),
+    items,
+  });
+  if (parsed.success) {
+    return parsed.data;
+  }
+  // 集合として成立しない（www が無い・3 件に満たない・ホストが重複）。
+  // 従来（厳格スキーマを generateObject に渡していた頃）と同じ 503 に倒す
+  throw new ApiException(
+    "AI_UNAVAILABLE",
+    "AI の提案が設計として成立しませんでした。しばらく待ってから再度お試しください。",
+    undefined,
+    { retryable: true },
+  );
+}
+
+/**
  * FR-13: リポジトリ解析 → サブドメイン提案。
  *
- * AI 出力は `generateObject` のスキーマ検証とは別に、返す直前で
- * `subdomainProposalSchema` を通す（`runStructured` が同じスキーマで再検証する。§13.1）。
+ * AI には形だけの緩いスキーマ（{@link subdomainProposalOutputSchema}）を渡し、
+ * 受け取ってから項目ごと → 集合の順に再検証する（{@link toProposal}）。
  * 上限は GitHub 解析 8 秒 + AI 20 秒で AC-13-1 の 30 秒に収める。
  */
 export async function generateSubdomainPlan(
@@ -93,9 +162,9 @@ export async function generateSubdomainPlan(
   const summary = await analyzeRepo(request);
   const description = request.description ?? null;
 
-  const proposal = await runStructured(
+  const output = await runStructured(
     "subdomain_plan",
-    subdomainProposalSchema,
+    subdomainProposalOutputSchema,
     buildSubdomainPlanPrompt({ domain, summary, description }),
     {
       user,
@@ -111,6 +180,7 @@ export async function generateSubdomainPlan(
       ...(options.db ? { db: options.db } : {}),
     },
   );
+  const proposal = toProposal(output, { domain, userId: user.id });
 
   return {
     summary,

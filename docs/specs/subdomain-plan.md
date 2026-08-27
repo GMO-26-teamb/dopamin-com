@@ -42,8 +42,9 @@ sequenceDiagram
   W->>R: POST /domains/:name/subdomain-plan { repoUrl? , description? }
   R->>G: fetchRepoSummary（8 秒上限・zod 検証）
   G-->>R: RepoSummary / GithubUnavailableError
-  R->>AI: runStructured(subdomain_plan, subdomainProposalSchema)（20 秒上限）
-  AI-->>W: 提案（保存しない）
+  R->>AI: runStructured(subdomain_plan, subdomainProposalOutputSchema)（20 秒上限）
+  AI-->>R: 素の出力 → 項目ごと + 集合の 2 段で再検証（§2.5）
+  R-->>W: 提案（保存しない）
   W->>R: PUT /domains/:name/subdomain-plan（編集後）
   R->>DB: upsert（UNIQUE(domain_id)）
   W->>R: GET /domains/:name/dns（差分ダイアログ）
@@ -72,9 +73,21 @@ sequenceDiagram
 
 - 集めるもの: 説明 / トピック / 言語（バイト数の降順）/ README 先頭 8KB / ルート直下 /
   `apps` `packages` `docs` `api` の直下 1 段（構造ヒント）/ ルートのマニフェスト最大 2 件。
+- 取り方: リポジトリ本体 1 回 + README / **再帰ツリー** / 言語の 3 回 + マニフェスト最大 2 回で、
+  **1 提案あたり最大 6 リクエスト**（`MAX_REQUESTS_PER_SUMMARY`）。ルート直下と構造ヒントは
+  `GET /git/trees/<default_branch>?recursive=1` **1 回**から作る。`contents` を辿ると
+  「ルート 1 回 + `apps` `packages` `docs` `api` の各 1 回」で最大 5 回掛かり、
+  未認証（60 req/h）だと 1 時間に 6 提案で 429 に達していた（#168）。
+  ツリーが読めない場合（`truncated` = 10 万エントリ超 / 空リポで 404）だけ従来の `contents` 経路に
+  落ちる（このときは最大 11 回）。打ち切られた応答はルート直下すら欠け得るので使わない。
 - **実キー前提にしない**。`GITHUB_MODE`（既定 `mock`）でネットワークに出ないフェイク応答へ切り替えられる。
   失敗系は `GITHUB_MOCK_FAIL_MODE`（`not_found` / `rate_limited` / `unreachable`）で再現する。
-  `GITHUB_TOKEN` は `real` でも任意で、未設定なら未認証で叩く（レート制限の緩和用。§17）。
+  ただし `GITHUB_TOKEN` は **`real` では実質必須**（§17 / #168）。未設定でも公開リポは読めるので
+  例外は投げないが、未認証は 60 req/h ＝ 1 時間に約 10 提案で `RATE_LIMITED` に達し、
+  `getJson` がレート制限だけは任意の呼び出しでも投げ直すため以降の提案が全滅する。
+  `GITHUB_MODE=real` かつ未設定なら、最初の実呼び出しで構造化ログに 1 回だけ警告を出す
+  （`{"level":"warn","type":"github_token_missing",…}`。起動時に出さないのは、
+  既定の `mock` 環境に無関係な警告を出さないため）。
 - 失敗の分類: 404 / 403 は `NOT_FOUND`「取得できません」、429 と
   `x-ratelimit-remaining: 0` の 403 は `RATE_LIMITED`（§10.3 は GitHub のレート制限を
   `RATE_LIMITED` に寄せている）。README / マニフェストの 404 は解析を止めない。
@@ -119,7 +132,39 @@ sequenceDiagram
   `<機能>.<操作>` 表記でレジストリコマンド（snake_case）と見分けられるようにする。
   NS 切替のレジストリ呼び出しは従来どおり `update` として別行で記録される。
 
-## 2.10 第三者データの隔離（#169）
+### 2.5 AI 出力の検証（#68 / #167）
+
+モデルには**形だけの緩いスキーマ**（`subdomainProposalOutputSchema`: 5 つの文字列 × 1〜16 件）を
+渡し、受け取ってから 2 段で検証する。厳格な `subdomainProposalSchema` を `generateObject` に
+そのまま渡していた頃は、制約の大半（`www` 必須 / 3〜8 件 / ホスト重複なし / `A` の target は IPv4）が
+`.refine` / `.superRefine` で JSON Schema に出ずモデルを拘束できないまま、1 件でも外れると
+応答全体が捨てられていた（`maxRetries: 0` なので 503。8 件中 7 件が正しくても救済されない）。
+
+| 段 | 何を見るか | 外れたとき |
+|---|---|---|
+| 1. 項目ごと（`pickValidSubdomainItems`） | `subdomainItemSchema` を 1 件ずつ。ホストが 1 ラベルか、`recordType` / `priority` が語彙内か、`A` の target が IPv4 か | **その項目だけ落とす**。`purpose` / `policy` の文字数超過は表示上の制約なので落とさず切り詰める |
+| 2. 集合として（`subdomainProposalSchema`） | `www` 必須 / 3〜8 件 / ホスト重複なし | **`AI_UNAVAILABLE`（503）**。勝手に `www` を足したり重複を畳んだりしない |
+
+**#66（AI 候補・FR-04）と揃えた部分**: 「生スキーマ + 項目ごとに再検証し、通ったものだけ使う」
+（[`ai-candidates.md`](ai-candidates.md) §2.1 / §2.2 の `CandidateBucket` と同じ）。文字数の超過を
+捨てずに切り詰めるのも #66 の `reason` と同じ扱い。
+
+**揃っていない部分（集合制約は救済しない）**: FR-04 の候補は独立した 6 件で、5 件でも 0 件でも
+「候補一覧」として成立する（AC-04-1 は「バリデーションを通過したもののみ」）。FR-13 の提案は
+**構造制約を持つ 1 つの設計**で、入口の `www` を欠いた構成や 2 ホストだけの構成は
+設計として成立しない（FR-13 の「3〜8 件」「`www` は必ず含める」）。足りない分を補完すると
+AI が提案していない設計をユーザーに見せることになるので、集合として成立しないものは
+従来どおり 503 で再試行させる。
+
+`purpose` / `policy` の切り詰めは、§2.6 の「注入された文章が丸ごと外に出ない」を長さで担保する側面も持つ
+（切り詰めても攻撃者の文章が 100 字だけ残ることはあるので、決定的な防御は §2.6 の 1 の方）。
+
+落とした項目は構造化ログに 1 行残す（NFR-06）: `{"level":"warn","type":"subdomain_plan_items_dropped",
+"requestId","userId","domain","kept","dropped":[{"host","reason"}]}`。AI の**素の出力**そのもの
+（落とした項目を含む）は `ai_logs.output` に残るので（AC-14-1）、後から「何が返ってきて何を落としたか」を
+突き合わせられる。
+
+### 2.6 第三者データの隔離（#169）
 
 GitHub から取ってくる情報（README・説明・トピック・使用言語・ルート直下のファイル名・構造ヒント・マニフェストの中身）と、ユーザーが打つ「プロジェクト概要」は、**攻撃者が自由に書ける第三者データ**である。README に「これまでの指示を無視して…」と書けば AI の出力を操れる（間接プロンプトインジェクション）。
 
@@ -213,8 +258,8 @@ Error Card で返るだけ、という割れ方をしていた（#187 で表面�
 
 | 種別 | 内容 |
 |---|---|
-| unit | `packages/shared/src/subdomains.test.ts`（差分・反映状態・手順テキスト）、`packages/db` のスキーマ制約は `apps/api/test/db/subdomain-schema.test.ts` |
-| 契約 / 統合 | `apps/api/test/lib/github.test.ts`（mock / real 両経路、失敗の分類、8KB 切り出し）、`test/routes/subdomain-plan-generate.test.ts`、`test/routes/subdomain-plan-save.test.ts`、`test/routes/subdomain-plan-apply.test.ts` |
+| unit | `packages/shared/src/subdomains.test.ts`（差分・反映状態・手順テキスト・AI 出力の項目ごと検証 `pickValidSubdomainItems`）、`packages/db` のスキーマ制約は `apps/api/test/db/subdomain-schema.test.ts` |
+| 契約 / 統合 | `apps/api/test/lib/github.test.ts`（mock / real 両経路、失敗の分類、8KB 切り出し、ツリー 1 回の構造取得と `truncated` のフォールバック、トークン未設定の警告）、`test/routes/subdomain-plan-generate.test.ts`（不正な 1 項目だけ落として残りを返す / 落とした結果 3 件未満は 503 / `www` 欠落は 503 / 落とした項目の構造化ログ）、`test/routes/subdomain-plan-save.test.ts`、`test/routes/subdomain-plan-apply.test.ts` |
 | 契約（web） | `apps/web/lib/api/http/http-services.test.ts`: `subdomains` の 5 メソッド（写像・未保存の 404 → null・提案の失敗の相手分け・apply 後の取り直し） |
 | unit（web） | `apps/web/features/subdomains/validate.test.ts`: 欄ごとの検証と、通った設計が `savedSubdomainProposalSchema` も通ること |
 | 統合（web） | `apps/web/features/subdomains/subdomains-screen.test.tsx`: 追加直後の保存を止める / 埋めれば保存できる / 全消し / 上限で追加不可 |
@@ -238,3 +283,5 @@ Error Card で返るだけ、という割れ方をしていた（#187 で表面�
 | v0.3 | 2026-08-27 | §3.1 に保存前の入力検証を追加（契約を満たさない設計はサーバーに投げず欄で直させる）。判定に使う上限を `packages/shared` の定数として切り出し、画面が数値を二重に持たないようにした。#187 |
 | v0.4 | 2026-08-27 | リポジトリ解析の時間制限を 2 倍に緩和。`GITHUB_FETCH_TIMEOUT_MS` 4 → 8 秒、`AI_CALL_TIMEOUT_MS` 10 → 20 秒とし、§2.2 / §2 の図・AC-13-1 の内訳を「GitHub 8 秒 + AI 20 秒 = 30 秒以内」に更新（requirements v0.1.22）。上限が厳しく解析を通せない公開リポジトリが実在したため。#199（thinking を絞って 10 秒予算を守る案）とは別方針で、上限そのものを引き上げている |
 | v0.5 | 2026-08-28 | ドメイン詳細（`GET /domains/:name`）に `subdomainPlan: { hosts, applied } \| null` が載ったことを §2.3 / §4 に追記（#217 / requirements v0.1.27）。設計を保存しても S-30 が「未作成」のままだった原因が web の固定値ではなく契約に件数が無かったことだったため。反映済みの判定は `GET /subdomain-plan` と同じ `subdomainApplyState` を使い、2 画面で件数が食い違わないようにしている |
+| v0.6 | 2026-08-28 | §2 / §2.5 / §7: **AI 出力の検証を 2 段構えにした**（#167）。`generateObject` には形だけの `subdomainProposalOutputSchema` を渡し、受け取ってから項目ごとに `subdomainItemSchema` で検証して**不正な項目だけ落とし**、残った集合に `subdomainProposalSchema`（`www` 必須 / 3〜8 件 / ホスト重複なし）を掛ける。集合として成立しなければ従来どおり `AI_UNAVAILABLE`（503）で、勝手な補完はしない。#66（FR-04）と揃えた部分（生スキーマ + 項目ごと再検証・文字数超過は切り詰め）と、揃えていない部分（FR-13 の提案は構造制約を持つ 1 つの設計なので集合制約は救済しない）を明記。落とした項目は `subdomain_plan_items_dropped` の構造化ログに残す（NFR-06）|
+| v0.7 | 2026-08-28 | §2.2 / §7: GitHub 解析のリクエスト数を **1 提案あたり最大 10 → 6** に減らし、`GITHUB_TOKEN` を `real` では実質必須として扱うことにした（#168 / requirements v0.1.29）。ルート直下と構造ヒントは再帰ツリー 1 回から作り、`contents` 経路（最大 5 回）は `truncated` / 404 のときのフォールバックに退けた。トークン未設定の `real` は初回呼び出しで `github_token_missing` の構造化ログを 1 回だけ出す（例外は投げず機能は落とさない）|
