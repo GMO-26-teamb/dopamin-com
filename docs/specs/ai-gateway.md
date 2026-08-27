@@ -117,6 +117,9 @@ FR-17 の選択肢に `xai`（Grok）を足す。**Gateway 経由専用**とし�
    `aiProviderApiKey("xai")` が常に `undefined` を返し、§2.2 の `hasApiKey` が
    「gateway キーがあるときだけ真」になる——既存ロジックのまま自然に達成される
 
+`xai` を選んだときは候補生成のプロンプトにユーモアの個性付けが入る（作風の切替）。
+方針と「変えないもの」は `docs/specs/ai-candidates.md` §2.5 が正。
+
 ### 2.7 Gateway の ID 変換表
 
 Gateway のカタログ（`@ai-sdk/gateway` の `GatewayModelId`）と、内部で持つ語彙が
