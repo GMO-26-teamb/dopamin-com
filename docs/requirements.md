@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.1.26（2026-08-27） |
+| 版 | v0.1.27（2026-08-27） |
 | プロダクト | ドパ民.com / dopamin.com — Z世代向けドメイン管理プラットフォーム（疑似レジストラ） |
 | チーム | チームドパ民（Team B）: 佐々木 琢登・星 はるか・上原 拓也 |
 | 位置づけ | GMO Internet Internship in kitaQ Webアプリケーションコース（2026/08/24–28）成果物 |
@@ -779,6 +779,7 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。アプリのテーブル
 | GET | `/domains` | 要 | 保有一覧（DB） | FR-02 |
 | POST | `/domains/sync` | 要 | 全保有ドメインを `info` で再同期し、Poll を消化する | FR-02/12 |
 | POST | `/domains/check` | 要 | `{ sld, tlds[] }` または `{ names[] }` → 各結果（空き・レジストリ・スコア） | FR-03/05 |
+| POST | `/uniqueness/preview` | **不要** | `{ sld }` または `{ name }` → `{ sld, uniqueness }`。独自性スコアだけを返す（レジストリに問い合わせないので空き状況は含まない）。ランディング（S-00）のお試し用。IP 単位のレート制限つき | FR-05 |
 | POST | `/domains` | 要 | `{ name, period, nameservers? }` → check → create → info | FR-06 |
 | GET | `/domains/:name` | 要 | `info` で最新化して返す（失敗時はキャッシュ + `stale: true`）。応答には登録者コンタクトの中身 `registrantProfile` を添える（`info` は ID しか返さないため。そのドメインがアプリのコンタクトを参照していなければ `null`）。更新系（`POST /domains`・`renew`・`PATCH`・`restore`）の応答も同じ形 | FR-07 / FR-09 |
 | POST | `/domains/:name/renew` | 要 | `{ period }` | FR-08 |
@@ -889,6 +890,17 @@ Drizzle スキーマは `packages/db/src/schema/*.ts`。アプリのテーブル
 - `confidence` は短名（記号除去後 3 文字以下）で `low`、それ以外は `normal`。`algorithmVersion` / `corpusVersion` は算出版の追跡用で常に返す（正は `docs/specs/uniqueness/ALGORITHM_SPEC.md`）。
 - `uniqueness` は `available` の行と**レジストリ障害による `error` の行**に付き（AC-05-2）、`unavailable` と未対応 TLD の `error`（`VALIDATION_ERROR`）では `null`。キー自体は常に存在する。
 
+`POST /uniqueness/preview`（未認証）は空き確認をしないので `uniqueness` が `null` になることはない。
+
+```json
+// リクエスト: {"sld":"gogle"} または {"name":"gogle.com"}
+{ "sld": "gogle", "uniqueness": { "score": 0, "label": "low", "topSimilar": [{ "name": "google", "similarity": 0.96 }], "confidence": "normal", "algorithmVersion": "v3.4-r2-ts.1", "corpusVersion": "tranco-74V4X-2026-08-26-top10k+curated-v1" } }
+```
+
+レート制限は **1 IP あたり毎分 10 回**（超過で `RATE_LIMITED` + `Retry-After`）。状態は関数インスタンスのメモリに持つので、Vercel Functions では「1 インスタンスあたり」の上限であり全体の厳密な上限ではない。
+
+`GET /domains/:name`（および更新系の同型レスポンス）には `subdomainPlan: { hosts, applied } | null` が付く。FR-13 の設計を保存していないドメインは `null`。件数は `subdomain_plans` と `dns_records` から算出する（S-30 のサブドメイン設計カードが使う）。
+
 ---
 
 ## 11. レジストリ連携（Bridge 層）
@@ -995,7 +1007,7 @@ Server ステータスは Client ステータスより優先される。
 | Redemption GP | 30 日 | 復旧ボタン + 残日数 |
 | Pending Delete | 5 日 | 操作不可の案内 |
 
-期間はレジストリの応答（`rgp_until` 等）があればそれを優先し、なければ上記目安で計算する。
+残日数は `domains.rgp_until` に値があるときだけ表示する。両レジストリの `info` は RGP の期限を返さない（`rgpStatus` の有無しか分からない）ため、現状この列を書くのは FR-16 のデモ投入だけで、値が無いドメインでは**残日数を出さない**（上記の目安から推定した日数を事実として表示しない）。
 
 ### 11.5 仕様変更通知への対応手順
 
@@ -1471,3 +1483,4 @@ docs/specs/<feature>.md（人間 + Claude で作成）
 | v0.1.24 | 2026-08-27 | §16.2 / §16.3: マイグレーションの手動適用で**直結ホスト（`db.<project-ref>.supabase.co`）が IPv6 でしか公開されておらず、IPv4 しか出られない回線からは届かない**ことを明記（`drizzle-kit migrate` が無言で失敗する。2026-08-27 に実際に踏んだ）。Supavisor session mode（ポート 5432）の URL を使う具体的な手順と、`nc` / `dig` での到達性の確かめ方を §16.2 の手順 3 に追記。§16.3 の「GitHub Actions ランナーが該当」という限定を外した |
 | v0.1.25 | 2026-08-27 | §9.2 / §11.3 / FR-11: **RGP（`redemptionPeriod`）と `pendingDelete` の優先順位を確定**。RFC 3915 の RGP 中は EPP の `pendingDelete` が必ず共存するため、`pendingDelete` を先に見る導出だと RGP のドメインが「削除待ち」になり復旧できなくなっていた（#171）。§9.2 に `deriveDisplayStatus` の優先順位（`transferred_out` > `redemptionPeriod` > `pendingDelete` > …）を明記し、§11.3 に「RGP 中は `pendingDelete` が共存する」「`redemptionPeriod` の載る場所はレジストリで違う（kitaqsign は `status` 側、mock は `rgpStatus` 側）ので両方を見る」を追記。AC-11-2 を「`redemptionPeriod` を伴わない `pendingDelete` では復旧ボタンを出さない」に明確化した（文言どおりだと FR-11 の「`redemptionPeriod` のドメインにのみ復旧ボタンを表示」と矛盾していた）。`docs/specs/ui-screens.md` S-33 / S-36 も追随（採番が衝突していたため v0.1.23 から採り直した）|
 | v0.1.26 | 2026-08-27 | FR-09 の残り 2 件を実装に合わせて確定（#172 / #205）。§10.1: 詳細レスポンス（`GET /domains/:name` と更新系）に **`registrantProfile`** を追加。レジストリの `info` は登録者をコンタクト ID でしか返さないため、S-30 のコンタクトカードと D-02 の初期値が出せなかった。ドメインがアプリのコンタクトを参照していないとき（移管 IN 直後など）は中身を知らないので `null` を返す（要確認 #14 は未解決のまま）。FR-09: 「ロック」トグルの【要確認】を削除。2026-08-27 の運営修正で `add.statuses` / `rem.statuses` が反映されるようになった（kitaqnic 実測、spec-notes §3 #10 で解決済み）ため保留を解き、UI から `clientTransferProhibited` を付け外しできるようにした（採番が衝突していたため v0.1.25 から採り直した）|
+| v0.1.27 | 2026-08-27 | UI/UX の全面見直し（#215〜#219 / #211 / #212）。**§10.1**: 未認証で叩ける `POST /uniqueness/preview`（IP 単位で毎分 10 回、空き確認なし）を追加し、ランディングのお試しスコアを実際に動くようにした（`docs/specs/ui-screens.md` §7 の【要確認】#1 を選択肢 (a) で解決）。詳細レスポンス（`GET /domains/:name` と更新系）に **`subdomainPlan: { hosts, applied } \| null`** を追加（設計を保存しても S-30 が「未作成」のままだった #217 の原因が、web 側の固定値ではなく契約に件数が無いことだったため）。**§11.4**: RGP の残日数は `domains.rgp_until` がある行だけ表示し、目安からの推定値を事実として出さないことを明記（#211）。**§15.1 / §15.4**: サイドバーのナビをダッシュボード / 移管 / 設定の 3 項目にし、「ドメイン取得」は主要 CTA に一本化、開発者向けの「ログ」は `/settings` の「開発者向け」からのみ到達に変更。全画面から開ける AI ログのスライドインパネル（P-01）を廃止（AI ログは `/logs` のタブで見る）。モバイルの CTA ラベルをデスクトップと揃えた |

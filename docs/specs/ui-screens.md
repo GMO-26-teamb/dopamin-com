@@ -2,8 +2,8 @@
 
 | 項目 | 内容 |
 |---|---|
-| 版 | v0.9（2026-08-27） |
-| 対応要件 | `docs/requirements.md` v0.1.11 §4 FR-01〜19、§9.2、§10.3、§11.3 / 11.4、§15 |
+| 版 | v0.10（2026-08-27） |
+| 対応要件 | `docs/requirements.md` v0.1.27 §4 FR-01〜19、§9.2、§10.3、§11.3 / 11.4、§15 |
 | Figma | `UI Design (Team B)` — ページ **Prototype / Screens**（全画面・全状態、Standard、Present で遷移可）/ **Prototype / Screens (極ドパ)** / **Prototype / Flow**（遷移図）。コンポーネントは同ファイルのデザインシステム（Getting Started 参照） |
 | アセット | `docs/ui-design/*.png`（抜粋スクリーンショット） |
 | 目的 | 実装者が「どのルートで・どの状態のとき・何を出すか」を迷わないための SSOT。API 契約は requirements §10、エラー形式は §10.3 |
@@ -71,15 +71,15 @@
 
 | ID | ルート | 状態 | 表示 / 振る舞い | 使用コンポーネント |
 |---|---|---|---|---|
-| S-20 | `/domains/new` | 初期 | 入力パネル（「ニックネームまたはアプリ名 *」「用途・キーワード」「希望 TLD」（複数選択、既定: 全対応 TLD）「候補を考える」）+ Empty State（案内）+ 直接検索カード | Input, Button, Empty State, Card |
+| S-20 | `/domains/new` | 初期 | 入力パネル（「ニックネームまたはアプリ名 *」「用途・キーワード」「希望 TLD」（既定は「すべて（22 種）」の要約 1 行。押すと TLD チップが開く）「候補を考える」）+ Empty State（案内）+ 直接検索（既定は畳んだトリガー 1 行） | Input, Button, Empty State, Card |
 | S-21 | `/domains/new` | AI 生成中 | ボタン「考え中…」Disabled、Skeleton Card ×6、注記「最大 20 秒」。完了で S-22、20 秒超 / `AI_UNAVAILABLE` / `RATE_LIMITED` で S-23 | Skeleton |
-| S-22 | `/domains/new` | 候補表示 | Candidate Card ×6。各カード: ドメイン名（TLD はブランド色）/ Rarity / Score Gauge（クリックで最も近い既存名 3 件と類似度を展開 = Similarity Row ×3）/ 理由（40 字、Caption）/ 空きバッジ / 操作。「登録へ」→ S-25、「もう一回考える」→ S-21（前回候補を除外）、「自分で入力して探す」→ S-24 | Candidate Card, Score Gauge, Similarity Row |
+| S-22 | `/domains/new` | 候補表示 | Candidate Card ×6。各カード: ドメイン名（TLD はブランド色）/ Rarity / Score Gauge（静止。最も近い既存名 3 件は「似ている名前」トグルで開閉 = Similarity Row ×3）/ 理由（40 字、Caption）/ 空きバッジ / 操作。「登録へ」→ S-25、「もう一回考える」→ S-21（前回候補を除外）、「自分で入力して探す」→ S-24 | Candidate Card, Score Gauge, Similarity Row |
 | S-23 | `/domains/new` | AI エラー（AC-04-2） | Banner Warn。`REGISTRY_TIMEOUT`→「AI が 20 秒以内に応答しませんでした」、`AI_UNAVAILABLE`→「AI が利用できません。手入力で探せます」、`RATE_LIMITED`→「利用上限に達しました。n 秒後に再試行」。直接検索へ誘導。AI ログに記録 | Banner |
-| S-24 | `/domains/new` | 直接検索の結果 | S-20〜S-23 と同一 URL（直接検索カードの開閉と結果表示のみが変わる）。検索条件・結果は URL に載らない（画面内 state のため、リロード・URL 共有では復元されない）。入力は `SLD + TLD 複数選択` または FQDN（`.` を含む場合は FQDN として 1 件で check）。結果は Search Result Row（Available / Taken / Error）。読み込み中は行ごとに Skeleton + レジストリ名。部分失敗は「確認不可」+ 注記（AC-03-2）。「登録へ」→ S-25、「代替を見る」→ 別 TLD・綴り違いを展開、「再試行」→ 当該レジストリのみ再 check | Search Result Row, Score Gauge, Rarity |
-| S-25 | `/domains/new`（dialog） | 登録ダイアログ | Dialog / Register：空き（再確認済み）+ スコア + レア度（ゲージクリックで内訳）→ 期間 Select（helper に税込合計）→ NS・コンタクトは読み取り専用の説明のみ（**NS は `create` に送らない**ので helper は「登録時は未設定。あとから「情報修正」で設定できます」。ドパ民 DNS（`DOPAMIN_NAMESERVERS`）は FR-13 の反映時に切り替える NS で、登録時の既定値ではない）→ 「お支払いへ」→ S-29。直前に check 再実行 | Dialog / Register |
-| S-29 | `/domains/new`（dialog） | お支払い（FR-19・モック） | 同じ Dialog 内でステップ切替。ご注文内容（Card + Key Value Row：品目 / 期間 / 単価 / 小計 / 消費税 10% / 税込合計 + Badge「固定ダミー価格」）→ カード入力（番号 / 有効期限 / CVC / 名義。デモ用カードが入力済み・AC-19-4）。「¥n を支払って登録する」→ 決済成立で `create` → S-26 /「戻る」→ S-25。入力エラーは欄ごとの warn helper、拒否は Banner Warn「お支払いに失敗しました」でダイアログは開いたまま（AC-19-3。`create` は呼ばない）。末尾 `0002` のカードで拒否を再現 | Dialog / Form, Card, Key Value Row, Input, Banner, Badge |
+| S-24 | `/domains/new` | 直接検索の結果 | S-20〜S-23 と同一 URL（直接検索カードの開閉と結果表示のみが変わる）。検索条件・結果は URL に載らない（画面内 state のため、リロード・URL 共有では復元されない）。入力は `SLD + TLD 複数選択` または FQDN（`.` を含む場合は FQDN として 1 件で check）。結果は Search Result Row（Available / Taken / Error）。**独自性スコアは SLD 単位で決まるので、結果カードの見出しに 1 つだけ出す**（行ごとには出さない）。読み込み中は行ごとに Skeleton + レジストリ名。部分失敗は「確認不可」+ 注記。「登録へ」→ S-25、「代替を見る」→ 別 TLD・綴り違いを展開、「再試行」→ 当該レジストリのみ再 check | Search Result Row, Score Gauge, Rarity |
+| S-25 | `/domains/new`（dialog） | 登録ダイアログ | Dialog / Register：空き（再確認済み）+ スコア + レア度（ゲージクリックで内訳）→ 期間 Select（helper に税込合計）→ NS・コンタクトは読み取り専用の説明のみ（**NS は `create` に送らない**ので placeholder は「未設定」、helper は「あとから「情報修正」で設定できます」。ドパ民 DNS（`DOPAMIN_NAMESERVERS`）は FR-13 の反映時に切り替える NS で、登録時の既定値ではない）→ 「お支払いへ」→ S-29。直前に check 再実行 | Dialog / Register |
+| S-29 | `/domains/new`（dialog） | お支払い（FR-19・モック） | 同じ Dialog 内でステップ切替。ご注文内容（Card + Key Value Row：品目 / 期間 / 単価 / 小計 / 消費税 10% / 税込合計）→ カード入力（番号 / 有効期限 / CVC / 名義。デモ用カードが入力済み・AC-19-4）。「¥n を支払って登録する」→ 決済成立で `create` → S-26 /「戻る」→ S-25。入力エラーは欄ごとの warn helper、拒否は Banner Warn「お支払いに失敗しました」でダイアログは開いたまま（AC-19-3。`create` は呼ばない）。末尾 `0002` のカードで拒否を再現 | Dialog / Form, Card, Key Value Row, Input, Banner, Badge |
 | S-26 | `/domains/new`（dialog） | 登録成功 | Dialog / Success：状態・有効期限・**実際の NS**（`domain.nameservers` が空なら「ネームサーバーは未設定（あとから設定できます）」）に加えお支払いの控え（金額・ブランド・下 4 桁・受付番号・モックである旨）。「サブドメイン設計に進む」→ S-40（登録直後は設計なし）、「詳細を見る」→ S-30。閉じた場合は元の S-22 / S-24 に戻り、当該カードは Taken（「取得しました → 詳細」）に更新。一覧は即時反映（AC-06-1） | Dialog / Success |
-| S-27 | `/domains/new`（dialog） | 取得済み（CONFLICT 409） | 汎用 Dialog：直前の再確認で他者取得。代替候補 3 件を本文に列挙、「代替候補を見る」→ S-24 | Dialog |
+| S-27 | `/domains/new`（dialog） | 取得済み（CONFLICT 409） | 汎用 Dialog：直前の再確認で他者が取得済みだった場合。代替候補 3 件を本文に列挙、「代替候補を見る」→ S-24 | Dialog |
 | S-28 | `/domains/new`（dialog） | create タイムアウト（AC-06-2） | 汎用 Dialog：再送せず `info` で照合。結果 4 分岐: 登録済み → S-30 / 空きのまま → S-25 に戻り Banner Info「登録は行われていません」（本文は「お支払いは確定していません。もう一度お支払いに進めば再送できます」・再送可）/ 他者取得 → S-27 / 照合失敗 → S-28 のまま Error Card + 「もう一度確認」 | Dialog, Error Card |
 
 **Rarity とスコアラベルの対応（FR-05）**
@@ -98,9 +98,9 @@
 
 | ID | ルート | 状態 | 表示 / 振る舞い | 使用コンポーネント |
 |---|---|---|---|---|
-| S-30 | `/domains/[name]` | Active | ヘッダー（ドメイン名 + 状態バッジ + ロックバッジ + 最終同期 / 再同期）。基本情報カード: レジストリ / EPP ステータス一覧（バッジ + 日本語説明ツールチップ）/ 登録日 / 有効期限（残日数 + 進捗）/ Grace Period（Renew / Transfer / Auto-Renew GP は種別と残日数を表示のみ）/ 移管可能日（ツールチップ「ICANN 実運用の参考。可否判定には使いません」）。ネームサーバー / コンタクト / サブドメイン設計カード（`反映済み n / m`、未作成時は「未作成 → 設計をはじめる」）。右: 操作パネル（更新 / 情報修正 / 移管 OUT / 廃止 / 復旧 + 移管ロックの ON / OFF 表示。切り替えは D-02 で行う）。コンタクトカードの登録者・メールは API の `registrantProfile` から出し、アプリのコンタクトを参照していないドメイン（移管 IN 直後など）は「未取得」と書く（コンタクト ID は出さない）。不可操作は Disabled + 理由（AC-07-1） | Card, Key Value Row, Progress Bar, Badge, Button |
+| S-30 | `/domains/[name]` | Active | ヘッダー（ドメイン名 + 状態バッジ + ロックバッジ + 最終同期 / 再同期）。基本情報カード: レジストリ / EPP ステータス一覧（バッジ + 日本語説明ツールチップ）/ 登録日 / 有効期限（残日数 + 進捗）/ Grace Period（Renew / Transfer / Auto-Renew GP は種別と残日数を表示のみ）/ 移管可能日（ツールチップ「ICANN 実運用の参考。可否判定には使いません」）。ネームサーバー / コンタクト / サブドメイン設計カード（`n ホスト · 反映済み a/n`、未作成時は「未作成 → 設計をはじめる」。カード面全体が S-43 / S-40 へのリンク）。右: 操作パネル（有効期限を延長 / 情報修正 / 他社へ移管する / 廃止 + 移管ロックの ON / OFF 表示。切り替えは D-02 で行う）。**ロックで止まっている操作は Disabled + 理由をボタン下の別行に出し、その状態で概念的に存在しない操作（Active での復旧など）は出さない**。コンタクトカードの登録者・メールは API の `registrantProfile` から出し、アプリのコンタクトを参照していないドメイン（移管 IN 直後など）は「未取得」と書く（コンタクト ID は出さない）。不可操作は Disabled + 理由（AC-07-1） | Card, Key Value Row, Progress Bar, Badge, Button |
 | S-31 | `/domains/[name]` | info 失敗（AC-07-2） | Banner Warn + キャッシュ表示（最終同期時刻）。操作ボタンは全て Disabled、「再同期」で S-35 → 成功なら S-30 | Banner |
-| S-32 | `/domains/[name]` | 移管申請を受信（AC-07-3） | Banner Warn + 状態バッジ「移管中（申請受信）」。操作パネル先頭に「拒否」「承認」+「自動承認まで mm:ss」（1 秒更新）。他操作は Disabled。タイマーが 0 になったらボタンを Disabled にし「状態を確認中…」→ 再照会 → S-34 | Banner, Button |
+| S-32 | `/domains/[name]` | 移管申請を受信（AC-07-3） | Banner Warn + 状態バッジ「移管中（申請受信）」。操作パネル先頭に「拒否」「承認」+「自動承認まで mm:ss」（1 秒更新）。他操作は Disabled。`GET /transfers` が取れず申請 ID が分からないときは、承認 / 拒否を Disabled にしたうえで理由と「申請を取得」（再取得）を出す（#212）。タイマーが 0 になったらボタンを Disabled にし「状態を確認中…」→ 再照会 → S-34 | Banner, Button |
 | S-33 | `/domains/[name]` | 復旧猶予（RGP・`redemptionPeriod`） | Banner Info「残り n 日」、バッジ「復旧猶予 残 n 日」。操作は「復旧する」のみ有効 → D-04。EPP ステータス欄に `pendingDelete` が並んでいても（RGP 中は必ず共存する）S-36 ではなくこちら | Banner, Badge |
 | S-34 | `/domains/[name]` | 移管済み（AC-12-5） | バッジ「移管済み」、操作パネルなし、Banner Info「表示のみ」。自ユーザーの `transferred_out` 行のみ | Banner |
 | S-35 | `/domains/[name]` | 読み込み | Skeleton。`info` 取得後 S-30 | Skeleton |
@@ -121,20 +121,20 @@
 
 | ID | ルート | 状態 | 表示 / 振る舞い | 使用コンポーネント |
 |---|---|---|---|---|
-| S-40 | `/domains/[name]/subdomains` | 初期（`GET …/subdomain-plan` が 404） | ヘッダー（「設計を保存」「DNS に反映」Disabled）+ リポ URL 入力 + Empty State（案内）。S-26 / S-30 からの入口で保存済み設計が無い場合 | Input, Empty State |
+| S-40 | `/domains/[name]/subdomains` | 初期（`GET …/subdomain-plan` が 404） | ヘッダー（「設計を保存」）+ リポ URL 入力 + Empty State（案内）。反映するものが無いのでこの状態の primary は提案の導線。S-26 / S-30 からの入口で保存済み設計が無い場合 | Input, Empty State |
 | S-40b | 同上 | 読み込み | 保存済み設計の取得中 Skeleton（`GET …/subdomain-plan`）。あれば S-43。Figma フレームなし（§4 の読み込み規則で表現） | Skeleton |
 | S-41 | 同上 | 解析中 | ボタン「解析中…」Disabled、Skeleton。GitHub 404 / 非公開 → S-42、AI 失敗（`AI_UNAVAILABLE` / timeout 30 秒）→ S-40 に戻り Banner Warn + 再試行 | Skeleton |
 | S-42 | 同上 | リポ取得失敗（AC-13-2） | Empty State Warn + 「プロジェクト概要」入力 → 「概要から提案」。GitHub レート制限（`RATE_LIMITED`）も同画面で文言差し替え | Empty State, Input |
-| S-43 | 同上 | 提案・編集（保存済み設計あり） | ツリー（Tree Root / Node with Show Status: 反映済み / 変更あり / 未反映）+ 編集パネル + 「DNS 反映」セクション + 手動設定用 Code Block | Tree Node, Card, Input, Badge, Code Block |
-| S-44 | 同上（dialog） | 反映確認（AC-13-7） | Dialog / Apply DNS：件数チップ → DNS Diff Row → NS 状態 → 「n 件を反映する」。キャンセル / Esc で S-43 に戻る（変更なし） | Dialog / Apply DNS, DNS Diff Row |
-| S-45 | 同上 | 反映後（AC-13-4） | Banner Ok、全ノード「反映済み」、CTA「反映済み — 差分なし」Disabled | Banner |
-| S-46 | 同上 | NS 切替失敗（AC-13-5） | Banner Warn、NS バッジ Warn「未切替 — 反映時に切り替えます」、レコード未変更 | Banner, Badge |
+| S-43 | 同上 | 提案・編集（保存済み設計あり） | 上段にツリー（Tree Root / Node。反映状態はアイコン + 読み上げテキスト）と編集パネルを 2 カラム、下段に全幅の「DNS 反映」セクション（primary はここだけ）と折りたたんだ手動設定用 Code Block | Tree Node, Card, Input, Badge, Code Block |
+| S-44 | 同上（dialog） | 反映確認（AC-13-7） | Dialog / Apply DNS：件数チップ → DNS Diff Row →（未切替のときだけ NS を切り替える旨の 1 文）→「反映する」。キャンセル / Esc で S-43 に戻る（変更なし） | Dialog / Apply DNS, DNS Diff Row |
+| S-45 | 同上 | 反映後（AC-13-4） | Banner Ok、全ノード「反映済み」、CTA は動作名のまま Disabled（差分が無いことは「反映状況」行が言う） | Banner |
+| S-46 | 同上 | NS 切替失敗（AC-13-5） | Banner Warn、NS バッジ Warn「未切替」+ 切り替える旨の 1 文、レコード未変更 | Banner, Badge |
 
 ### 2.6 移管（FR-12）
 
 | ID | ルート | 状態 | 表示 / 振る舞い | 使用コンポーネント |
 |---|---|---|---|---|
-| S-50 | `/transfers` | 一覧 | Page Header（件数、「状態を更新」= Poll 消化 + transferQuery）+ 移管 IN フォーム + セクション: 受信した申請（Out Received: 拒否 / 承認 + 残り時間）/ 申請中（In Pending: 状態を確認 / 取消、Import Pending: 承認済み・取り込み待ち + 再試行）/ 履歴（approved OUT の行 → S-34、取り込み完了 → S-30 + Banner Ok「取り込みました」） | Transfer Item, Card, Input |
+| S-50 | `/transfers` | 一覧 | Page Header（件数、「状態を更新」）+ 移管 IN フォーム + セクション: 受信した申請（Out Received: 拒否 / 承認 + 残り時間）/ 申請中（In Pending: 状態を確認 / 取消、Import Pending: 承認済み・取り込み待ち + 再試行）/ 履歴（approved OUT の行 → S-34、取り込み完了 → S-30 + Banner Ok「取り込みました」） | Transfer Item, Card, Input |
 | S-51 | `/transfers` | 0 件 | フォーム + Empty State | Empty State |
 | S-52 | `/transfers` | 申請エラー（AC-12-2） | フォーム下に Error Card（`REGISTRY_REJECTED · 2202` など、Show Retry なし）。移管ロック中・pendingTransfer 中・未登録も同型で文言差し替え | Error Card |
 | S-53 | `/transfers` | 更新エラー（FR-18） | Banner Warn + キャッシュ表示。承認 / 拒否 / 取消 / 申請は Disabled | Banner |
@@ -270,7 +270,7 @@ Figma **Prototype / Screens** にプロトタイプ接続を設定済み（Prese
 
 | # | 事項 | 本書の仮置き | 選択肢 |
 |---|---|---|---|
-| 1 | S-00 のお試しスコアが `POST /domains/check`（認証要）を未認証で呼べない | 「ログイン後に利用可」と表示し、入力欄は Disabled | (a) 未認証可の `POST /uniqueness/preview`（レート制限付き）を §10.1 に追加 (b) お試しスコアを削除 |
+| 1 | ~~S-00 のお試しスコアが `POST /domains/check`（認証要）を未認証で呼べない~~ → 解決（requirements v0.1.27）: 選択肢 (a) を採用し、未認証で叩ける `POST /uniqueness/preview`（IP 単位のレート制限つき・空き確認は含まない）を追加した。S-00 の入力欄は常に操作でき、「ログイン後に利用可」の注記は無い | 済 | 済 |
 | 2 | ~~FR-17 の選択肢（有効プロバイダ / モデル）を取得する API が §10.1 にない~~ → 解決（requirements v0.1.8）: `GET /auth/me` の `ai: { provider, model, providers[] }` で配る | `GET /auth/me` に含める | 済 |
 | 3 | ~~FR-16 `DEMO_RESET_ENABLED` をクライアントが知る手段~~ → 解決（requirements v0.1.8）: `GET /auth/me` の `features.demoReset`。false ならカード非表示 | `GET /auth/me` に含める | 済 |
 | 4 | §15.2「移管 OUT はドメイン名再入力」の適用範囲 | 承認（D-06）で再入力、AuthCode 発行（D-05）は不要 | D-05 にも再入力を課す |
@@ -291,3 +291,4 @@ Figma **Prototype / Screens** にプロトタイプ接続を設定済み（Prese
 | v0.7 | 2026-08-27 | S-13 の Banner を `failures[].code` で出し分ける仕様に更新（#184）。固定文言だと `NOT_FOUND` などレジストリ障害でない失敗まで「〇〇が応答しません」と出て切り分けが空振りするため。画面と状態そのものは変えていない |
 | v0.8 | 2026-08-27 | 文言と実結果の不一致を修正（#173）: S-25 の NS helper から実際には適用されない `DOPAMIN_NAMESERVERS` を外し、S-26 は実際の `nameservers` を出す（空なら「未設定」）、D-03 の AGP 分岐の注記から「即時に削除され、元に戻せません」の断定を外す（採番が衝突していたため v0.6 から採り直した）|
 | v0.9 | 2026-08-27 | RGP の状態を requirements v0.1.23 に追随（#171）。S-33 / S-36 / §2.2 の Status 表を「RGP 中は `pendingDelete` が共存する」前提に直し、S-36 の対象を「`redemptionPeriod` を伴わない `pendingDelete`」に限定した（採番が衝突していたため v0.6 から採り直した）|
+| v0.10 | 2026-08-27 | UI/UX の全面見直しに追随（#215〜#219 / #211 / #212、requirements v0.1.27）。§1: サイドバーのナビを 3 項目にし「ドメイン取得」を CTA へ一本化、「ログ」は S-70 の「開発者向け」からのみ到達に。AI ログパネル（P-01）を廃止。§2.2: Domain Card はカード面全体が S-30 へのリンクになり「詳細」ボタンを持たない。残日数の掲示を Meta に一本化。§2.3: TLD 選択と直接検索を既定で畳み、直接検索のスコアは結果カードの見出しに 1 つだけ出す。§2.4: 操作パネルのラベルを平易にし、その状態で存在しない操作は出さない（ロックによる不可は Disabled + 理由）。§2.5: 反映 CTA を 1 つに絞り、上段=設計 / 下段=反映に分けた。§2.6: meta から「Poll 消化済み」を削除。§7 #1 を解決（未認証のスコアプレビュー API を追加）|
