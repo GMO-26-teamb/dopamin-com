@@ -85,6 +85,9 @@ jobs:
       # pull / build に復号されず リテラル "[SENSITIVE]" が渡るため、NEXT_PUBLIC_* に
       # Sensitive を付けるとビルドが落ちるか、黙って壊れた本番が出来上がる（2026-08-27 の障害）。
       # next build が不親切なプリレンダーエラーで落ちる前に、ここで原因を名指しして止める。
+      # 注意: dopamin-web プロジェクトは「既定で Sensitive」ポリシーが有効なので、
+      # `vercel env add` はフラグ無しだと Sensitive で登録される。NEXT_PUBLIC_* を足すときは
+      # 必ず `vercel env add <NAME> production --no-sensitive` を使うこと。
       - name: Verify pulled build-time env
         run: |
           env_file=.vercel/.env.production.local
