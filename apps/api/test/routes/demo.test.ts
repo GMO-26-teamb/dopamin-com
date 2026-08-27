@@ -1,4 +1,5 @@
 import { type Db, DEMO_DOMAIN_PREFIX, schema } from "@dopamin/db";
+import { MockRegistryAdapter } from "@dopamin/registry";
 import type { DemoResetResponse } from "@dopamin/shared";
 import { demoResetResponseSchema } from "@dopamin/shared";
 import { eq } from "drizzle-orm";
@@ -15,7 +16,10 @@ import {
 import app from "../../src/index";
 import { setDbForTesting } from "../../src/lib/db";
 import { resetApiEnvCacheForTesting } from "../../src/lib/env";
-import { setRegistrySetForTesting } from "../../src/lib/registries";
+import {
+  adapterForDomain,
+  setRegistrySetForTesting,
+} from "../../src/lib/registries";
 import { createTestDb, resetTestDb } from "../helpers/db";
 import { createTestSession } from "../helpers/session";
 
@@ -179,6 +183,35 @@ describe("POST /demo/reset（FR-16）", () => {
     expect(await db.$count(schema.subdomainPlans)).toBe(0);
     expect(await db.$count(schema.dnsRecords)).toBe(0);
     expect(await db.$count(schema.aiLogs)).toBe(0);
+  });
+
+  it("mock ストアに別のドメインがあっても、コールドインスタンスからのリセットで巻き戻さない", async () => {
+    const { cookie } = await createTestSession(db);
+    // 他ユーザー相当のドメインを mock に登録し、DB ストアへ書き戻しておく
+    const seeded = adapterForDomain("keep.com");
+    if (!(seeded instanceof MockRegistryAdapter)) {
+      throw new Error("REGISTRY_MODE=mock の配線になっていません");
+    }
+    await seeded.hydrate();
+    seeded.seedOwnedDomain("keep.com", {
+      nameservers: ["ns1.example.com", "ns2.example.com"],
+    });
+    await seeded.persist();
+    // Vercel のコールドスタートを再現する: プロセス内キャッシュを破棄して
+    // 未 hydrate の別インスタンスに reset を処理させる（回帰: seed（同期 API）→
+    // persist がストア全体を書き戻すため、hydrate を一度も通らないと空状態で上書きしていた）
+    setRegistrySetForTesting(null);
+
+    const { status } = await reset(cookie);
+    expect(status).toBe(200);
+
+    const after = adapterForDomain("keep.com");
+    if (!(after instanceof MockRegistryAdapter)) {
+      throw new Error("REGISTRY_MODE=mock の配線になっていません");
+    }
+    // hydrate 込みの公開メソッドで、リセット後もストアに残っていることを確かめる
+    const info = await after.info("keep.com");
+    expect(info.name).toBe("keep.com");
   });
 
   it("他ユーザーのデータは消さない", async () => {

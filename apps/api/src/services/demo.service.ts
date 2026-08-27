@@ -196,6 +196,12 @@ export async function resetDemoData(
   }
   const adapter = requireMockAdapter(first);
 
+  // ストア使用時（#46）は必ず 1 回読み込んでから始める。この後の seed（同期 API）→
+  // `persist()` はスナップショット**全体**を書き戻すため、掃除対象が 0 件で
+  // `clearMockDomains` が公開メソッドを一度も通らないと、コールドなインスタンスの
+  // 空状態で他ユーザーのドメイン・コンタクト・Poll キューまで上書きしてしまう
+  await adapter.hydrate();
+
   // 先に前回ぶんをレジストリから掃除する（DB を消した後だと名前が引けない）
   await clearMockDomains(adapter, await listDemoDomainNames(db, user.id));
   await clearDemoData(db, user.id);
