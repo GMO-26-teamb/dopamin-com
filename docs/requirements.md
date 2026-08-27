@@ -493,6 +493,7 @@ flowchart LR
 - 書き込み: レジストリ成功 → DB 更新の順（write-through）。レジストリ成功後の DB 更新失敗は操作ログに残し、次回 `info` で自己修復する。
 - 更新系コマンドのタイムアウト: 再送しない。`info` で結果を照合し、存在すれば成功扱いで DB を更新する。`transferRequest` のみ `transferQuery` で照合する（FR-18）。
 - 所有権（移管 OUT）: Poll の移管承認通知、または `info` の `sponsoringRegistrarId`（clID）が自レジストラ ID（`adapter.registrarId`）と異なることを検知したら、`domains.ownership` を `transferred_out` に遷移させる。行は削除せず履歴として残し、`subdomain_plans` も旧行に紐付いたまま新所有者へは引き継がない。同じドメインを後日再び移管 IN した場合は新しい行を作る（一意制約は保有中の行のみ、§9.1）。`sponsoringRegistrarId` は当面 null（§11.1）なので、それまでの検知手段は Poll の承認通知だけになる【要確認: 非スポンサーからの `info` 応答、§21.2 #12】。
+- 失効した名前の再登録: レジストリから消えた名前を**別のユーザー**が登録するとき、旧所有者の `domains` 行は破棄してから新しい行を作る（同じ id を引き継がない）。引き継ぐと旧所有者の `subdomain_plans` / `dns_records` が新所有者に見えてしまうため。`ownership` は `owned` / `transferred_out` の 2 値なので「失効」の第 3 の値は作らず、`DELETE /domains/:name` がレジストリからの即時消滅を検知したときと同じ扱い（行の削除）に揃える。同一ユーザーの再取得では何もしない（設計はそのまま引き継ぐ）。破棄は操作ログに残す（NFR-06）。
 - 所有権（移管 IN）: `transfers(in)` が承認されるまで `domains` 行は作らない。承認検知 → `info` 取り込み → `domains` 作成の順で、取り込みが失敗しても `transfers` は `approved` のまま残し、次回の `/transfers` 表示で再試行する。
 
 ---
