@@ -4,6 +4,7 @@ import type { Db } from "@dopamin/db";
 import type { AiFeature, AiProvider, AiSettings } from "@dopamin/shared";
 import {
   APICallError,
+  createGateway,
   generateObject,
   type LanguageModel,
   RetryError,
@@ -80,22 +81,39 @@ export interface AiUserSettings {
 /** LanguageModel の生成。テストではここを差し替えてプロバイダを呼ばせない。 */
 export type AiModelFactory = (attempt: AiAttempt) => LanguageModel;
 
+/**
+ * Gateway に渡すモデル ID。Vercel AI Gateway は `<provider>/<model>` で宛先を決める。
+ * `AI_MODEL` に既にスラッシュ付きで設定されている場合は二重に前置しない。
+ */
+function gatewayModelId(provider: AiProvider, model: string): string {
+  return model.includes("/") ? model : `${provider}/${model}`;
+}
+
 const defaultModelFactory: AiModelFactory = ({ provider, model }) => {
-  const apiKey = aiProviderApiKey(provider, getApiEnv());
-  if (apiKey === undefined) {
-    // resolveAiSettings は「キーのあるプロバイダ」しか選ばないので、ここに来るのは
-    // どのプロバイダのキーも設定されていない環境だけ（機能として使えない = 503）
-    throw new ApiException(
-      "AI_UNAVAILABLE",
-      "AI 機能が利用できません。時間をおいて再度お試しください。",
+  const env = getApiEnv();
+  // プロバイダ固有のキーがあるならそのまま直接叩く（従来の経路。gateway を挟まない）
+  const apiKey = aiProviderApiKey(provider, env);
+  if (apiKey !== undefined) {
+    switch (provider) {
+      case "google":
+        return createGoogleGenerativeAI({ apiKey })(model);
+      case "anthropic":
+        return createAnthropic({ apiKey })(model);
+    }
+  }
+  // 固有キーが無くても Vercel AI Gateway のキー 1 本で両プロバイダに出せる。
+  // `createGateway` は `ai` が re-export しているので追加の依存は要らない。
+  if (env.AI_GATEWAY_API_KEY !== undefined) {
+    return createGateway({ apiKey: env.AI_GATEWAY_API_KEY })(
+      gatewayModelId(provider, model),
     );
   }
-  switch (provider) {
-    case "google":
-      return createGoogleGenerativeAI({ apiKey })(model);
-    case "anthropic":
-      return createAnthropic({ apiKey })(model);
-  }
+  // resolveAiSettings は「キーのあるプロバイダ」しか選ばないので、ここに来るのは
+  // 固有キーも gateway キーも設定されていない環境だけ（機能として使えない = 503）
+  throw new ApiException(
+    "AI_UNAVAILABLE",
+    "AI 機能が利用できません。時間をおいて再度お試しください。",
+  );
 };
 
 let modelFactoryOverride: AiModelFactory | null = null;
