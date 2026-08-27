@@ -312,33 +312,44 @@
 
   /*
    * S-00 右カラムの抽象の場（`features/landing/score-field.tsx`）。
-   * ブランド罫線を増やしたものなので、面の作り方は `.brand-gradient` と同じ。
-   * 1 本ずつ周期の違う横ドリフトを重ね、ゆっくりした干渉に見せる。
-   * 極ドパでは `--gradient-motion`（RGB のパン）も同時に走る。
+   * 罫線は全段が同じ継ぎ目で切ってあり、右側だけが 0 → 1.75rem ゆっくり開く。
+   * 揃う / ずれる の往復が場の唯一の動き。段ごとに位相をずらす。
    */
-  @keyframes score-field-drift {
+  @keyframes score-field-seam {
     from {
       transform: translate3d(0, 0, 0);
     }
     to {
-      transform: translate3d(0.75rem, 0, 0);
+      transform: translate3d(1.75rem, 0, 0);
     }
   }
 
-  .score-field-row {
+  .score-field-seam {
+    animation: score-field-seam 11s ease-in-out var(--seam-delay, 0s) infinite
+      alternate;
+  }
+
+  /*
+   * 場の中で唯一色を持つ 1 本。面の作り方は `.brand-gradient` と同じで、
+   * 極ドパでは `--gradient-motion`（RGB のパン）も走る。
+   */
+  .score-field-brand {
     background-image: var(--gradient-brand);
     background-size: var(--gradient-size);
-    will-change: transform;
+    animation: var(--gradient-motion);
+  }
+
+  .score-field-brand.score-field-seam {
     animation:
-      score-field-drift var(--row-duration, 20s) ease-in-out
-      var(--row-delay, 0s) infinite alternate,
+      score-field-seam 11s ease-in-out var(--seam-delay, 0s) infinite alternate,
       var(--gradient-motion);
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .score-field-row {
+    .score-field-seam,
+    .score-field-brand,
+    .score-field-brand.score-field-seam {
       animation: none;
-      will-change: auto;
     }
   }
 
