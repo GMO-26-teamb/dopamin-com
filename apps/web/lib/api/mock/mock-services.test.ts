@@ -182,6 +182,40 @@ describe("createMockServices - subdomains", () => {
   });
 });
 
+describe("createMockServices - uniqueness（FR-05 / S-00 お試しスコア）", () => {
+  it("SLD でも FQDN でも、判定に使った SLD とスコアを返す", async () => {
+    const api = services("default");
+    const fromSld = await api.uniqueness.preview({ sld: "gogle" });
+    const fromFqdn = await api.uniqueness.preview({ name: "gogle.com" });
+
+    expect(fromSld.sld).toBe("gogle");
+    // TLD は判定に使わないので同じ結果になる
+    expect(fromFqdn).toEqual(fromSld);
+    expect(fromSld.uniqueness.score).toBeGreaterThanOrEqual(0);
+    expect(fromSld.uniqueness.score).toBeLessThanOrEqual(100);
+  });
+
+  it("類似候補の類似度は 0〜1（SimilarityRow と同じ単位）", async () => {
+    const { uniqueness } = await services("default").uniqueness.preview({
+      sld: "gogle",
+    });
+
+    expect(uniqueness.nearest.length).toBeGreaterThan(0);
+    for (const entry of uniqueness.nearest) {
+      expect(entry.similarity).toBeGreaterThan(0);
+      expect(entry.similarity).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("error シナリオはレジストリのせいにしない（この口はレジストリを叩かない）", async () => {
+    const error = await services("error")
+      .uniqueness.preview({ sld: "gogle" })
+      .catch((e: unknown) => e);
+
+    expect((error as ApiClientError).code).toBe("INTERNAL");
+  });
+});
+
 describe("createMockServices - candidates", () => {
   it("候補を 6 件、重複なしで返す", async () => {
     const candidates = await services("default").candidates.generate({

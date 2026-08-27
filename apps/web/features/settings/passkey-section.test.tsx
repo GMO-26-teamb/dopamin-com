@@ -51,6 +51,7 @@ function createServices(auth: AuthOverrides): Services {
     },
     // 設定画面のパスキーセクションは auth しか触らない
     domains: {} as Services["domains"],
+    uniqueness: {} as Services["uniqueness"],
     candidates: {} as Services["candidates"],
     subdomains: {} as Services["subdomains"],
     transfers: {} as Services["transfers"],

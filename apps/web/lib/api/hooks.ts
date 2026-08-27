@@ -8,7 +8,11 @@
  * invalidate して一覧・詳細へ即時反映する（AC-06-1）。
  */
 
-import type { DomainCheckRequest, PasskeySummary } from "@dopamin/shared";
+import type {
+  DomainCheckRequest,
+  PasskeySummary,
+  UniquenessPreviewRequest,
+} from "@dopamin/shared";
 import {
   type UseMutationResult,
   type UseQueryResult,
@@ -36,6 +40,7 @@ import type {
   SubdomainPlan,
   SyncResult,
   Transfer,
+  UniquenessPreview,
 } from "./types";
 
 type CandidateInput = Parameters<CandidateService["generate"]>[0];
@@ -227,6 +232,21 @@ export function useCheckDomains(): Mutation<
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: keys.aiLogs() });
     },
+  });
+}
+
+/**
+ * 独自性スコアのプレビュー（FR-05 / ランディング S-00）。
+ *
+ * ログイン前に叩くので、`useCheckDomains` と違って AI ログ（要ログイン）は触らない。
+ */
+export function usePreviewUniqueness(): Mutation<
+  UniquenessPreview,
+  UniquenessPreviewRequest
+> {
+  const services = useServices();
+  return useMutation({
+    mutationFn: (input) => services.uniqueness.preview(input),
   });
 }
 
