@@ -76,6 +76,11 @@ export async function updateOwnedDomainFromInfo(
  * 返るのは `transferred_out` の行なので、詳細レスポンスは AC-12-5 の「移管済み・操作不可」
  * になる。レジストリ側の結果を握りつぶすことになるが、他社がスポンサーのドメインの
  * `info` は信頼できない（【要確認 §21.2 #12】）ので、移管 OUT の判断を優先する。
+ *
+ * 空振りの理由は「移管 OUT された」だけではないので、返す前に**自分の行か**を見る
+ * （#222 / NFR-04）。`upsert` は `setWhere` が外れると 0 行 = FORBIDDEN で落ちていたので、
+ * ここで所有者を見ないと、その間に別ユーザーが同名を取り直した場合に
+ * 他人の行をそのまま返してしまう（旧 `upsert` は落ちていた経路）。
  */
 export async function refreshDomainFromInfo(
   userId: string,
@@ -92,6 +97,14 @@ export async function refreshDomainFromInfo(
     throw new ApiException(
       "NOT_FOUND",
       "保有ドメインに見つかりません。ダッシュボードの「最新化」をお試しください。",
+    );
+  }
+  if (current.userId !== userId) {
+    // 読んだ後に所有者が変わった（旧行の破棄 → 別ユーザーの新規登録）。
+    // §10.3 の FORBIDDEN = 所有権なしに揃える（内部の表・列名は出さない）
+    throw new ApiException(
+      "FORBIDDEN",
+      "このドメインを操作する権限がありません。",
     );
   }
   return current;

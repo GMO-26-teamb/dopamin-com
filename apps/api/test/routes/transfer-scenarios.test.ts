@@ -427,6 +427,41 @@ describe("8. info 取得中の移管 OUT 確定（#251 / AC-12-5 / AC-02-4）", 
     expect(await visibleDomains()).toEqual([]);
   });
 
+  it("読んだ後に別ユーザーが同名を取り直していたら 403（#222 / NFR-04）", async () => {
+    await createOwnDomain("race-owner.com");
+
+    // `info` の応答直後に「旧行の破棄 → 別ユーザーの新規登録」を割り込ませる。
+    // 旧 `upsert` は setWhere が外れて 0 行 = FORBIDDEN で落ちていた経路なので、
+    // write-through を UPDATE に変えた後も落ち続けること（他人の行を返さないこと）を固定する
+    const other = await createTestSession(db);
+    const original = kitaqsign.info.bind(kitaqsign);
+    let done = false;
+    vi.spyOn(kitaqsign, "info").mockImplementation(async (target: string) => {
+      const info = await original(target);
+      if (!done && target === "race-owner.com") {
+        done = true;
+        await getDomainStore().remove(target);
+        await getDomainStore().upsert({
+          userId: other.user.id,
+          name: target,
+          registry: info.registry,
+          ownership: "owned",
+          info,
+          syncedAt: new Date(),
+        });
+      }
+      return info;
+    });
+
+    const res = await api("/domains/race-owner.com");
+    expect(res.status).toBe(403);
+
+    // 他ユーザーの行を書き換えても増やしてもいない
+    const rows = await domainRows("race-owner.com");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: other.user.id });
+  });
+
   it("割り込みが無ければ従来どおり write-through する", async () => {
     await createOwnDomain("race-none.com");
     const before = (await domainRows("race-none.com"))[0];
