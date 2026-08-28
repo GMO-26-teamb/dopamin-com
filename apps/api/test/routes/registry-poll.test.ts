@@ -439,11 +439,12 @@ describe("POST /api/v1/registry/poll（FR-12 Poll 消化）", () => {
     expect(list.history).toHaveLength(1);
   });
 
-  it("レジストラ ID を返さないレジストリでも、昔の移管 IN の履歴で移管 OUT を止めない（#244）", async () => {
-    // 上のテストの裏返し。向きが分からない承認通知でも、IN の確定が**この通知より前**に
-    // 済んでいるなら別の移管 = 移管 OUT の完了として読む。
-    // 「承認済みの IN 行がある」だけで止めると、移管 IN で取得したドメインは
-    // 以後どれだけ移管 OUT されても transferred_out に倒れなくなる
+  it("レジストラ ID を返さないレジストリでは、昔の移管 IN があっても保有行を倒さず警告を残す", async () => {
+    // #244 の保険の境界。向きが分からない承認通知は、対応する行が無いなら倒さない。
+    // kitaqnic の承認通知は gaining にしか積まれない（#176）ので、受け取る承認通知は
+    // 移管 IN のはず。ここで倒すと取り込んだばかりの保有行を消す方が実害が大きい。
+    // 見送ったことはログに残し、踏んだ回数を運用で見られるようにする
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const anonymous = new AnonymousTransferAdapter({
       id: "kitaqsign",
       // 申請を pending のうちに消化できない状況（OUT 行が手元に無いまま承認だけ届く）
@@ -453,34 +454,34 @@ describe("POST /api/v1/registry/poll（FR-12 Poll 消化）", () => {
       createRegistrySet({ mode: "real", adapters: [anonymous] }),
     );
     anonymous.seedForeignDomain("anon-out.com", "auth-anon-out");
-    const requested = await sendJson("/transfers", {
-      name: "anon-out.com",
-      authCode: "auth-anon-out",
-    });
-    expect(requested.status).toBe(202);
-    const { record } = (await requested.json()) as { record: { id: string } };
+    expect(
+      (
+        await sendJson("/transfers", {
+          name: "anon-out.com",
+          authCode: "auth-anon-out",
+        })
+      ).status,
+    ).toBe(202);
 
     // 移管 IN で取得する（期限 0 なのでサーバ自動承認で確定する）
     expect(await poll()).toMatchObject({ settled: 1 });
     expect(await visibleDomains()).toEqual(["anon-out.com"]);
-    // その確定は「昔」の出来事にする（次の通知より前に済んでいる）
-    await transferStore.update(record.id, {
-      completedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+
+    // 同じドメインへの申請 + 承認が向き不明のまま届く
+    anonymous.simulateInboundTransferRequest("anon-out.com");
+    expect(await poll()).toMatchObject({
+      processed: 2,
+      settled: 0,
+      skipped: 2,
     });
 
-    // 取得したドメインを移管 OUT する
-    anonymous.simulateInboundTransferRequest("anon-out.com");
-    expect(await poll()).toMatchObject({ processed: 2, settled: 1 });
-
-    expect(await visibleDomains()).toEqual([]);
-    // AC-12-5: 移管 OUT の完了が履歴に残る
-    const list = await listTransfers();
-    expect(list.outbound).toEqual([]);
+    // 倒さない = 保有一覧に残る（誤って消すよりは残す）
+    expect(await visibleDomains()).toEqual(["anon-out.com"]);
     expect(
-      list.history.filter(
-        (t) => t.direction === "out" && t.status === "approved",
+      warn.mock.calls.some((args) =>
+        String(args[0]).includes("transfer_settlement_direction_unknown"),
       ),
-    ).toHaveLength(1);
+    ).toBe(true);
   });
 
   it("キューに溜まった複数の通知を一度で消化しきる（FIFO を詰まらせない）", async () => {

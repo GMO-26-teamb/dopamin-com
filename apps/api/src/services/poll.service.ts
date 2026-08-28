@@ -176,34 +176,26 @@ async function handleRequest(
 }
 
 /**
- * レジストリとアプリの時計のずれを吸収する猶予。
- * `transfer.service.ts` の承認判定の窓（`APPROVAL_WINDOW_SLACK_MS`）と同じ幅にしてある。
+ * 向きが導出できない承認通知を「決着済みの移管 IN」と読んだことを残す（FR-15 の運用ログ）。
+ * この保険が実際に効いた回数が分からないと、{@link handleSettlement} の
+ * 【要確認】が現実に踏まれているのか判断できない。
  */
-const CLOCK_SKEW_SLACK_MS = 5 * 60 * 1000;
-
-/**
- * この通知より後に確定した移管 IN の行があるか（{@link handleSettlement} の (a) 判定）。
- *
- * kitaqnic の通知は `counterpartyRegistrar` しか返さず向きを導出できない（#176 の実測形）。
- * その場合の保険として時系列を見る: 承認通知はレジストリが承認した時刻（`queuedAt`）に
- * 積まれ、`GET /transfers` の照合はそれを観測してから走るので、**同じ移管を指す** IN 行の
- * `completedAt` は必ず `queuedAt` 以降になる。逆に、この通知と無関係な過去の移管 IN は
- * `queuedAt` より前に確定している。判定できない値（時刻が無い / 壊れている）は、
- * 取り込んだばかりの保有行を倒さない側に倒す。
- */
-async function settledInboundAfter(
-  name: string,
+function warnAmbiguousSettlement(
+  adapter: RegistryAdapter,
   message: PollMessage,
-): Promise<boolean> {
-  const row = await getTransferStore().findLatest(name, "in", "approved");
-  if (row === null) {
-    return false;
-  }
-  const queuedAt = new Date(message.queuedAt).getTime();
-  if (row.completedAt === null || Number.isNaN(queuedAt)) {
-    return true;
-  }
-  return row.completedAt.getTime() >= queuedAt - CLOCK_SKEW_SLACK_MS;
+  name: string,
+): void {
+  console.warn(
+    JSON.stringify({
+      level: "warn",
+      type: "transfer_settlement_direction_unknown",
+      registry: adapter.id,
+      registryMessageId: message.id,
+      domain: name,
+      message:
+        "向きを導出できない承認通知に対応する行が無く、決着済みの移管 IN として見送りました",
+    }),
+  );
 }
 
 /**
@@ -244,7 +236,20 @@ async function handleSettlement(
     if (direction === "in") {
       return "skipped";
     }
-    if (direction === null && (await settledInboundAfter(name, message))) {
+    if (
+      direction === null &&
+      (await store.findLatest(name, "in", "approved")) !== null
+    ) {
+      // 向きが導出できないレジストリのための保険。ここは倒さない側に倒す:
+      // kitaqnic の実測形（#176）は `counterpartyRegistrar` しか返さず向きが分からないが、
+      // 承認 / 拒否の通知は gaining にしか積まれない = 受け取る承認通知は移管 IN なので、
+      // 倒すと取り込んだばかりの保有行をユーザーの一覧から消すことになる。
+      // 通知の `queuedAt` で時系列を見る手も無い: kitaqnic の `qdate` はタイムゾーンを
+      // 持たず（`docs/registry/kitaqnic/CHANGELOG.md`。実測値は JST 相当で、UTC として
+      // 読むと 9 時間ずれる）、手元の時刻と絶対時刻として比較できない。
+      // 【要確認】losing にも承認通知を積むレジストリ（サーバ自動承認時など）が現れたら、
+      // この保険は移管 OUT を取りこぼす（#244 の残り）。ログで踏んだ回数を見て判断する。
+      warnAmbiguousSettlement(adapter, message, name);
       return "skipped";
     }
     // (b) 移管 OUT の完了。履歴を残しつつ所有権を倒す
