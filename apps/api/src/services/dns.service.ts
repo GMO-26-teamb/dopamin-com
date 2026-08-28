@@ -22,7 +22,7 @@ import { and, eq } from "drizzle-orm";
 import { ApiException } from "../lib/errors";
 import { getRequestContext } from "../lib/operation-log-context";
 import { reconcileOnTimeout } from "../lib/reconcile";
-import { upsertDomainFromInfo } from "./domain.service";
+import { refreshDomainFromInfo } from "./domain.service";
 import type { DomainRecord } from "./domain-store";
 import { recordAppOperation } from "./operation-log.service";
 import {
@@ -137,7 +137,7 @@ async function switchNameserversIfNeeded(
     },
   );
   // 一覧・詳細に切替後の NS を反映する（§6.5 の write-through）
-  await upsertDomainFromInfo(userId, after);
+  await refreshDomainFromInfo(userId, after);
   return true;
 }
 

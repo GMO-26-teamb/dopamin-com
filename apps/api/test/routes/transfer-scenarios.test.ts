@@ -20,6 +20,7 @@ import app from "../../src/index";
 import { setDbForTesting } from "../../src/lib/db";
 import { setRegistrySetForTesting } from "../../src/lib/registries";
 import { setRetrySleepForTesting } from "../../src/lib/retry";
+import { getDomainStore } from "../../src/services/domain-store";
 import { createTestDb, resetTestDb } from "../helpers/db";
 import { createTestSession } from "../helpers/session";
 
@@ -357,5 +358,89 @@ describe("7. 出戻り（移管 OUT 後に同名を再取得）", () => {
     });
     // 新しい IN は新しい保有行に紐付く（古い履歴行ではない）
     expect(byId.get(inId)?.domainId).toBe(domains[1]?.id);
+  });
+});
+
+describe("8. info 取得中の移管 OUT 確定（#251 / AC-12-5 / AC-02-4）", () => {
+  /**
+   * `info` の応答直後（= write-through の直前）に移管 OUT の確定を割り込ませる。
+   *
+   * S-32 の自動承認カウントダウンが 0 に達すると、詳細画面が `GET /domains/:name` と
+   * `GET /transfers`（→ Poll 消化 → `markTransferredOut`）を同じ tick で投げるので、
+   * この並びは実際に起こりうる。`info` の再試行（最大 5s × 3 回）の分だけ窓が広い。
+   *
+   * ここで保有行を作り直すと、`domains_name_owned_uniq` が `ownership = 'owned'` の
+   * 部分一意インデックスであるせいで衝突が起きず、`transferred_out` 行の隣に
+   * `owned` 行が生えて一覧に復活する（`sync` でも消えない）。
+   */
+  function interleaveTransferOutDuringInfo(name: string): void {
+    const original = kitaqsign.info.bind(kitaqsign);
+    let done = false;
+    vi.spyOn(kitaqsign, "info").mockImplementation(async (target: string) => {
+      const info = await original(target);
+      if (!done && target === name) {
+        done = true;
+        await getDomainStore().markTransferredOut(target, new Date());
+      }
+      return info;
+    });
+  }
+
+  it("詳細取得の write-through が保有行を復活させない", async () => {
+    await createOwnDomain("race-detail.com");
+    interleaveTransferOutDuringInfo("race-detail.com");
+
+    const res = await api("/domains/race-detail.com");
+    expect(res.status).toBe(200);
+
+    const rows = await domainRows("race-detail.com");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ ownership: "transferred_out" });
+    expect(await visibleDomains()).toEqual([]);
+
+    // 復旧経路が塞がっていないこと: 最新化しても行は増えず、一覧にも戻らない
+    const sync = await api("/domains/sync", { method: "POST" });
+    expect(sync.status).toBe(200);
+    const body = (await sync.json()) as { domains: { name: string }[] };
+    expect(body.domains.map((d) => d.name)).toEqual([]);
+    expect(await domainRows("race-detail.com")).toHaveLength(1);
+    expect(await visibleDomains()).toEqual([]);
+  });
+
+  it("最新化の write-through が保有行を復活させない", async () => {
+    await createOwnDomain("race-sync.com");
+    interleaveTransferOutDuringInfo("race-sync.com");
+
+    const res = await api("/domains/sync", { method: "POST" });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      domains: { name: string }[];
+      failures: unknown[];
+    };
+
+    // 書けなかったことは失敗ではない（移管 OUT が確定しただけ）
+    expect(body.domains.map((d) => d.name)).toEqual([]);
+    expect(body.failures).toEqual([]);
+    const rows = await domainRows("race-sync.com");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ ownership: "transferred_out" });
+    expect(await visibleDomains()).toEqual([]);
+  });
+
+  it("割り込みが無ければ従来どおり write-through する", async () => {
+    await createOwnDomain("race-none.com");
+    const before = (await domainRows("race-none.com"))[0];
+
+    expect((await api("/domains/race-none.com")).status).toBe(200);
+
+    const rows = await domainRows("race-none.com");
+    expect(rows).toHaveLength(1);
+    // 同じ行が更新される（id を保つ）。syncedAt が進む = 実際に書けている
+    expect(rows[0]?.id).toBe(before?.id);
+    expect(rows[0]).toMatchObject({ ownership: "owned", userId });
+    expect(rows[0]?.syncedAt?.getTime()).toBeGreaterThanOrEqual(
+      before?.syncedAt?.getTime() ?? 0,
+    );
+    expect(await visibleDomains()).toEqual(["race-none.com"]);
   });
 });

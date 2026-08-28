@@ -10,27 +10,91 @@ import { ApiException } from "../lib/errors";
 import { adapterForDomain } from "../lib/registries";
 import { registryErrorMessage } from "../lib/registry-message";
 import { withReadRetry } from "../lib/retry";
-import { type DomainRecord, getDomainStore } from "./domain-store";
+import {
+  type DomainRecord,
+  type DomainUpsert,
+  getDomainStore,
+} from "./domain-store";
 import { getTransferStore, type TransferRecord } from "./transfer-store";
 
+/** `info` の正規化結果 → `domains` の書き込み値（保有中の行として書く）。 */
+function ownedValuesFromInfo(
+  userId: string,
+  info: DomainInfo,
+  syncedAt: Date,
+): DomainUpsert {
+  return {
+    userId,
+    name: info.name,
+    registry: info.registry,
+    ownership: "owned",
+    info,
+    syncedAt,
+  };
+}
+
 /**
- * 保有ドメインの write-through（docs/requirements.md §6.5）。
- * レジストリが正なので、`info` / 更新系の結果を受け取るたびに DB キャッシュを上書きする。
+ * ドメインを**取得した**ときに保有行を作る（新規登録 FR-06 / 移管 IN の取り込み FR-12 / デモ投入）。
+ *
+ * 行が無ければ作るので、同名の `transferred_out` 行が残っていても「出戻り」で
+ * 新しい保有行が生える（AC-12-5）。呼んでよいのは「たった今レジストリから
+ * このドメインを得た」と言い切れる経路だけ。
+ * 既存行の最新化は {@link refreshDomainFromInfo} を使う（#251）。
  */
 export async function upsertDomainFromInfo(
   userId: string,
   info: DomainInfo,
   syncedAt: Date = new Date(),
 ): Promise<DomainRecord> {
-  return getDomainStore().upsert({
-    userId,
-    name: info.name,
-    registry: info.registry,
-    // `info` が返るのは保有中の行だけ。移管 OUT の検知は #57 / #58 が別経路で行う
-    ownership: "owned",
-    info,
-    syncedAt,
-  });
+  return getDomainStore().upsert(ownedValuesFromInfo(userId, info, syncedAt));
+}
+
+/**
+ * 保有ドメインの write-through（docs/requirements.md §6.5）。
+ * レジストリが正なので、`info` / 更新系の結果を受け取るたびに DB キャッシュを上書きする。
+ *
+ * 更新できる保有行が無ければ **何も書かずに null** を返す。ここで作りに行かないのが要点で、
+ * `info` を取っている間（最大 5s × 3 回の再試行）に移管 OUT の確定が割り込むと、
+ * 読んだときは `owned` だった行が `transferred_out` に変わっている。
+ * その状態で `upsert` すると部分一意インデックス（`ownership = 'owned'` のみ）を
+ * すり抜けて保有行が新規 INSERT され、移管したはずのドメインが一覧に復活する（#251）。
+ */
+export async function updateOwnedDomainFromInfo(
+  userId: string,
+  info: DomainInfo,
+  syncedAt: Date = new Date(),
+): Promise<DomainRecord | null> {
+  return getDomainStore().updateOwned(
+    ownedValuesFromInfo(userId, info, syncedAt),
+  );
+}
+
+/**
+ * ルート用の write-through。{@link updateOwnedDomainFromInfo} が空振りしたとき
+ * （移管 OUT の確定が割り込んだ）は、書かずに現在の行をそのまま返す。
+ *
+ * 返るのは `transferred_out` の行なので、詳細レスポンスは AC-12-5 の「移管済み・操作不可」
+ * になる。レジストリ側の結果を握りつぶすことになるが、他社がスポンサーのドメインの
+ * `info` は信頼できない（【要確認 §21.2 #12】）ので、移管 OUT の判断を優先する。
+ */
+export async function refreshDomainFromInfo(
+  userId: string,
+  info: DomainInfo,
+  syncedAt: Date = new Date(),
+): Promise<DomainRecord> {
+  const updated = await updateOwnedDomainFromInfo(userId, info, syncedAt);
+  if (updated) {
+    return updated;
+  }
+  const current = await getDomainStore().find(info.name);
+  if (!current) {
+    // 行ごと消えた（`DELETE /domains/:name` の即時消滅と競合）。作り直さない
+    throw new ApiException(
+      "NOT_FOUND",
+      "保有ドメインに見つかりません。ダッシュボードの「最新化」をお試しください。",
+    );
+  }
+  return current;
 }
 
 /** 保有ドメインを DB から削除する（レジストリから即時消滅した場合）。 */
@@ -326,8 +390,13 @@ export async function syncDomains(
         const info = await withReadRetry(() =>
           adapterForDomain(record.name).info(record.name),
         );
-        const updated = await upsertDomainFromInfo(userId, info);
-        await options.onSynced?.(updated, info);
+        // 保有行が消えていたら書かない（同期中に移管 OUT が確定した / 削除された）。
+        // ここで作り直すと移管 OUT 済みのドメインが一覧に復活する（#251）。
+        // 検知フックも回さない: 対象は既に保有していない行なので判定する意味がない。
+        const updated = await updateOwnedDomainFromInfo(userId, info);
+        if (updated) {
+          await options.onSynced?.(updated, info);
+        }
       } catch (err) {
         failures.push(toSyncFailure(record.name, err));
       }
