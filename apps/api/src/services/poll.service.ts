@@ -176,6 +176,37 @@ async function handleRequest(
 }
 
 /**
+ * レジストリとアプリの時計のずれを吸収する猶予。
+ * `transfer.service.ts` の承認判定の窓（`APPROVAL_WINDOW_SLACK_MS`）と同じ幅にしてある。
+ */
+const CLOCK_SKEW_SLACK_MS = 5 * 60 * 1000;
+
+/**
+ * この通知より後に確定した移管 IN の行があるか（{@link handleSettlement} の (a) 判定）。
+ *
+ * kitaqnic の通知は `counterpartyRegistrar` しか返さず向きを導出できない（#176 の実測形）。
+ * その場合の保険として時系列を見る: 承認通知はレジストリが承認した時刻（`queuedAt`）に
+ * 積まれ、`GET /transfers` の照合はそれを観測してから走るので、**同じ移管を指す** IN 行の
+ * `completedAt` は必ず `queuedAt` 以降になる。逆に、この通知と無関係な過去の移管 IN は
+ * `queuedAt` より前に確定している。判定できない値（時刻が無い / 壊れている）は、
+ * 取り込んだばかりの保有行を倒さない側に倒す。
+ */
+async function settledInboundAfter(
+  name: string,
+  message: PollMessage,
+): Promise<boolean> {
+  const row = await getTransferStore().findLatest(name, "in", "approved");
+  if (row === null) {
+    return false;
+  }
+  const queuedAt = new Date(message.queuedAt).getTime();
+  if (row.completedAt === null || Number.isNaN(queuedAt)) {
+    return true;
+  }
+  return row.completedAt.getTime() >= queuedAt - CLOCK_SKEW_SLACK_MS;
+}
+
+/**
  * 確定通知（承認 / 拒否 / 取消）を `transfers` と `domains` に反映する。
  *
  * 対応する pending 行が無い承認通知でも、そのドメインを保有していれば移管 OUT の
@@ -206,14 +237,14 @@ async function handleSettlement(
     // pending 行が無い承認通知は 2 通りに読める:
     //   (a) 移管 IN の確定が `GET /transfers` の照合（`info` の trDate）で先に済んでいた
     //   (b) 申請の受信通知を取りこぼしたまま承認だけ届いた移管 OUT
-    // レジストラ ID を返さないレジストリでは向きから区別できないので、直近に承認済みの
-    // IN 行があれば (a) と読む。(b) と誤ると、取り込んだばかりの保有行を
-    // transferred_out に倒してユーザーのドメインを一覧から消してしまうため。
+    // 向きが導出できるなら（ADR-0002 決定 3）それが正で、IN の履歴は見ない。
+    // 「承認済みの IN 行がある」だけで (a) と読むと、移管 IN で取得したドメインが
+    // 以後どれだけ移管 OUT されても transferred_out に倒れなくなる（#244）。
     const direction = transferDirectionOf(result, adapter.registrarId);
-    const settledInbound =
-      direction === "in" ||
-      (await store.findLatest(name, "in", "approved")) !== null;
-    if (settledInbound) {
+    if (direction === "in") {
+      return "skipped";
+    }
+    if (direction === null && (await settledInboundAfter(name, message))) {
       return "skipped";
     }
     // (b) 移管 OUT の完了。履歴を残しつつ所有権を倒す
