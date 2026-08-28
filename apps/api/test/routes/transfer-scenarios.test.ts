@@ -361,7 +361,59 @@ describe("7. 出戻り（移管 OUT 後に同名を再取得）", () => {
   });
 });
 
-describe("8. info 取得中の移管 OUT 確定（#251 / AC-12-5 / AC-02-4）", () => {
+describe("8. 移管 IN で取得したドメインの移管 OUT（#244）", () => {
+  it("申請を Poll で拾えていれば、承認で保有一覧から消えて履歴に残る", async () => {
+    // 相手の申請を pending のうちに消化できたケース（OUT 行が手元にある）
+    const authCode = seedForeign("in-out-row.com");
+    const inId = await requestInbound("in-out-row.com", authCode);
+    kitaqsign.simulateCounterpartApprove("in-out-row.com");
+    await listTransfers(); // 承認通知を消化して取り込む
+    expect(await visibleDomains()).toEqual(["in-out-row.com"]);
+
+    const outId = await receiveOutbound("in-out-row.com");
+    expect(
+      (await api(`/transfers/${outId}/approve`, { method: "POST" })).status,
+    ).toBe(200);
+
+    expect(await visibleDomains()).toEqual([]);
+    expect((await domainRows("in-out-row.com"))[0]).toMatchObject({
+      ownership: "transferred_out",
+    });
+    const list = await listTransfers();
+    expect([...list.history.map((t) => t.id)].sort()).toEqual(
+      [inId, outId].sort(),
+    );
+  });
+
+  it("申請と自動承認を同じ Poll で読んでも transferred_out になる", async () => {
+    // 期限 0 で「申請を pending のうちに消化できなかった」状態を作る（§11.1 の遅延評価）。
+    // OUT 行が手元に無いまま承認通知が届くので、向きの導出だけが頼りになる。
+    installRegistry({ autoApproveMs: 0 });
+    const authCode = seedForeign("in-out-norow.com");
+    await requestInbound("in-out-norow.com", authCode);
+    // 期限 0 なのでサーバ自動承認で移管 IN が確定し、取り込まれる
+    await listTransfers();
+    expect(await visibleDomains()).toEqual(["in-out-norow.com"]);
+
+    kitaqsign.simulateInboundTransferRequest("in-out-norow.com");
+    const res = await api("/registry/poll", { method: "POST" });
+    expect(res.status).toBe(200);
+
+    expect(await visibleDomains()).toEqual([]);
+    const domains = await domainRows("in-out-norow.com");
+    expect(domains[0]).toMatchObject({ ownership: "transferred_out" });
+    expect(domains[0]?.transferredOutAt).not.toBeNull();
+
+    // AC-12-5: 移管 OUT の完了が履歴に残る
+    const list = await listTransfers();
+    expect(list.outbound).toEqual([]);
+    const out = list.history.filter((t) => t.direction === "out");
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ status: "approved" });
+  });
+});
+
+describe("9. info 取得中の移管 OUT 確定（#251 / AC-12-5 / AC-02-4）", () => {
   /**
    * `info` の応答直後（= write-through の直前）に移管 OUT の確定を割り込ませる。
    *
