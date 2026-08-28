@@ -245,9 +245,9 @@ async function handleSettlement(
       // kitaqnic の実測形（#176）は `counterpartyRegistrar` しか返さず向きが分からないが、
       // 承認 / 拒否の通知は gaining にしか積まれない = 受け取る承認通知は移管 IN なので、
       // 倒すと取り込んだばかりの保有行をユーザーの一覧から消すことになる。
-      // 通知の `queuedAt` で時系列を見る手も無い: kitaqnic の `qdate` はタイムゾーンを
-      // 持たず（`docs/registry/kitaqnic/CHANGELOG.md`。実測値は JST 相当で、UTC として
-      // 読むと 9 時間ずれる）、手元の時刻と絶対時刻として比較できない。
+      // 通知の `queuedAt`（#289 で JST 壁時計値 → UTC に正規化済み）で時系列を見る手も
+      // 取らない: IN の決着より後の qdate でも「決着済み IN の承認通知の消化が遅れた」のか
+      // 「新たな移管 OUT の承認」なのかは切り分けられない（Poll は FIFO でまとめて遅れる）。
       // 【要確認】losing にも承認通知を積むレジストリ（サーバ自動承認時など）が現れたら、
       // この保険は移管 OUT を取りこぼす（#244 の残り）。ログで踏んだ回数を見て判断する。
       warnAmbiguousSettlement(adapter, message, name);
