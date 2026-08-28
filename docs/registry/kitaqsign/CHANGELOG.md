@@ -11,6 +11,25 @@
 
 ---
 
+## 2026-08-28 — 日時は JST の壁時計値（`Z` 付きでも UTC ではない）と実測で判明
+
+| 項目 | 内容 |
+|---|---|
+| 種別 | 実測で判明（#289） |
+| `specVersion` | 未更新（`v2 (2026-08-27)` のまま。OpenAPI スキーマ自体は変わっていない） |
+| fixture 更新 | なし（`Z` 付きの形はそのまま実測どおり。解釈の変更は `../fixtures/README.md` に記載） |
+| 影響 FR | FR-02（`registered_at` 等のキャッシュ）/ AC-02-2（有効期限 30 日警告）/ FR-12 |
+
+- `domain:info` 等の `crDate` / `upDate` / `exDate` / `trDate` は **`Z` 付きで返るが中身は
+  JST の壁時計値**。実測: 本番 DB の kitaqsign 全行で `registered_at` が行作成時刻より
+  +9.0h（例: `naodevelops.com` created `04:12:31Z` / registered `13:12:31Z`。#289）。
+- kitaqsign は transfer 応答に `reDate` / `acDate` を返さない（2026-08-25 エントリ）ため、
+  移管カウントダウンはサーバ時刻フォールバックで偶然正しく、`.com` では実害が見えなかった。
+  `registered_at` / `expires_at` のずれは初回登録時から出ていた。
+- アダプタ対応は kitaqnic と共通: `packages/registry/src/kitaq-datetime.ts` の正規化
+  （オフセット表記を無視して壁時計成分を JST と解釈 → UTC）を `kitaq.ts` の
+  全日時マッピングに適用（[`../kitaqnic/CHANGELOG.md`](../kitaqnic/CHANGELOG.md) 同日エントリ）。
+
 ## 2026-08-27 — `.org` / `.info` の管轄が kitaqnic へ移管（kitaqsign では非対応に）
 
 | 項目 | 内容 |

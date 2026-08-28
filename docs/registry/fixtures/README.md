@@ -41,6 +41,15 @@
 契約テストはそこを見るのではなく、**アダプタが後続で `info` を呼んで状態を取り直すこと**を
 確かめる（`delete` / `restore` / kitaqnic の `update`）。
 
+## 日時の読み方（#289）
+
+fixture 内の日時（`crDate` / `upDate` / `exDate` / `trDate` / `reDate` / `acDate` / `qdate`）は、
+実レジストリの応答と同じく **JST の壁時計値**。`Z` が付いていても UTC ではない
+（`transfer-request.kitaqnic.json` の `reDate: "2026-08-28T14:30:57Z"` は実測の生値で、
+JST 14:30:57 = UTC `05:30:57Z`。`qdate` はオフセット無しで返る。
+[`../spec-notes.md`](../spec-notes.md) §1「日時表現」）。契約テストはアダプタの正規化
+（`packages/registry/src/kitaq-datetime.ts`）を通した **UTC の期待値**で検証する。
+
 ## 暫定値を含む fixture
 
 `transfer-request.*.json` の `resData.status` は暫定値。両レジストリの OpenAPI で

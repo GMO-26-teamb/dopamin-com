@@ -11,6 +11,29 @@
 
 ---
 
+## 2026-08-28 — 日時はすべて JST の壁時計値（`Z` 付きでも UTC ではない）と実測で判明
+
+| 項目 | 内容 |
+|---|---|
+| 種別 | 実測で判明（#289。移管 IN の自動承認カウントダウンが 9 時間ずれた） |
+| `specVersion` | 未更新（`v2 (2026-08-27)` のまま。OpenAPI スキーマ自体は変わっていない） |
+| fixture 更新 | `../fixtures/transfer-request.kitaqnic.json`（`reDate` / `acDate` を実測の生値ベースに差し替え） |
+| 影響 FR | FR-12 / AC-07-3（自動承認カウントダウン）/ AC-02-2（有効期限 30 日警告）/ FR-02（`registered_at` 等のキャッシュ） |
+
+- `DomainTransferResponse` の `reDate` / `acDate` は **`Z` 付きで返るが中身は JST の壁時計値**。
+  実測: `dopamin-trin-ok.xyz` / svTRID `KQNIC-20260828-017291` の `reDate` が
+  `2026-08-28T14:30:57Z`、同リクエストの実 UTC は `05:30:57Z`（+9h）。
+- Poll の `qdate` は逆に**オフセット無し**の naive（例 `2026-08-28T14:29:05.259522`。
+  2026-08-27 エントリで既知）だが、値はやはり JST の壁時計値。
+- `domain:info` の `crDate` / `upDate` / `exDate` / `trDate` も同様に JST 壁時計値
+  （本番 DB の全行で `registered_at` が行作成時刻より +9.0h。#289 の実測）。
+- アダプタ対応: `packages/registry/src/kitaq-datetime.ts` を追加し、`kitaq.ts` の
+  `toDomainInfo` / `toTransferResult` / `toPollMessage` の日時を「オフセット表記を無視して
+  壁時計成分を JST と解釈 → UTC」に正規化。既存行は `packages/db/drizzle/`
+  の是正マイグレーションで -9h する（詳細は #289）。
+- 契約テスト: `kitaq-datetime.test.ts`（`Z` 付き / オフセット無し双方）と `kitaq.test.ts` で
+  正規化後の UTC を固定。グリーン。
+
 ## 2026-08-27 — `.org` / `.info` の管轄を kitaqsign から引き継いだ
 
 | 項目 | 内容 |
