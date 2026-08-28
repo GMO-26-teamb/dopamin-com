@@ -19,6 +19,7 @@ import type { RegistryAdapter } from "./adapter";
 import type { EppEnvelope } from "./envelope";
 import { RegistryError } from "./errors";
 import { type KitaqAdapterConfig, KitaqHttpClient } from "./http";
+import { kitaqDatetimeToUtc } from "./kitaq-datetime";
 
 /** Swagger 取得日（docs/registry/*.openapi.json）。仕様変更時に更新し /health で確認できるようにする。 */
 // v2: 2026-08-27 の .org / .info 管轄移管（kitaqsign → kitaqnic。docs/registry/*/CHANGELOG.md）
@@ -157,6 +158,15 @@ function newContactId(): string {
   return `dp-${randomUUID().replace(/-/g, "").slice(0, 10)}`;
 }
 
+/**
+ * レジストリ日時を UTC へ（{@link kitaqDatetimeToUtc}）。値が無ければ undefined。
+ * 両レジストリの日時（crDate / exDate / reDate / acDate / qdate 等）はすべて
+ * JST の壁時計値で返る（#289 の実測）ため、正規化型に載せる前に必ずここを通す。
+ */
+function toUtcIfPresent(value: string | null | undefined): string | undefined {
+  return value == null ? undefined : kitaqDatetimeToUtc(value);
+}
+
 function toDomainInfo(
   registry: KitaqAdapterConfig["id"],
   resData: DomainResData,
@@ -168,10 +178,10 @@ function toDomainInfo(
     registrant: resData.registrant,
     contacts: resData.contacts,
     nameservers: resData.nameservers,
-    registeredAt: resData.crDate,
-    updatedAt: resData.upDate ?? null,
-    expiresAt: resData.exDate ?? null,
-    lastTransferAt: resData.trDate ?? null,
+    registeredAt: kitaqDatetimeToUtc(resData.crDate),
+    updatedAt: toUtcIfPresent(resData.upDate) ?? null,
+    expiresAt: toUtcIfPresent(resData.exDate) ?? null,
+    lastTransferAt: toUtcIfPresent(resData.trDate) ?? null,
     // 両レジストリの info 応答に clID 相当のフィールドが無い【要確認: §21.2 #12】。
     // 実測で判明したら domainResDataSchema に足してここでマップする（ADR-0002）。
     sponsoringRegistrarId: null,
@@ -353,8 +363,8 @@ function toTransferResult(
     registryStatus: resData.status,
     requestingRegistrarId: resData.gainingRegistrar ?? undefined,
     actingRegistrarId: resData.losingRegistrar ?? undefined,
-    requestedAt: resData.reDate ?? undefined,
-    actByAt: resData.acDate ?? undefined,
+    requestedAt: toUtcIfPresent(resData.reDate),
+    actByAt: toUtcIfPresent(resData.acDate),
     raw: envelope,
   };
 }
@@ -405,14 +415,18 @@ function toPollMessage(
           registryStatus: rawStatus ?? message.msgType,
           ...(requestingRegistrarId ? { requestingRegistrarId } : {}),
           ...(actingRegistrarId ? { actingRegistrarId } : {}),
-          ...(payload?.reDate ? { requestedAt: payload.reDate } : {}),
-          ...(payload?.acDate ? { actByAt: payload.acDate } : {}),
+          ...(payload?.reDate
+            ? { requestedAt: kitaqDatetimeToUtc(payload.reDate) }
+            : {}),
+          ...(payload?.acDate
+            ? { actByAt: kitaqDatetimeToUtc(payload.acDate) }
+            : {}),
           raw: envelope,
         };
   return {
     id: String(message.id),
     count: resData.count,
-    queuedAt: message.qdate,
+    queuedAt: kitaqDatetimeToUtc(message.qdate),
     type,
     ...(domainName === undefined ? {} : { domainName }),
     ...(transfer === undefined ? {} : { transfer }),

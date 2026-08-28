@@ -77,6 +77,23 @@ HTTP 200 でも `result.code` が 2xxx なら失敗。アダプタはこの 2 �
 | 2303 | 存在しない | 404 ObjectNotFound |
 | 2306 | ポリシー違反 | — |
 
+### 日時表現（2026-08-28 実測・両レジストリで同じ癖）
+
+**日時はすべて JST の壁時計値**で返る。表記は場所によって違うが、どれも中身は JST:
+
+| フィールド | 表記 | 例（実測） |
+|---|---|---|
+| `crDate` / `upDate` / `exDate` / `trDate` / `reDate` / `acDate` | `Z` 付き（UTC を自称） | `2026-08-28T14:30:57Z`（実際は JST 14:30:57 = UTC `05:30:57Z`） |
+| Poll の `qdate` | オフセット無し・マイクロ秒精度 | `2026-08-28T14:29:05.259522` |
+
+`Z` が付いていても信用できないため、アダプタは**オフセット表記を無視して壁時計成分を
+JST と解釈**し、UTC の ISO 8601 に正規化してから正規化型（`DomainInfo` / `TransferResult` /
+`PollMessage`）に載せる（`packages/registry/src/kitaq-datetime.ts`。#289）。
+放置すると移管の自動承認カウントダウン（AC-07-3）が 9 時間ずれ、`exDate` 由来の
+残日数（AC-02-2）が暦日で最大 1 日ずれる。発見の経緯と本番 DB での影響は #289、
+記録は [`kitaqnic/CHANGELOG.md`](kitaqnic/CHANGELOG.md) /
+[`kitaqsign/CHANGELOG.md`](kitaqsign/CHANGELOG.md) の 2026-08-28 エントリ。
+
 ### 値の制約（違反は 400）
 
 | 項目 | 制約 |

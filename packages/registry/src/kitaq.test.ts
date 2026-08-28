@@ -142,9 +142,10 @@ describe("info（fixture → DomainInfo への正規化）", () => {
       registrant: "C-0001",
       contacts: { ADMIN: "C-0001", TECH: "C-0001" },
       nameservers: ["ns1.example.com", "ns2.example.com"],
-      registeredAt: "2026-05-05T10:00:00Z",
+      // fixture の crDate / exDate は JST 壁時計値。UTC に正規化される（#289）
+      registeredAt: "2026-05-05T01:00:00.000Z",
       updatedAt: null,
-      expiresAt: "2027-05-05T10:00:00Z",
+      expiresAt: "2027-05-05T01:00:00.000Z",
       lastTransferAt: null,
       // 両レジストリの info 応答に clID 相当が無いため常に null（§21.2 #12 / ADR-0002）
       sponsoringRegistrarId: null,
@@ -276,8 +277,9 @@ describe("update（ensureHosts と resData 形状差の吸収）", () => {
     // 追加の info 呼び出しをせず 2 リクエストで完結する
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(domain.name).toBe("example.com");
-    // kitaqsign 形は update の応答をそのまま正規化する（upDate が入っている）
-    expect(domain.updatedAt).toBe("2026-08-25T12:00:00Z");
+    // kitaqsign 形は update の応答をそのまま正規化する（upDate が入っている）。
+    // upDate も JST 壁時計値なので UTC に直る（#289）
+    expect(domain.updatedAt).toBe("2026-08-25T03:00:00.000Z");
   });
 
   it("host:create の 2302（並行作成による既存）は無視して続行する", async () => {
@@ -315,8 +317,10 @@ describe("transfer（fixture → TransferResult への正規化。ADR-0002）", 
       status: "pending",
       requestingRegistrarId: "REG-DOPAMIN",
       actingRegistrarId: "REG-OTHER",
-      requestedAt: "2026-08-26T10:00:00Z",
-      actByAt: "2026-08-26T10:20:00Z",
+      // fixture の reDate（実測の生値 "2026-08-28T14:30:57Z"）は Z 付きでも中身は
+      // JST（#289 の実測）。UTC に正規化される
+      requestedAt: "2026-08-28T05:30:57.000Z",
+      actByAt: "2026-08-28T05:50:57.000Z",
     });
     // 生の status は必ず残す（値域が未確定なため。§21.2 #13）
     expect(result.registryStatus).toBe("pending");
@@ -698,7 +702,8 @@ describe("poll / ackMessage（§11.1 / FR-12 AC-12-4。レジストリ差はエ�
       // int64 は string に正規化する（ADR-0002 決定 8）
       id: "1042",
       count: 2,
-      queuedAt: "2026-08-26T10:00:00Z",
+      // qdate も JST 壁時計値なので UTC に正規化される（#289）
+      queuedAt: "2026-08-26T01:00:00.000Z",
       // msgType から動詞が読めないので payload.status（pending）へフォールバックする
       type: "transfer_request",
       domainName: "example.com",
@@ -732,7 +737,8 @@ describe("poll / ackMessage（§11.1 / FR-12 AC-12-4。レジストリ差はエ�
     expect(message).toMatchObject({
       id: "522",
       count: 1,
-      queuedAt: "2026-08-27T12:16:52.607727",
+      // オフセット無しの qdate（実測形）も JST と解釈して UTC に正規化する（#289）
+      queuedAt: "2026-08-27T03:16:52.607Z",
       type: "transfer_rejected",
       domainName: "dopamin-trf-mtayaan3.xyz",
       transfer: {
@@ -847,8 +853,9 @@ describe("poll / ackMessage（§11.1 / FR-12 AC-12-4。レジストリ差はエ�
         registryStatus: "clientApproved",
         requestingRegistrarId: "REG-DOPAMIN",
         actingRegistrarId: "REG-OTHER",
-        requestedAt: "2026-08-26T10:00:00Z",
-        actByAt: "2026-08-26T10:20:00Z",
+        // payload の reDate / acDate も JST 壁時計値として UTC に正規化する（#289）
+        requestedAt: "2026-08-26T01:00:00.000Z",
+        actByAt: "2026-08-26T01:20:00.000Z",
       },
     });
   });

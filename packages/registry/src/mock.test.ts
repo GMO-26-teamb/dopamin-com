@@ -1008,3 +1008,20 @@ describe("MockRegistryAdapter: seedOwnedDomain（FR-16 のデモ投入）", () =
     expect(calls.map((c) => c.command)).toEqual(["info"]);
   });
 });
+
+describe("MockRegistryAdapter: 日時は真の UTC を返す（#289 の JST 正規化の対象外）", () => {
+  it("info / transferRequest の日時は注入した now の toISOString() がそのまま出る", async () => {
+    const now = new Date("2026-08-28T05:30:57.000Z");
+    const mock = new MockRegistryAdapter({ now: () => now });
+
+    await mock.create({ name: "utc-pin.com", periodYears: 1, authInfo: "a" });
+    const info = await mock.info("utc-pin.com");
+    // kitaq と違い壁時計は JST ではないので、kitaqDatetimeToUtc（-9h）を通してはいけない。
+    // 通すとここが 2026-08-27T20:30:57.000Z に化けて落ちる
+    expect(info.registeredAt).toBe("2026-08-28T05:30:57.000Z");
+
+    mock.seedForeignDomain("utc-pin.xyz", "auth-1");
+    const result = await mock.transferRequest("utc-pin.xyz", "auth-1");
+    expect(result.requestedAt).toBe("2026-08-28T05:30:57.000Z");
+  });
+});
