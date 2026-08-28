@@ -26,7 +26,25 @@ export interface DomainStore {
    * 404（存在しない）ではなく 403（所有権なし）で返し分けるため（§10.3）。
    */
   find(name: string): Promise<DomainRecord | null>;
+  /**
+   * 保有行を作る / 更新する。**取得経路専用**（新規登録 FR-06 / 移管 IN の取り込み FR-12 / デモ投入）。
+   *
+   * 同名の `transferred_out` 行の隣に `owned` 行を作れることが要件（AC-12-5 の「出戻り」）なので、
+   * INSERT を止めない。逆に言えば `info` の write-through から呼んではいけない
+   * （移管 OUT 済みのドメインが保有一覧に復活する。#251 と {@link updateOwned} を参照）。
+   */
   upsert(record: DomainUpsert): Promise<DomainRecord>;
+  /**
+   * **既にある保有行だけ**を最新の `info` で上書きする（§6.5 の write-through）。
+   * 保有行が無ければ何も書かずに null（移管 OUT 済み / 削除済み / 他ユーザーの行）。
+   *
+   * `upsert` と違って INSERT しないのが要点（#251）。`domains_name_owned_uniq` は
+   * `ownership = 'owned'` の部分一意インデックスなので、`info` を取っている間に
+   * `markTransferredOut` が割り込むと `upsert` の ON CONFLICT が何にも当たらず、
+   * `transferred_out` 行の隣に `owned` 行を新規 INSERT してしまう。
+   * こうなると保有一覧に復活したまま `sync` でも消えず、復旧経路が無くなる。
+   */
+  updateOwned(record: DomainUpsert): Promise<DomainRecord | null>;
   remove(name: string): Promise<void>;
   /**
    * 保有中の行を移管 OUT 済みに遷移させる（§6.5 / AC-12-5）。行は消さず履歴として残す。
@@ -113,6 +131,23 @@ export function createDbDomainStore(db: Db): DomainStore {
         throw ownershipConflict();
       }
       return toDomainRecord(row);
+    },
+
+    async updateOwned(record) {
+      // INSERT を持たない UPDATE 1 文。「保有中」「所有者が自分」を WHERE で見るので、
+      // 判定と書き込みが同じ文の中で起きる = 読んでから書くまでの窓が無い（#251）。
+      const [row] = await db
+        .update(schema.domains)
+        .set(toDomainValues(record))
+        .where(
+          and(
+            eq(schema.domains.name, record.name),
+            eq(schema.domains.ownership, "owned"),
+            eq(schema.domains.userId, record.userId),
+          ),
+        )
+        .returning();
+      return row ? toDomainRecord(row) : null;
     },
 
     async markTransferredOut(name, at) {
@@ -206,6 +241,24 @@ export function createInMemoryDomainStore(
       };
       byName.set(record.name, stored);
       return Promise.resolve(stored);
+    },
+    updateOwned: (record) => {
+      // DB 実装の WHERE と同じ条件（保有中 + 所有者が自分）。無ければ書かない
+      const existing = byName.get(record.name);
+      if (
+        existing?.ownership !== "owned" ||
+        existing.userId !== record.userId
+      ) {
+        return Promise.resolve(null);
+      }
+      const updated: DomainRecord = {
+        ...record,
+        id: existing.id,
+        // `rgp_until` は toDomainValues に無い = DB の UPDATE でも触らない列
+        rgpUntil: existing.rgpUntil,
+      };
+      byName.set(record.name, updated);
+      return Promise.resolve(updated);
     },
     remove: (name) => {
       byName.delete(name);

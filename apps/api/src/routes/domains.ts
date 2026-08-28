@@ -33,6 +33,7 @@ import {
   discardForeignOwnedRow,
   listDomainSummaries,
   pendingTransfersByDomain,
+  refreshDomainFromInfo,
   removeDomain,
   requireOwnedDomain,
   toDomainSummary,
@@ -308,16 +309,16 @@ export const domains = new Hono<AuthedEnv>()
     const transfer = await pendingTransferFor(userId, name);
 
     // AC-12-5: 移管 OUT 済みの行はレジストリに問い合わせない。
-    // 自レジストラがスポンサーではないので `info` の応答を信頼できず（【要確認 §21.2 #12】）、
-    // さらに `upsertDomainFromInfo` は常に `ownership = 'owned'` で書くため、
-    // 部分一意インデックス（保有中の行のみ）をすり抜けて保有行が復活してしまう。
+    // 自レジストラがスポンサーではないので `info` の応答を信頼できない（【要確認 §21.2 #12】）。
+    // ここを通り抜けた後に移管 OUT が確定する競合もあるが、その後始末は
+    // `refreshDomainFromInfo`（保有行が無ければ書かない）が持つ（#251）。
     if (cached.ownership !== "owned") {
       return c.json(await detailResponse(cached, false, { transfer }));
     }
 
     try {
       const info = await withReadRetry(() => adapter.info(name));
-      const record = await upsertDomainFromInfo(userId, info);
+      const record = await refreshDomainFromInfo(userId, info);
       return c.json(await detailResponse(record, false, { transfer }));
     } catch (err) {
       if (!(err instanceof RegistryError) || !isTransportFailure(err)) {
@@ -390,7 +391,7 @@ export const domains = new Hono<AuthedEnv>()
           : null;
       },
     );
-    const record = await upsertDomainFromInfo(userId, domain);
+    const record = await refreshDomainFromInfo(userId, domain);
     return c.json(await detailResponse(record, false));
   })
 
@@ -474,7 +475,7 @@ export const domains = new Hono<AuthedEnv>()
       input.registrant !== undefined ||
       input.contacts !== undefined;
     if (!hasChanges) {
-      const unchanged = await upsertDomainFromInfo(userId, current);
+      const unchanged = await refreshDomainFromInfo(userId, current);
       return c.json(await detailResponse(unchanged, false));
     }
 
@@ -486,7 +487,7 @@ export const domains = new Hono<AuthedEnv>()
         return isUpdateReflected(after, body) ? after : null;
       },
     );
-    const record = await upsertDomainFromInfo(userId, domain);
+    const record = await refreshDomainFromInfo(userId, domain);
     return c.json(await detailResponse(record, false));
   })
 
@@ -549,7 +550,7 @@ export const domains = new Hono<AuthedEnv>()
       throw err;
     }
     // AC-10-1: RGP バッジを一覧に出すため削除後の状態も write-through する
-    const record = await upsertDomainFromInfo(userId, domain);
+    const record = await refreshDomainFromInfo(userId, domain);
     return c.json(await detailResponse(record, false));
   })
 
@@ -580,7 +581,7 @@ export const domains = new Hono<AuthedEnv>()
           : null;
       },
     );
-    const record = await upsertDomainFromInfo(userId, domain);
+    const record = await refreshDomainFromInfo(userId, domain);
     return c.json(await detailResponse(record, false));
   })
 
