@@ -1,4 +1,5 @@
 import { type Db, schema } from "@dopamin/db";
+import { MockRegistryAdapter } from "@dopamin/registry";
 import { asc } from "drizzle-orm";
 import {
   afterAll,
@@ -14,7 +15,10 @@ import {
 import app from "../../src/index";
 import { setDbForTesting } from "../../src/lib/db";
 import { resetApiEnvCacheForTesting } from "../../src/lib/env";
-import { setRegistrySetForTesting } from "../../src/lib/registries";
+import {
+  getRegistrySet,
+  setRegistrySetForTesting,
+} from "../../src/lib/registries";
 import { setRetrySleepForTesting } from "../../src/lib/retry";
 import { createTestDb, resetTestDb } from "../helpers/db";
 import { createTestSession } from "../helpers/session";
@@ -244,5 +248,76 @@ describe("operation_logs への永続化（FR-15）", () => {
     expect(rows.length).toBeGreaterThanOrEqual(2);
     const requestIds = rows.map((row) => row.requestId);
     expect(requestIds).toEqual(rows.map((_, i) => `reqcreate-${i + 1}`));
+  });
+});
+
+/**
+ * §9.1「Poll 由来などシステム起点の呼び出しは NULL」/ NFR-04（#250）。
+ * Poll のキューはレジストラ単位で全ユーザー分が混ざるため、消化中の呼び出しを
+ * 起動者の user_id で記録すると、他ユーザーのドメイン名が起動者の
+ * `GET /logs/operations` に出てしまう（読み出しは `user_id = 自分` で引くだけ）。
+ */
+describe("Poll 由来の呼び出しの user_id（#250）", () => {
+  it("消化を起動したユーザーではなく NULL で記録される", async () => {
+    const { cookie } = await createTestSession(db);
+    const res = await app.request("/api/v1/registry/poll", {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(200);
+
+    const poll = (await selectLogs()).filter((row) => row.command === "poll");
+    expect(poll.length).toBeGreaterThan(0);
+    for (const row of poll) {
+      expect(row.userId).toBeNull();
+    }
+  });
+
+  it("他ユーザーが保有するドメインの transfer_query が起動者の操作ログに出ない", async () => {
+    // B が victim.com を保有し、相手レジストラから移管申請を受けている
+    const owner = await createTestSession(db, { displayName: "所有者B" });
+    const created = await app.request("/api/v1/domains", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: owner.cookie },
+      body: JSON.stringify({ name: "victim.com", period: 1 }),
+    });
+    expect(created.status).toBe(201);
+
+    const adapter = getRegistrySet().forDomain("victim.com");
+    if (!(adapter instanceof MockRegistryAdapter)) {
+      throw new Error("mock モードのアダプタが取れませんでした");
+    }
+    adapter.simulateInboundTransferRequest("victim.com");
+    await adapter.persist();
+
+    // A が移管一覧を開くと、その裏で consumePoll() が B 宛の通知を消化する
+    const invoker = await createTestSession(db, { displayName: "起動者A" });
+    const transfers = await app.request("/api/v1/transfers", {
+      headers: { cookie: invoker.cookie },
+    });
+    expect(transfers.status).toBe(200);
+
+    const rows = await selectLogs();
+    const pollOrigin = rows.filter((row) =>
+      ["poll", "transfer_query", "ack"].includes(row.command),
+    );
+    // 消化で victim.com の transfer_query が実際に飛んでいる（前提の確認）
+    expect(
+      pollOrigin.some(
+        (row) =>
+          row.command === "transfer_query" && row.domainName === "victim.com",
+      ),
+    ).toBe(true);
+    // どれも誰の操作でもない（システム起点）ので user_id は NULL
+    for (const row of pollOrigin) {
+      expect(row.userId).toBeNull();
+    }
+    // 起動者 A の操作ログに B のドメイン名は 1 件も出ない（NFR-04）
+    const visibleToInvoker = rows.filter(
+      (row) => row.userId === invoker.user.id,
+    );
+    expect(visibleToInvoker.map((row) => row.domainName)).not.toContain(
+      "victim.com",
+    );
   });
 });
