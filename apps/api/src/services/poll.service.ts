@@ -177,6 +177,29 @@ async function handleRequest(
 }
 
 /**
+ * 向きが導出できない承認通知を「決着済みの移管 IN」と読んだことを残す（FR-15 の運用ログ）。
+ * この保険が実際に効いた回数が分からないと、{@link handleSettlement} の
+ * 【要確認】が現実に踏まれているのか判断できない。
+ */
+function warnAmbiguousSettlement(
+  adapter: RegistryAdapter,
+  message: PollMessage,
+  name: string,
+): void {
+  console.warn(
+    JSON.stringify({
+      level: "warn",
+      type: "transfer_settlement_direction_unknown",
+      registry: adapter.id,
+      registryMessageId: message.id,
+      domain: name,
+      message:
+        "向きを導出できない承認通知に対応する行が無く、決着済みの移管 IN として見送りました",
+    }),
+  );
+}
+
+/**
  * 確定通知（承認 / 拒否 / 取消）を `transfers` と `domains` に反映する。
  *
  * 対応する pending 行が無い承認通知でも、そのドメインを保有していれば移管 OUT の
@@ -207,14 +230,27 @@ async function handleSettlement(
     // pending 行が無い承認通知は 2 通りに読める:
     //   (a) 移管 IN の確定が `GET /transfers` の照合（`info` の trDate）で先に済んでいた
     //   (b) 申請の受信通知を取りこぼしたまま承認だけ届いた移管 OUT
-    // レジストラ ID を返さないレジストリでは向きから区別できないので、直近に承認済みの
-    // IN 行があれば (a) と読む。(b) と誤ると、取り込んだばかりの保有行を
-    // transferred_out に倒してユーザーのドメインを一覧から消してしまうため。
+    // 向きが導出できるなら（ADR-0002 決定 3）それが正で、IN の履歴は見ない。
+    // 「承認済みの IN 行がある」だけで (a) と読むと、移管 IN で取得したドメインが
+    // 以後どれだけ移管 OUT されても transferred_out に倒れなくなる（#244）。
     const direction = transferDirectionOf(result, adapter.registrarId);
-    const settledInbound =
-      direction === "in" ||
-      (await store.findLatest(name, "in", "approved")) !== null;
-    if (settledInbound) {
+    if (direction === "in") {
+      return "skipped";
+    }
+    if (
+      direction === null &&
+      (await store.findLatest(name, "in", "approved")) !== null
+    ) {
+      // 向きが導出できないレジストリのための保険。ここは倒さない側に倒す:
+      // kitaqnic の実測形（#176）は `counterpartyRegistrar` しか返さず向きが分からないが、
+      // 承認 / 拒否の通知は gaining にしか積まれない = 受け取る承認通知は移管 IN なので、
+      // 倒すと取り込んだばかりの保有行をユーザーの一覧から消すことになる。
+      // 通知の `queuedAt` で時系列を見る手も無い: kitaqnic の `qdate` はタイムゾーンを
+      // 持たず（`docs/registry/kitaqnic/CHANGELOG.md`。実測値は JST 相当で、UTC として
+      // 読むと 9 時間ずれる）、手元の時刻と絶対時刻として比較できない。
+      // 【要確認】losing にも承認通知を積むレジストリ（サーバ自動承認時など）が現れたら、
+      // この保険は移管 OUT を取りこぼす（#244 の残り）。ログで踏んだ回数を見て判断する。
+      warnAmbiguousSettlement(adapter, message, name);
       return "skipped";
     }
     // (b) 移管 OUT の完了。履歴を残しつつ所有権を倒す

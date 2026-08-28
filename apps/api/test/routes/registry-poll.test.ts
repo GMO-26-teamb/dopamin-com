@@ -125,6 +125,27 @@ class PollFaultAdapter extends MockRegistryAdapter {
   }
 }
 
+/**
+ * 通知からレジストラ ID を落とすアダプタ（ADR-0002 決定 3 / #176 の実測形）。
+ * 実レジストリの Poll は向きを導出できる ID を返さないので、その状況を作る。
+ */
+class AnonymousTransferAdapter extends MockRegistryAdapter {
+  override async poll(): Promise<PollMessage | null> {
+    const message = await super.poll();
+    if (!message?.transfer) {
+      return message;
+    }
+    return {
+      ...message,
+      transfer: {
+        ...message.transfer,
+        requestingRegistrarId: undefined,
+        actingRegistrarId: undefined,
+      },
+    };
+  }
+}
+
 /** 未知種別・対象不明の通知が ack されることを API 境界から確認する。 */
 class SyntheticPollAdapter extends MockRegistryAdapter {
   private acknowledged = false;
@@ -218,6 +239,14 @@ async function sync() {
   const res = await api("/domains/sync", { method: "POST" });
   expect(res.status).toBe(200);
   return domainSyncWithPollResponseSchema.parse(await res.json());
+}
+
+/** 保有一覧（FR-02）に見えているドメイン名。 */
+async function visibleDomains(): Promise<string[]> {
+  const res = await api("/domains");
+  expect(res.status).toBe(200);
+  const { domains } = (await res.json()) as { domains: { name: string }[] };
+  return domains.map((d) => d.name);
 }
 
 /** 自分の保有ドメインを 1 件作る。 */
@@ -369,22 +398,6 @@ describe("POST /api/v1/registry/poll（FR-12 Poll 消化）", () => {
     // 実レジストリの transferQuery / Poll は registrarId を返さない（ADR-0002）。
     // 向きが分からないまま「pending 行が無い承認通知」を OUT の完了と読むと、
     // 取り込んだばかりの保有行を transferred_out に倒して一覧から消してしまう
-    class AnonymousTransferAdapter extends MockRegistryAdapter {
-      override async poll(): Promise<PollMessage | null> {
-        const message = await super.poll();
-        if (!message?.transfer) {
-          return message;
-        }
-        return {
-          ...message,
-          transfer: {
-            ...message.transfer,
-            requestingRegistrarId: undefined,
-            actingRegistrarId: undefined,
-          },
-        };
-      }
-    }
     const anonymous = new AnonymousTransferAdapter({ id: "kitaqsign" });
     setRegistrySetForTesting(
       createRegistrySet({ mode: "real", adapters: [anonymous] }),
@@ -424,6 +437,51 @@ describe("POST /api/v1/registry/poll（FR-12 Poll 消化）", () => {
     const list = await listTransfers();
     expect(list.outbound).toEqual([]);
     expect(list.history).toHaveLength(1);
+  });
+
+  it("レジストラ ID を返さないレジストリでは、昔の移管 IN があっても保有行を倒さず警告を残す", async () => {
+    // #244 の保険の境界。向きが分からない承認通知は、対応する行が無いなら倒さない。
+    // kitaqnic の承認通知は gaining にしか積まれない（#176）ので、受け取る承認通知は
+    // 移管 IN のはず。ここで倒すと取り込んだばかりの保有行を消す方が実害が大きい。
+    // 見送ったことはログに残し、踏んだ回数を運用で見られるようにする
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const anonymous = new AnonymousTransferAdapter({
+      id: "kitaqsign",
+      // 申請を pending のうちに消化できない状況（OUT 行が手元に無いまま承認だけ届く）
+      autoApproveMs: 0,
+    });
+    setRegistrySetForTesting(
+      createRegistrySet({ mode: "real", adapters: [anonymous] }),
+    );
+    anonymous.seedForeignDomain("anon-out.com", "auth-anon-out");
+    expect(
+      (
+        await sendJson("/transfers", {
+          name: "anon-out.com",
+          authCode: "auth-anon-out",
+        })
+      ).status,
+    ).toBe(202);
+
+    // 移管 IN で取得する（期限 0 なのでサーバ自動承認で確定する）
+    expect(await poll()).toMatchObject({ settled: 1 });
+    expect(await visibleDomains()).toEqual(["anon-out.com"]);
+
+    // 同じドメインへの申請 + 承認が向き不明のまま届く
+    anonymous.simulateInboundTransferRequest("anon-out.com");
+    expect(await poll()).toMatchObject({
+      processed: 2,
+      settled: 0,
+      skipped: 2,
+    });
+
+    // 倒さない = 保有一覧に残る（誤って消すよりは残す）
+    expect(await visibleDomains()).toEqual(["anon-out.com"]);
+    expect(
+      warn.mock.calls.some((args) =>
+        String(args[0]).includes("transfer_settlement_direction_unknown"),
+      ),
+    ).toBe(true);
   });
 
   it("キューに溜まった複数の通知を一度で消化しきる（FIFO を詰まらせない）", async () => {
