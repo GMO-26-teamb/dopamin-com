@@ -320,4 +320,42 @@ describe("Poll 由来の呼び出しの user_id（#250）", () => {
       "victim.com",
     );
   });
+
+  it("同じリクエストでも消化のあとのユーザー操作は自分の user_id に戻る", async () => {
+    // POST /domains/sync は consumePoll（システム起点）→ syncDomains（本人の操作）の順に走る。
+    // 消化を包んだせいで後続まで NULL になっていないことを固定する
+    const { user, cookie } = await createTestSession(db);
+    expect(
+      (
+        await app.request("/api/v1/domains", {
+          method: "POST",
+          headers: { "content-type": "application/json", cookie },
+          body: JSON.stringify({ name: "mine.com", period: 1 }),
+        })
+      ).status,
+    ).toBe(201);
+
+    await db.delete(schema.operationLogs);
+    const res = await app.request("/api/v1/domains/sync", {
+      method: "POST",
+      headers: { cookie, "x-request-id": "syncreq" },
+    });
+    expect(res.status).toBe(200);
+
+    const rows = await selectLogs();
+    // 消化ぶんは NULL
+    for (const row of rows.filter((r) => r.command === "poll")) {
+      expect(row.userId).toBeNull();
+    }
+    // 自分のドメインの再同期（info）は自分の user_id で残る
+    const info = rows.filter((row) => row.command === "info");
+    expect(info.length).toBeGreaterThan(0);
+    for (const row of info) {
+      expect(row.userId).toBe(user.id);
+    }
+    // clTRID の連番は境界をまたいでも通し番号のまま（§9.1 の相関キー）
+    expect(rows.map((row) => row.requestId)).toEqual(
+      rows.map((_, i) => `syncreq-${i + 1}`),
+    );
+  });
 });
