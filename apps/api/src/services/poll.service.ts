@@ -8,6 +8,7 @@ import type {
   TransferDirection,
   TransferResult,
 } from "@dopamin/shared";
+import { runAsSystem } from "../lib/operation-log-context";
 import { adapterForDomain, getRegistrySet } from "../lib/registries";
 import { registryErrorMessage } from "../lib/registry-message";
 import { syncDomains, upsertDomainFromInfo } from "./domain.service";
@@ -393,27 +394,36 @@ export async function syncDomainsAndConsumePoll(
  * 1 つのレジストリが落ちていても他方は消化する（部分失敗の許容）。
  * 通知はユーザーに依らずレジストラ単位で届くので、対象ユーザーは
  * ドメインの保有行（`transfer_request`）または `transfers` 行から引く。
+ *
+ * 消化の中身は `runAsSystem` で包み、操作ログ（FR-15）を `user_id = NULL` で残す
+ * （§9.1「Poll 由来などシステム起点の呼び出しは NULL」/ #250）。全ユーザー分の通知を
+ * 処理するので、起動者の `user_id` で記録すると他ユーザーのドメイン名がその人の
+ * `GET /logs/operations` に出る（NFR-04 違反）。呼び出し元
+ * （`GET /transfers` / `POST /registry/poll` / `POST /domains/sync`）が
+ * 個別に包み忘れないよう、包むのは全経路が通るこの関数の中にする。
  */
 export async function consumePoll(
   now: Date = new Date(),
 ): Promise<PollConsumeResult> {
   const result = emptyResult();
-  await Promise.all(
-    getRegistrySet()
-      .all()
-      .map(async (adapter) => {
-        try {
-          await consumeRegistry(adapter, result, now);
-        } catch (err) {
-          result.failures.push({
-            registry: adapter.id,
-            message:
-              err instanceof RegistryError
-                ? registryErrorMessage(err)
-                : "通知の取得に失敗しました。",
-          });
-        }
-      }),
+  await runAsSystem(() =>
+    Promise.all(
+      getRegistrySet()
+        .all()
+        .map(async (adapter) => {
+          try {
+            await consumeRegistry(adapter, result, now);
+          } catch (err) {
+            result.failures.push({
+              registry: adapter.id,
+              message:
+                err instanceof RegistryError
+                  ? registryErrorMessage(err)
+                  : "通知の取得に失敗しました。",
+            });
+          }
+        }),
+    ),
   );
   return result;
 }
