@@ -71,6 +71,13 @@
       "when": 1787818978449,
       "tag": "0009_org-info-to-kitaqnic",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787896936000,
+      "tag": "0010_registry-jst-to-utc",
+      "breakpoints": true
     }
   ]
 }
